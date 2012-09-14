@@ -1,0 +1,34 @@
+frame [control_panel_name].run_frame -borderwidth 0 -width 130
+
+button [control_panel_name].run_frame.run -text "Run" -font button_font -command {
+  send_environment_cmd \
+    "update [get_handler_name [control_panel_name].run_frame.run] \
+       (lambda (x) \
+          (declare (ignore x)) \
+            (unwind-protect \
+             (if (environment-busy-p) \
+                (model-warning \"Run button has no effect because model still running when pressed.\") \
+               (progn (set-environment-busy) \
+                     (run $run_button_time) \
+               )) \
+             (set-environment-free)))"
+}                    
+
+entry [control_panel_name].run_frame.run_time -width 6 -font text_font \
+      -textvariable run_button_time -justify right
+
+[control_panel_name].run_frame.run_time insert 0 "10.0"
+
+pack [control_panel_name].run_frame.run -side left
+pack [control_panel_name].run_frame.run_time -side right
+
+pack [control_panel_name].run_frame
+
+send_environment_cmd \
+  "create simple-handler [control_panel_name].run_frame.run ignore_returns \
+    (lambda (x) (declare (ignore x))) ()"
+
+bind [control_panel_name].run_frame.run <Destroy> {
+  remove_handler %W
+}
+

@@ -1,0 +1,18 @@
+# If this file is renamed with a .tcl instead of .tcx extension
+# you'll get a new button on the control-panel and understand 
+# why the what.gif file is there...
+
+image create photo dan -file what.gif
+proc show_dan {} {
+toplevel .dan
+wm withdraw .dan
+label .dan.image -image dan
+pack .dan.image
+wm geometry .dan +0+0
+wm deiconify .dan
+}
+
+button [control_panel_name].dan_button -command {show_dan} \
+                                 -text "Dan" -font button_font
+
+pack [control_panel_name].dan_button

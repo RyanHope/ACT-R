@@ -1,0 +1,355 @@
+global open_return 
+global model_type
+global tutor_wait
+
+
+frame [control_panel_name].o_frame
+
+tk_optionMenu [control_panel_name].o_frame.open_option model_type Existing New
+[control_panel_name].o_frame.open_option configure -font button_font
+[[control_panel_name].o_frame.open_option cget -menu] configure -font menu_font
+
+
+button [control_panel_name].o_frame.open -text "Open Model:" \
+       -font button_font -command {
+  global local_connection
+  global current_open_model
+  global model_type
+  global top_dir
+
+  if {$local_connection == 0} {
+    tk_messageBox -icon warning -type ok -title "Open warning" \
+                  -message "You cannot use the Open Model button if the\
+                            environment is not running on the same machine\
+                            as ACT-R at this time, but if you want such a\
+                            feature let Dan know because there are a couple\
+                            of ways such a feature could be added."  
+  } elseif {$current_open_model != ""} {
+    tk_messageBox -icon warning -type ok -title "Open warning" \
+                  -message "You must close the current model before you\
+                            can open another one."
+  } else {
+    switch -- $model_type {
+      Existing {
+        set fname [tk_getOpenFile -title "Model to open" \
+                            -filetypes {{"All Files" *}} \
+                            -initialdir $top_dir] 
+   
+        if {$fname != ""} {
+          open_model_file $fname
+        }
+      }
+      New {
+        set fname [tk_getSaveFile -title "Save new model as"\
+                                  -filetypes {{"All Files" *}} \
+                                  -initialdir $top_dir]
+        if {$fname != ""} {
+          write_data "(clear-all)\n" $fname
+          open_model_file $fname
+        }
+      }
+    }
+  }
+}
+ 
+pack [control_panel_name].o_frame.open -side left
+pack [control_panel_name].o_frame.open_option -side left
+
+pack [control_panel_name].o_frame
+
+send_environment_cmd \
+  "create list-handler [control_panel_name].o_frame.open\
+     open_return (lambda (x)) ()"
+
+bind [control_panel_name].o_frame.open <Destroy> {
+  remove_handler %W
+}
+
+
+proc open_model_file {fname} {
+  global open_return
+  global current_open_model
+  global current_open_model_name
+  global top_dir
+  global options_array
+  global tutor_mode
+ 
+  set open_return ""
+
+  send_environment_cmd \
+    "update [get_handler_name [control_panel_name].o_frame.open] \
+      (lambda (x) \
+        (unwind-protect \ 
+           (unless (environment-busy-p) \
+             (set-environment-busy) \
+             (let ((result (if $options_array(use_smart_load) \
+                               (smart-loader \"$fname\")
+                             (safe-load \"$fname\" nil)))) \
+                (set-environment-free) \
+                (format t (if (= 1 (first result)) \
+                            \"~%#|## Model $fname loaded. ##|#~%\" \
+                            \"~%#|## Failed loading model $fname. ##|#~%\")) \     
+                result)) \
+             (set-environment-free)))"
+ 
+  wait_for_non_null open_return
+           
+       set win [toplevel [new_variable_name .reload_response]]
+  
+  # hide the window for speed and aesthetic reasons
+  
+  wm withdraw $win
+
+  wm geometry $win [get_configuration .reload_response $win]
+
+
+ set text_frame [frame $win.text_frame -borderwidth 0]  
+ 
+ set text_box [text $text_frame.text -yscrollcommand \
+                     "$text_frame.text_scrl set" -state normal \
+                     -font text_font]
+  
+  
+  
+  set text_scroll_bar [scrollbar $text_frame.text_scrl \
+                                 -command "$text_box yview"]
+
+
+  set the_button [button $win.but -text "Ok" -font button_font -command "destroy $win"]
+
+  place $text_frame -x 0 -y 0 -relheight 1.0 -height -30 -relwidth 1.0
+  place $the_button -relx .5 -x -30 -width 60 -rely 1.0 -y -30 -height 30
+
+  pack $text_scroll_bar -side right -fill y
+  pack $text_box -side left -expand 1 -fill both
+
+
+  if {[lindex $open_return 0] == 0} {
+    wm title $win "ERROR Opening"
+    $text_box insert 1.0 "Error:\n[lindex $open_return 1]"
+  } else {
+    wm title $win "SUCCESSFUL Load"
+    $text_box insert 1.0 "Successful Load:\n[lindex $open_return 1]"
+  }
+
+  wm deiconify $win
+  focus $win
+      
+  tkwait window $win 
+  set open_return ""
+    
+  set current_open_model $fname
+  set current_open_model_name [file tail $fname]
+  set tutor_mode 0
+
+  edit_model_file .model $fname 1
+}
+
+set pmatch_id ""
+
+proc edit_model_file {win_name file_name reload} {
+  global model_file_names
+  global model_file_changed
+  global tutor_mode
+              
+  if {[winfo exists $win_name] == 1} {
+     wm deiconify $win_name
+     raise $win_name
+
+     if {$reload == 1} {
+       set data [read_file $file_name]
+
+       $win_name.frame.text delete 1.0 end
+       $win_name.frame.text insert end $data
+     }
+  } else {
+     toplevel $win_name
+
+     wm withdraw $win_name
+     
+     wm geometry $win_name [get_configuration $win_name]
+   
+     wm title $win_name [file tail [file rootname $file_name]]
+
+     # create a text_box to hold the output and put it in the window
+     # also need a frame to hold it and the scroll bar
+
+     frame $win_name.frame -borderwidth 0  
+    
+      set text_box [text $win_name.frame.text -yscrollcommand \
+          "$win_name.frame.vscrl set" -xscrollcommand \
+          "$win_name.frame.hscrl set" -font text_font -wrap none]
+          
+      set model_file_names($text_box) $file_name
+
+      set v_scrl_bar [scrollbar $win_name.frame.vscrl -command \
+            "$win_name.frame.text yview"]
+   
+      set h_scrl_bar [scrollbar $win_name.frame.hscrl -command \
+            "$win_name.frame.text xview" -orient horizontal]
+   
+      place $win_name.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0
+        
+      pack $v_scrl_bar -side right -fill y 
+      pack $h_scrl_bar -side bottom -fill x 
+      pack $text_box -side left -expand 1 -fill both
+
+      set data [read_file $file_name]
+
+      if {$data != ""} {
+        $text_box delete 1.0 end
+        $text_box insert end $data
+      }
+
+      set model_file_changed($text_box) 0
+
+      bind $text_box <KeyPress-parenright> {
+        global model_file_changed
+        
+        set model_file_changed(%W) 1
+        
+        set start [%W index insert]
+        
+        set paren_count 1
+        set index_count 0
+        set hit_start 0
+
+        while { $paren_count != 0 && $hit_start == 0} {
+         
+          incr index_count 1
+
+          set cur_char [%W get "$start - $index_count chars"]
+          
+          if {[%W index "$start - $index_count chars"] == [%W index 1.0]} {
+            set hit_start 1
+          }
+
+          if { $cur_char == ")" } {
+            incr paren_count 1
+          } elseif {$cur_char == "(" } {
+            incr paren_count -1
+          }
+       }
+
+       global pmatch_id       
+
+       if {$paren_count == 0} {
+          if {[lsearch -exact [%W tag names] pmatch] != -1} {
+            after cancel $pmatch_id
+            %W tag delete pmatch
+          }
+
+          %W tag add pmatch "$start - $index_count chars"
+          %W tag configure pmatch -underline 1
+          
+          set pmatch_id [after 300 {%W tag delete pmatch}]
+       }
+      }
+
+      bind $text_box <KeyPress-parenleft> {
+        global model_file_changed
+        
+        set model_file_changed(%W) 1
+        
+        set start [%W index insert]
+        
+        set paren_count 1
+        set index_count -1
+        set hit_end 0
+
+        while { $paren_count != 0 && $hit_end == 0} {
+         
+          incr index_count 1
+
+          set cur_char [%W get "$start + $index_count chars"]
+          
+          if {[%W index "$start + $index_count chars"] == [%W index end]} {
+            set hit_end 1
+          }
+
+          if { $cur_char == "(" } {
+            incr paren_count 1
+          } elseif {$cur_char == ")" } {
+            incr paren_count -1
+          }
+       }
+
+       global pmatch_id       
+
+       if {$paren_count == 0} {
+          if {[lsearch -exact [%W tag names] pmatch] != -1} {
+            after cancel $pmatch_id
+            %W tag delete pmatch
+          }
+
+          %W tag add pmatch "$start + $index_count chars"
+          %W tag configure pmatch -underline 1
+          
+          set pmatch_id [after 300 {%W tag delete pmatch}]
+       }
+      }
+   
+      bind $text_box <KeyPress> {
+        global model_file_changed
+        
+        set model_file_changed(%W) 1
+
+        if $tutor_mode {
+          handle_tutor_entry %W %K
+        }
+      }
+        
+      wm protocol $win_name WM_DELETE_WINDOW "prompt_close_text $win_name"
+         
+
+      wm deiconify $win_name
+      raise $win_name
+  }
+} 
+ 
+
+proc prompt_close_text {win} {
+  global model_file_names
+  global model_file_changed
+
+  if {$model_file_changed($win.frame.text) == 1} {
+    set answer \
+      [tk_messageBox -icon warning -title \
+                     "Closing [file tail $model_file_names($win.frame.text)]" \
+                     -message "Save contents before closing?" \
+                     -type yesnocancel]
+
+    switch -- $answer {
+      yes {
+        save_text $win.frame.text $model_file_names($win.frame.text)
+        destroy $win
+      }
+      no {
+        destroy $win 
+      }
+    }
+  } else {
+    destroy $win
+  }
+
+
+  global current_open_model
+  global current_open_model_name
+   
+  set current_open_model ""
+  set current_open_model_name "No Model Open"
+
+
+
+
+}
+
+
+
+
+
+proc normal_key {key} {
+  return [regexp {^([a-zA-Z0-9]|underscore|minus|plus|equal|BackSpace|Shift_L|Shift_R)$} $key]
+}
+
+

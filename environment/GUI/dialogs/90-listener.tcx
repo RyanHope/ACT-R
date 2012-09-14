@@ -1,0 +1,142 @@
+global wait_for_cmd
+
+proc make_listener {} {
+  # create a new toplevel window with a unique name
+  # not specifing anything for it - placement, size, fonts, etc.
+  # thats going to be done later from a config system
+  global wait_for_cmd
+
+ if {[winfo exists .listener]} {
+    wm deiconify .listener
+    raise .listener
+    focus .listener.command
+  } else {
+   toplevel .listener
+  
+  # hide the window for speed and aesthetic reasons
+  
+  wm withdraw .listener
+
+  wm geometry .listener [get_configuration .listener]
+  
+  # make the label of the filter - just the text item "Filter:"
+  
+
+  label .listener.cmd_label -text "Command:" -justify left \
+                                            -font label_font
+
+  entry .listener.command  -font text_font -font text_font
+
+  send_environment_cmd "create simple-handler .listener.command wait_for_cmd (lambda (x)) nil"
+
+
+  bind .listener.command <Key-Return> {
+    set cmd [%W get]
+    %W configure -state disabled
+    
+    regsub -all "\"" $cmd "\\\"" safe_cmd
+    
+    send_environment_cmd "update [get_handler_name %W] \
+            (lambda (x) (eval-command \"$safe_cmd\"))"
+
+    wait_for_non_null wait_for_cmd
+
+    %W configure -state normal
+
+    %W delete 0 end
+  }
+ 
+  bind .listener.command <Destroy> {
+    remove_handler %W
+  }
+
+  # here's the frame for the chunk display
+
+  set text_frame [frame .listener.text_frame -borderwidth 0]  
+ 
+  # create a text box to display the chunk and set it so that it also has a
+  # scroll bar attached to it and make it noneditable (that may need to change,
+  # but for now the viewer windows are going to be static)
+  
+  set text_box [text $text_frame.text -yscrollcommand \
+                     "$text_frame.text_scrl set" -state normal \
+                     -font text_font]
+  
+  send_environment_cmd "create simple-text-handler $text_box $text_box start-listener-outputer nil"
+
+  bind $text_box <Destroy> {
+    remove_handler %W
+  }
+  
+  set text_scroll_bar [scrollbar $text_frame.text_scrl \
+                                 -command "$text_box yview"]
+
+  
+
+  place $text_frame -x 0 -y 0 -relheight 1.0 -height -30 -relwidth 1.0
+  place .listener.cmd_label -x 2 -rely 1.0 -y -30 -height 30 -width 65
+  place .listener.command -x 70 -rely 1.0 -y -27 -height 25 -relwidth 1.0 -width -72
+
+  pack $text_scroll_bar -side right -fill y
+  pack $text_box -side left -expand 1 -fill both
+
+  # now show the window 
+
+  wm deiconify .listener
+  }
+}
+
+make_listener
+
+button [control_panel_name].listener_button \
+       -command {make_listener} -text "Listener" -font button_font
+
+pack [control_panel_name].listener_button
+
+
+
+wm protocol .listener WM_DELETE_WINDOW {
+
+  global current_open_model 
+
+  set answer [tk_messageBox -icon warning -title "Exit the Environment?" \
+             -message "Closing this window exits the environment. Do you want to quit now?" \
+             -type yesno]
+
+  switch -- $answer {
+    yes {
+      if {$current_open_model != ""} {
+        set answer [tk_messageBox -icon warning -title "Model still open" \
+            -message "There is a model open.  Should the environment \
+                      close the model before quitting (all unsaved\
+                      changes will be lost if it is not closed)?" \
+            -type yesno]
+
+        switch -- $answer {
+          yes {
+            close_model
+          }
+        }
+      }
+
+      send_environment_cmd "update [get_handler_name .listener.command] \
+                        (lambda (x) (exit))"
+
+      catch {
+        global environment_socket
+        global connection_socket
+
+        if {$environment_socket != ""} {
+          close $environment_socket
+        }
+      }
+      catch {
+        if {$connection_socket != ""} {
+          close $connection_socket
+        }
+      }
+    
+    exit
+    }
+  }
+}

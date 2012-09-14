@@ -1,0 +1,25 @@
+proc stop_model {} {
+
+  send_environment_cmd \
+    "update [get_handler_name [control_panel_name].stop_button] \
+       (lambda (x) \
+          (declare (ignore x)) \
+             (if (mp-running?) \
+               (schedule-break-relative 0 :details \"Environment Button Stopping model\")
+              (format t \"Model cannot stop because it is not running.~%\")))"
+}
+
+button [control_panel_name].stop_button \
+       -command {stop_model} -text "Stop" -font button_font
+
+send_environment_cmd \
+  "create simple-handler [control_panel_name].stop_button ignore_returns \
+    (lambda (x) (declare (ignore x))) ()"
+
+
+bind [control_panel_name].stop_button <Destroy> {
+  remove_handler %W
+}
+
+pack [control_panel_name].stop_button
+

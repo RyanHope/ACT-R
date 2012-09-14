@@ -1,0 +1,170 @@
+This is a log of small differences between ACT-R 5 and ACT-R 6 that
+I find and may not have documented in the code (or there may not be
+a spot in the code to make such a note).  They aren't bugs - they're 
+features (which may need to be changed at some point).
+
+
+Can't name a chunk with a number - numbers are always treated as
+numbers.  Avoids problems with the comparison slot modifiers and
+makes productions operate consistently i.e. in ACT-R 5 will this
+production work:
+
+(p test1
+   =goal>
+   isa test
+   slot 4
+   slot =val
+   
+   ==>
+   +goal> =val
+   )
+
+The answer is that it will iff one also has (add-dm (4 isa ...))
+otherwise it results in an error at run time.  Of course, in
+ACT-R 6 it would always result in an error. Which, while consistent,
+may not be the optimal solution either. [In this case it could be
+flagged at the time of the production's definition since the value
+for the =val variable is know, but in the general case that isn't
+going to be possible.]
+
+
+
+
+Because buffers now hold copies of chunks the name of the
+chunk in the buffer is not a "pointer" to the original chunk
+(the one from which it was copied).  For most buffers that isn't
+an issue, but for retrieval it has a couple consequences.
+
+First, as was noted in the ACT-R 6 talk after ICCM 2004, now 
+one cannot change the chunks that are in declarative memory 
+through productions.
+
+Another consequences can be seen in the tutorial models and
+relates to how merging occurs.  (Merging in ACT-R 6 does not 
+replace references to the merged chunk with the name of the 
+existing chunk - see below). Basically, using ={buffer-name} 
+on the RHS of a production to set a slot value or in a retrieval 
+request can lead to something different than what one might 
+expect from ACT-R 5 if the chunk in the buffer hasn't been
+allowed to merge back into DM with the original.  
+
+
+As noted above, merging does not result in any mdoifications
+to any chunks - only a mapping of the names to the same 
+representation.  Because of that, if one uses the name of the
+chunk in a buffer (particularly retrieval) the trace may
+appear strange for something like partial matching as can be
+seen in the grouped recall model versions 1 and 2.  
+
+There are two main reasons for not doing the replacement
+that is done in ACT-R 5.  The first is because it could
+lead to problems with modules other than declartive.  Since
+chunks exist outside of declarative memory it's possible
+for a module writer to have internal references to particluar
+chunks which the system couldn't change and it may be 
+important to some module that slots hold the different
+names despite the underlying reference chunk being the same.
+Basically, the idea is to not get in the way of the module
+developer or have things changing outside of his or her control.
+The other reason is that merging in ACT-R 6 is going to 
+happen a lot more frequently than it did in ACT-R 5 and
+if it had to make those replacements everytime a chunk was 
+merged it seems like it'd be a lot of extra time spent doing 
+that clean-up.
+
+One potential "fix" for this is to hide it.  When the trace
+(and perhaps other printing operations) shows chunknames it
+could always replace the references with the cannonical name
+of the chunk at that point.  The only thing that worries me
+about that is it could lead to possible confusions when what
+you see isn't what is really in the slot i.e. what you see
+in something like a call to dm and what you get if you call
+chunk-slot-value differ.  So, for now at least, it's going
+to be left as is and we'll see how much trouble it causes...
+
+What this does then, in essence, is to push people to not
+using the buffer's chunkname binding in productions and 
+lead to the use of an "id" slot when one wants specific
+references.  Thus, chunknames become basically meaningless
+from the system's perspective.  That has been a suggestion 
+for a while, but hasn't really gained much serious attention
+until now.
+
+
+There are two other changes in productions that should be 
+noted here.  First, !eval! can't be used in a slot test.
+However, it doesn't flag such a use as a warning or
+error at this point because a list is a valid slot value.
+The reason is that doing so makes production compilation
+more difficult to specify and it's possible to replace
+any use of a slot !eval! with a !bind!.  However, it does
+make something like this a bit more complicated:
+
+=goal>
+  isa something
+  slot1  =val
+  slot2  (!eval! (some-function =val)
+
+because that would have to be split into two goal buffer tests
+like this:
+
+=goal>
+  isa something
+  slot1 =val
+!bind! =val2 (some-function =val)
+=goal>
+  isa something
+  slot2 =val2
+
+which may make be just as difficult for production compilation 
+to deal with.  So, that's something which will have to be
+looked at.
+
+The other change is that one can't use unbound variables
+on the RHS of a production.  THe only place where this
+matters relative to ACT-R 5 (since returning values on a
+goal change aren't part of ACT-R 5) is in retrieval requests.
+In ACT-R 5 it would be possible to request something like
+this:
+
++retrieval>
+  isa something
+  slot1  =new-variable
+  slot2  =new-variable
+
+to request that a chunk which has the same value in
+slot1 and slot2 be retrieved.  That was really just
+a holdover from the old days where retrievals were
+on the LHS and doesn't seem like a reasonable thing
+to be doing anymore.  However, if people need that
+and it does come back my suggestion would be to introduce
+a special variable description for the retrieval request
+which isn't a "variable" from the production's perspective.
+So, perhaps something like this:
+
++retrieval>
+  isa something
+  slot1 *new-variable
+  slot2 *new-variable
+
+The declarative module would know how to interpret
+those values as variables and there would be no
+confusion within the production because they would
+be treated as default chunk names (which could be
+changed as well if that becomes confusing).  Basically,
+my feeling is that productions shouldn't have to know
+about the pecularities of any modules and provide 
+special syntax for such. 
+
+
+
+Another difference has to do with running time.  This
+is something which may be easily fixed later, but for now
+one should turn off all traces to improve the timing - not
+just :v.  The problem is that whie turning :v off does
+effectively stop the output if the other traces are still
+enabled (for instance :act) the model-output macro has to
+find the printing module and check the :v parameter.  If
+the original trace flag is nil it doesn't need to do that 
+check.  The activation trace can be particularly costly
+in a model with a lot of chunks and/or retrieval requests.

@@ -1,0 +1,40 @@
+global close_return 
+
+button [control_panel_name].close -command {close_model} \
+                            -text "Close Model" -font button_font
+
+pack [control_panel_name].close
+
+proc close_model {} {
+  global current_open_model
+  global current_open_model_name
+  global options_array 
+  global model_file_names
+
+  if {$current_open_model == ""} {
+    tk_messageBox -icon warning -type ok -title "Closing model" \
+                  -message "No open model to close."
+  } else {
+    if {[save_model] == 0} {
+      set answer [tk_messageBox -icon warning -type yesno \
+                                -title "Closing model" \
+                                -message "Close model even with the error(s)?."]
+
+      if {$answer == "no"} {
+        return 0
+      }
+    } 
+          
+      if {[winfo exists .model] == 1} {
+        destroy .model
+        set model_file_names(.model.frame.text) ""
+      }
+    
+
+    set current_open_model ""
+    set current_open_model_name "No Model Open"
+
+    return 1
+  } 
+} 
+  

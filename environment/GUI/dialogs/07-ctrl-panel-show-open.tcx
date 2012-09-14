@@ -1,0 +1,8 @@
+label [control_panel_name].current_open -text "Currently Open Model" -font label_font
+
+label [control_panel_name].open_model_name \
+      -font text_font -textvariable current_open_model_name
+
+pack [control_panel_name].current_open
+pack [control_panel_name].open_model_name
+

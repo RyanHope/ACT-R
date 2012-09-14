@@ -1,0 +1,64 @@
+global save_return 
+
+button [control_panel_name].save \
+       -command {
+           [control_panel_name].save configure -state disabled 
+           save_model 
+           [control_panel_name].save configure -state normal} \
+       -text "Save Model" -font button_font
+
+pack [control_panel_name].save
+
+send_environment_cmd \
+  "create list-handler [control_panel_name].save save_return (lambda (x)) ()"
+
+bind [control_panel_name].save <Destroy> {
+  remove_handler %W
+}
+
+proc save_model {} {
+  
+  
+  global model_file_names
+  global model_file_changed
+  global current_open_model
+  global options_array
+  global save_return
+  global tutor_mode
+  global tutor_windows
+
+  if {$current_open_model == ""} {
+    tk_messageBox -icon warning -type ok -title "Saving model" \
+                  -message "No model open."
+  } else {
+      save_backup
+
+      if {[winfo exists .model] == 1} {
+        save_text .model.frame.text $model_file_names(.model.frame.text)
+        set model_file_changed(.model.frame.text) 0
+       return 1
+      }
+    }
+}
+
+proc save_backup {} {
+global current_open_model
+global options_array
+
+ 
+ 
+ if $options_array(save_backups) {
+ 
+   set save_index 0
+   
+   while {[file exists "$current_open_model-$save_index"] == 1} {
+
+     incr save_index
+
+        }
+       
+     # report_status "'$current_open_model-$save_index' "
+     write_data [read_file $current_open_model] \
+                 "$current_open_model-$save_index"
+  }
+}

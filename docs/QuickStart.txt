@@ -1,0 +1,83 @@
+Here is the very basic information on how to start running ACT-R 6.  More 
+information is available in the tutorials, the reference manual, and the
+ACT-R Environment's manual.
+
+These instructions are for using the ACT-R source code and not the ACT-R 
+standalone application.  The instructions for the standalone version are 
+different and vary by system.  You should consult the readme file that is 
+included with the standalone for instructions on how to install and run it.
+
+
+1) Download the source files and extract them from the archive (zip file or 
+disk image).
+
+2) Start your Lisp application.  ACT-R should work with any ANSI Common Lisp 
+and it has been tested with ACL (Allegro Common Lisp), LispWorks, MCL (Macintosh
+Common Lisp), CLisp, CMUCL, OpenMCL, CCL (Clozure Common Lisp), SBCL, and ABCL.
+
+3) In your Lisp application, load the load-act-r-6.lisp file which is found at 
+the top level of the ACT-R sources.
+
+That will load all of the necessary ACT-R files, and once the ACT-R version 
+information is printed it is ready to use.
+
+---------------------------------------------------------------------------------
+
+If you would like to use the ACT-R Environment GUI and you have a Lisp 
+application which can run it then you need to perform steps 4-6 listed here
+or the alternative step 4 listed in the next section if applicable.
+
+The ACT-R Environment can be run with ACL, LispWorks, MCL, OpenMCL, CCL, CMUCL,
+and versions of SBCL that have the multiprocessing support included.
+
+4) Run the appropriate Environment application which is included with the ACT-R
+source files.  The applications are found in the environment directory.
+
+ - On Windows you should run the "Start Environment.exe" application.
+ - On Macs with OS X it's the "Start Environment OSX" application.  
+ - For Unix/Linux you need to have Tcl/Tk installed and then you must run 
+   the starter.tcl script located in the GUI subdirectory of the environment
+   directory.
+
+5) Wait for the "Control Panel" window to appear.  It should be on the far 
+right side of your display and will say "Waiting for ACT-R" at the top.
+
+6) Once the "Control Panel" is waiting call the start-environment function 
+from the Lisp with ACT-R loaded in it.  That will connect ACT-R to the GUI 
+tools and several buttons should now be available on the "Control Panel". 
+
+After the buttons appear the ACT-R Environment is connected and ready to use.
+
+When you are done using ACT-R you should stop the ACT-R Environment by calling
+stop-environment before closing the Lisp application or the Environment 
+application to make sure that the Environment closes properly and saves its
+settings.
+
+---------------------------------------------------------------------------------
+
+Alternative instructions for starting the ACT-R Environment.  If you are using 
+LispWorks or Allegro Common Lisp under either Mac OS X or Windows then you may 
+be able to replace steps 4-6 above with a single step.
+  
+4) Call the function run-environment.  That should automatically run the 
+appropriate Environment application and then initiate the connection between 
+ACT-R and the Environment.  
+
+Run-environment may not work right in all situations.  If the Environment 
+application does not start, then you should use the standard instructions 
+described above.  If the application starts, but the connection does not complete
+(no version information window or buttons show up in the control panel) or you 
+get an error, then you may need to increase the delay before ACT-R attempts to 
+connect to the Environment.  The delay can be provided as an optional parameter 
+to run-environment.  The default delay is 12 seconds which should be safe for 
+most machines, but a longer delay may be necessary in some cases.  Alternatively,
+on some machines a shorter delay will work just fine and may be used if you want
+to speed up the start time.
+
+Just like with the full instructions above, when you are done with ACT-R you should
+call the stop-environment command before closing the Lisp application.
+
+-----------------------------------------------------------------------------------
+
+If you have any questions, problems, or comments please send them to 
+Dan (db30@andrew.cmu.edu).
