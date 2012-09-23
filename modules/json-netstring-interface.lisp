@@ -73,6 +73,7 @@
           (method (pop s))
           (params (pop s)))
      (declare (ignore model))
+     (format *standard-output* "~&=> Remote Method Called: ~A~%" method)
      (cond 
        ((string= method "ready")
           (bordeaux-threads:condition-notify (ready-cond instance)))
