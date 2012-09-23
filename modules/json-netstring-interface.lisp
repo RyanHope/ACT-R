@@ -172,9 +172,12 @@
 ;; Signal remote environment that model is about to run
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
-      (progn
-  	(send-command instance (current-model) "model-run"))
-      	(bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))))
+      (bordeaux-threads:with-recursive-lock-held 
+       ((ready-lock instance))
+       (progn
+         (send-command instance (current-model) "model-run")
+         (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))
+         ))))
 
 ;; Signal remote environment that model has stopped running
 (defun run-end-json-netstring-module (instance)
