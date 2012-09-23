@@ -207,11 +207,9 @@ class Environment(object):
                     elif e.key >= pygame.K_a and e.key <= pygame.K_z:
                         if self.state == self.STATE_SEARCH:
                             self.response.append(str.upper(str(e.unicode)))
-                            print self.response
                             if len(self.response) == 4:
                                 self.validate()
                 elif e.type == pygame.MOUSEBUTTONDOWN:
-                    print e
                     if self.state == self.STATE_INTRO:
                         if self.intro_xs.collidepoint(e.pos):
                             self.state = self.STATE_RESET
@@ -245,14 +243,12 @@ class Environment(object):
         
         @d.listen('mousemotion')
         def ACTR6_JNI_Event(self, d, model, params):
-            print ("mousemotion",params[0])
             # Store "ACT-R" cursor in variable since we are 
             # not going to move the real mouse
             self.fake_cursor = params[0]
             
         @d.listen('mouseclick')
         def ACTR6_JNI_Event(self, d, model, params):
-            print ("mouseclick")
             # Simulate a button press using the "ACT-R" cursor loc
             pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=self.fake_cursor))
             
