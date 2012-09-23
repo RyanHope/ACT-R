@@ -77,5 +77,11 @@ class JNI_Server(Factory):
     def other_sound(self, content, duration, delay, recode):
         self.p.sendCommand(self.model, "new-other-sound", content, duration, delay, recode)
 
+    def trigger_reward(self, reward):
+        self.p.sendCommand(self.model, "trigger-reward", reward)
+
+    def set_visual_center_pint(self, (x, y)):
+        self.p.sendCommand(self.model, "set-visual-center-point", x, y)
+
     def ready(self):
         self.p.sendCommand(self.model, "ready")
