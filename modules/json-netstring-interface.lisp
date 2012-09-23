@@ -173,7 +173,7 @@
   (if (current-model)
       (progn
   	(send-command instance (current-model) "model-run"))
-      	(bordeaux-threads:condition-wait (ready-cond instance) (ready-lock device))))
+      	(bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))))
 
 ;; Signal remote environment that model has stopped running
 (defun run-end-json-netstring-module (instance)
