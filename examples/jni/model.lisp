@@ -8,12 +8,13 @@
   (chunk-type (background (:include visual-object)))
   (chunk-type color-opposite color opposite)
   (chunk-type find-color found quad)
-  (chunk-type find-bg)
   (chunk-type get-direction)
   (chunk-type search-direction color direction)
   (chunk-type oddball)
   (chunk-type respond start-quad start-color bg-color direction letter)
   (chunk-type quad quad clockwise counter-clockwise)
+  (chunk-type intro)
+  (chunk-type trial)
   
   (add-dm
    (o-blue isa color-opposite color blue opposite red)
@@ -27,16 +28,64 @@
   
   (sgp :v t) 
   (sgp :needs-mouse nil :process-cursor t)
-  ;(start-hand-at-mouse)
+  (start-hand-at-mouse)
   
-  (p start-trial
+  (p find-x
      ?goal>
      buffer empty
+     =visual-location>
+     isa visual-location
+     - kind letterobj
+     - color red
+     ==>
+     +visual-location>
+     isa visual-location
+     kind letterobj
+     color red
+     )
+  
+  (p found-x
+     ?goal>
+     buffer empty
+     =visual-location>
+     isa visual-location
+     kind letterobj
+     color red
+     ?manual>
+     preparation free
+     ==>
+     +goal>
+     isa intro
+     +manual>
+     isa move-cursor
+     loc =visual-location
+     )
+  
+  (p click-x
+     =goal>
+     isa intro
+     ?manual>
+     preparation free
+     ==>
+     +manual>
+     isa click-mouse
+     +goal>
+     isa trial
+     -imaginal>
+     )
+  
+  (p start-trial
+     =goal>
+     isa trial
      ?imaginal>
      buffer empty
+     ?manual>
+     preparation free
      ==>
      +goal>
      isa fixation-cross
+     +manual>
+     isa hand-to-home
      )
   
   (p find-fixation-cross
@@ -74,10 +123,10 @@
      =visual>
      isa fixation-cross
      ?manual>
-     state free
+     preparation free
      ==>
      +manual>
-     ISA press-key
+     isa press-key
      key "space"
      +imaginal>
      isa respond
@@ -94,8 +143,6 @@
      direction nil
      ==>
      =imaginal>
-     +goal>
-     isa find-bg
      +visual-location>
      isa visual-location
      kind background
@@ -103,7 +150,7 @@
   
   (p found-bg
      =goal>
-     isa find-bg
+     isa chunk
      =visual-location>
      isa visual-location
      kind background
@@ -111,11 +158,10 @@
      =imaginal>
      isa respond
      bg-color nil
+     direction nil
      ==>
      =imaginal>
      bg-color =bg-color
-     +goal>
-     isa chunk
      )
   
   (p find-color
@@ -363,7 +409,8 @@
      +manual>
      ISA press-key
      key "space"
-     -goal>
+     +goal>
+     isa trial
      -imaginal>
      -aural-location>
      )
