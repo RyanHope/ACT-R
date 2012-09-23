@@ -370,13 +370,5 @@
   
   )
 
-(defun test-jni (host port)
-  (if (install-device (jni-device host port))
-      (run 10 :real-time T)))
-
-(defun restart-test ()
-  (if (current-model)
-      (progn
-        (reset)
-      	(install-device (get-module jni))
-        (run 10 :real-time T))))
+(if (install-device (jni-device "localhost" 5555))
+    (run 10 :real-time T))
