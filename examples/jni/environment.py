@@ -77,8 +77,9 @@ class Environment(object):
         self.snd_incorrect = pygame.mixer.Sound("beep-5.wav")
 
         self.trial = 0
+        self.fake_cursor = self.screen_rect.center
 
-        self.state = self.STATE_RESET
+        self.state = self.STATE_INTRO
         self.actr = actr
         self.actr_running = False
         if ACTR6 and self.actr:
@@ -210,16 +211,20 @@ class Environment(object):
                             if len(self.response) == 4:
                                 self.validate()
                 elif e.type == pygame.MOUSEBUTTONDOWN:
+                    print e
                     if self.state == self.STATE_INTRO:
                         if self.intro_xs.collidepoint(e.pos):
                             self.state = self.STATE_RESET
+                    
             yield
             
     if ACTR6:
         
         @d.listen('connectionMade')
         def ACTR6_JNI_Event(self, d, model, params):
-            self.state = self.STATE_RESET
+            self.state = self.STATE_INTRO
+            X = VisualChunk(None, "letterobj", self.intro_xs.centerx, self.intro_xs.centery, color="red")
+            self.actr.update_display([X], clear=True)
 
         @d.listen('reset')
         def ACTR6_JNI_Event(self, d, model, params):
@@ -228,6 +233,7 @@ class Environment(object):
         @d.listen('model-run')
         def ACTR6_JNI_Event(self, d, model, params):
             self.actr_running = True
+            self.actr.ready()
             
         @d.listen('model-stop')
         def ACTR6_JNI_Event(self, d, model, params):
@@ -237,6 +243,19 @@ class Environment(object):
         def ACTR6_JNI_Event(self, d, model, params):
             pygame.event.post(pygame.event.Event(pygame.KEYDOWN, unicode=chr(params[0]), key=params[0], mod=None))
         
+        @d.listen('mousemotion')
+        def ACTR6_JNI_Event(self, d, model, params):
+            print ("mousemotion",params[0])
+            # Store "ACT-R" cursor in variable since we are 
+            # not going to move the real mouse
+            self.fake_cursor = params[0]
+            
+        @d.listen('mouseclick')
+        def ACTR6_JNI_Event(self, d, model, params):
+            print ("mouseclick")
+            # Simulate a button press using the "ACT-R" cursor loc
+            pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=self.fake_cursor))
+            
 if __name__ == '__main__':
 
     pygame.display.init()
