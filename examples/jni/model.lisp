@@ -371,4 +371,4 @@
   )
 
 (if (install-device (jni-device "localhost" 5555))
-    (run 10 :real-time T))
+    (run-full-time 10 :real-time T))
