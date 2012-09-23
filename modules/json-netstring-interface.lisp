@@ -59,6 +59,8 @@
 (defclass jni-module ()
   ((socket :accessor socket :initform nil)
    (thread :accessor thread :initform nil)
+   (ready-cond :accessor ready-cond :initform (bordeaux-threads:make-condition-variable))
+   (ready-lock :accessor ready-lock :initform (bordeaux-threads:make-lock))
    (display :accessor display :initform nil)
    (cursor-loc :accessor cursor-loc :initform '(0 0))))
 
@@ -72,12 +74,14 @@
           (params (pop s)))
      (declare (ignore model))
      (cond 
+       ((string= method "ready")
+          (bordeaux-threads:condition-notify (ready-cond instance)))
        ((string= method "update-display")
-            (progn
-              (setf (display instance)
-                    (pairlis (eval (read-from-string (pop params)))
-                             (eval (read-from-string (pop params)))))
-              (proc-display :clear (pop params))))
+        (progn
+          (setf (display instance)
+                (pairlis (eval (read-from-string (pop params)))
+                         (eval (read-from-string (pop params)))))
+          (proc-display :clear (pop params))))
        ((string= method "set-cursor-loc")
         (setf (cursor-loc instance) (pop params)))
        ((string= method "new-digit-sound")
@@ -167,7 +171,9 @@
 ;; Signal remote environment that model is about to run
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
-  	(send-command instance (current-model) "model-run")))
+      (progn
+  	(send-command instance (current-model) "model-run"))
+      	(bordeaux-threads:condition-wait (ready-cond instance) (ready-lock device))))
 
 ;; Signal remote environment that model has stopped running
 (defun run-end-json-netstring-module (instance)
