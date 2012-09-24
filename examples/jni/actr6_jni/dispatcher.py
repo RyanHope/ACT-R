@@ -25,6 +25,7 @@ class Dispatcher(Pangler):
         def decorator(target):
             @self.subscribe(e=event, needs=['model', 'params'])
             def wrapper(*args, **kwargs):
-                return target(*args, **kwargs)
+                newargs = tuple([arg for arg in args if not isinstance(arg, Pangler)])
+                return target(*newargs, **kwargs)
             return wrapper
         return decorator
