@@ -73,7 +73,6 @@
 	   (method (pop s))
 	   (params (pop s)))
       (declare (ignore model))
-      (format *standard-output* "~&=> Remote Method Called: ~A~%" method)
       (cond 
        ((string= method "ready")
 	(bordeaux-threads:condition-notify (ready-cond instance)))
@@ -97,7 +96,10 @@
         (new-word-sound (pop params)))
        ((string= method "new-other-sound")
         (new-other-sound (pop params) (pop params) (pop params) (pop params))))))
-   (end-of-file () (cleanup instance))))
+   (end-of-file
+    ()
+    (print-warning "Remote connection closed.")
+    (cleanup instance))))
 
 ;; Encode method and params with JSON then send over socket as a netstring
 (defmethod send-command ((instance jni-module) mid method &rest params)
@@ -161,11 +163,11 @@
 	     instance)
 	   (usocket:connection-refused-error
 	    ()
-	    (format t "Connection refused. Is remote environment server running?~%")
+	    (print-warning "Connection refused. Is remote environment server running?")
 	    nil)
 	   (usocket:timeout-error
 	    ()
-	    (format t "Timeout. Is remote environment server running?~%")
+	    (print-warning "Timeout. Is remote environment server running?")
 	    nil))))))
 
 ;; Create a new instance of the main class
