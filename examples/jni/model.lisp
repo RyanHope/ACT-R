@@ -1,11 +1,5 @@
 #-:ACT-R-6.0 (load "~/workspace/actr6/load-act-r-6.lisp")
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; TODOs : - Use :nearest clockwise|counterclockwise
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  
 (define-model jni-test
   
   (chunk-type (visual-location-ext (:include visual-location)) quad)
