@@ -370,6 +370,7 @@
       isa respond
       start-quad =start-quad
       letter nil
+      - direction nil
       =visual>
       isa letterobj
       value =letter
