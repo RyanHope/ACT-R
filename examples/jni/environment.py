@@ -224,9 +224,15 @@ class Environment(object):
             X = VisualChunk(None, "letterobj", self.intro_xs.centerx, self.intro_xs.centery, color="red")
             self.actr.update_display([X], clear=True)
 
+        @d.listen('connectionLost')
+        def ACTR6_JNI_Event(self, model, params):
+            self.actr_running = False
+            self.state = self.STATE_WAIT
+            
         @d.listen('reset')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = False
+            self.state = self.STATE_WAIT
             
         @d.listen('model-run')
         def ACTR6_JNI_Event(self, model, params):

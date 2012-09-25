@@ -276,8 +276,6 @@
      isa respond
      bg-color =bg-color
      direction nil
-     ?retrieval>
-     buffer empty
      ==>
      =imaginal>
      +retrieval>
@@ -418,5 +416,6 @@
   
   )
 
-(if (install-device (jni-device "localhost" 5555))
-    (run-full-time 10 :real-time T))
+(defun test-jni ()
+  (if (install-device (jni-device "localhost" 5555))
+      (run-full-time 10 :real-time T)))

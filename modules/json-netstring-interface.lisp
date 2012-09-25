@@ -65,17 +65,18 @@
 
 ;; Read TCP stream from remote environment and process the commands
 (defmethod read-stream ((instance jni-module))
-  (loop
-   (let* ((s (json:decode-json-from-string
-              (netstrings:read-netstring (usocket:socket-stream (socket instance)))))
-          (model (pop s))
-          (method (pop s))
-          (params (pop s)))
-     (declare (ignore model))
-     (format *standard-output* "~&=> Remote Method Called: ~A~%" method)
-     (cond 
+  (handler-case
+   (loop
+    (let* ((s (json:decode-json-from-string
+	       (netstrings:read-netstring (usocket:socket-stream (socket instance)))))
+	   (model (pop s))
+	   (method (pop s))
+	   (params (pop s)))
+      (declare (ignore model))
+      (format *standard-output* "~&=> Remote Method Called: ~A~%" method)
+      (cond 
        ((string= method "ready")
-          (bordeaux-threads:condition-notify (ready-cond instance)))
+	(bordeaux-threads:condition-notify (ready-cond instance)))
        ((string= method "update-display")
         (progn
           (setf (display instance)
@@ -95,7 +96,8 @@
        ((string= method "new-word-sound")
         (new-word-sound (pop params)))
        ((string= method "new-other-sound")
-        (new-other-sound (pop params) (pop params) (pop params) (pop params)))))))
+        (new-other-sound (pop params) (pop params) (pop params) (pop params))))))
+   (end-of-file () (cleanup instance))))
 
 ;; Encode method and params with JSON then send over socket as a netstring
 (defmethod send-command ((instance jni-module) mid method &rest params)
@@ -104,6 +106,13 @@
         (progn
           (netstrings:write-netstring (json:encode-json-to-string (vector mid method params)) stream)
           (finish-output stream)))))
+
+(defmethod cleanup ((instance jni-module))
+  (if (socket instance)
+      (progn
+	(usocket:socket-close (socket instance))
+	(setf (socket instance) nil))))
+    
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -145,17 +154,19 @@
       (let ((instance (get-module jni)))
         (if (socket instance)
             instance
-            (handler-case
-             (progn
-               (setf (socket instance) (usocket:socket-connect host port :element-type '(unsigned-byte 8)))
-               (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
-               instance)
-             (usocket:connection-refused-error ()
-               (format t "Connection refused. Is remote environment server running?~%")
-               nil)
-             (usocket:timeout-error ()
-               (format t "Timeout. Is remote environment server running?~%")
-               nil))))))
+	  (handler-case
+	   (progn
+	     (setf (socket instance) (usocket:socket-connect host port :element-type '(unsigned-byte 8)))
+	     (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
+	     instance)
+	   (usocket:connection-refused-error
+	    ()
+	    (format t "Connection refused. Is remote environment server running?~%")
+	    nil)
+	   (usocket:timeout-error
+	    ()
+	    (format t "Timeout. Is remote environment server running?~%")
+	    nil))))))
 
 ;; Create a new instance of the main class
 (defun create-json-netstring-module (name)
@@ -165,12 +176,13 @@
 ;; Signal remote environment to reset itself to a default/initial state
 (defun reset-json-netstring-module (instance)
   (if (current-model)
-  	(send-command instance (current-model) "reset")))
+      (progn
+	(send-command instance (current-model) "reset")
+	(cleanup instance))))
 
 ;; Close any open sockets
 (defun delete-json-netstring-module (instance)
-  (if (socket instance)
-      (usocket:socket-close (socket instance))))
+  (cleanup instance))
 
 ;; Signal remote environment that model is about to run
 (defun run-start-json-netstring-module (instance)
@@ -185,7 +197,7 @@
 ;; Signal remote environment that model has stopped running
 (defun run-end-json-netstring-module (instance)
   (if (current-model)
-  	(send-command instance (current-model) "model-stop")))
+      (send-command instance (current-model) "model-stop")))
 
 ;; JNI Module Definition
 (define-module jni nil nil
