@@ -169,11 +169,13 @@
 	   (progn
 	     (setf (sync instance) sync)
 	     (setf (socket instance) (iolib:make-socket :connect :active
-							:address-family :internet
+							:address-family :file ;:internet
 							:type :stream
+							:remote-filename "/tmp/actr"
 							:external-format '(:utf-8 :eol-style :crlf)
 							:ipv6 nil))
-	     (iolib:connect (socket instance) (iolib:lookup-hostname host) :port port :wait t)
+	     ;(iolib:connect (socket instance) "/tmp/actr")
+	     ;(iolib:connect (socket instance) (iolib:lookup-hostname host) :port port :wait t)
 	     (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
 	     instance)
 	   (iolib:socket-connection-refused-error
