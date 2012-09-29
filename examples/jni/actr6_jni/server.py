@@ -17,13 +17,13 @@
 # along with ACTR6_JNI.  If not, see <http://www.gnu.org/licenses/>.
 #===============================================================================
 
-from twisted.protocols.basic import NetstringReceiver
+from twisted.protocols.basic import LineReceiver
 from twisted.internet.protocol import Factory
 import json
 
 from clock import MPClock
 
-class ACTR_Protocol(NetstringReceiver):
+class ACTR_Protocol(LineReceiver):
 
     def connectionMade(self):
         for d in self.factory.dispatchers:
@@ -33,7 +33,7 @@ class ACTR_Protocol(NetstringReceiver):
         for d in self.factory.dispatchers:
             d.trigger(e="connectionLost", model=None, params=None)
 
-    def stringReceived(self, string):
+    def lineReceived(self, string):
         model, method, params = json.loads(string)
         if method == 'set-mp-time':
             self.factory.clock.setTime(float(params[0]))
@@ -43,7 +43,7 @@ class ACTR_Protocol(NetstringReceiver):
                 d.trigger(e=method, model=model, params=params)
 
     def sendCommand(self, model, method, *params):
-        self.sendString(json.dumps([model, method, params]))
+        self.sendLine(json.dumps([model, method, params]))
 
 class JNI_Server(Factory):
 

@@ -46,9 +46,8 @@
 ;; having to write a lot of implementation specific code
 ;;
 (eval-when (:compile-toplevel :load-toplevel)
-  (asdf:load-system :usocket)
+  (asdf:load-system :iolib)
   (asdf:load-system :bordeaux-threads)
-  (asdf:load-system :cl-netstrings)
   (asdf:load-system :cl-json))
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -70,8 +69,7 @@
 (defmethod read-stream ((instance jni-module))
   (handler-case
    (loop
-    (let* ((s (json:decode-json-from-string
-	       (netstrings:read-netstring (usocket:socket-stream (socket instance)))))
+    (let* ((s (json:decode-json-from-string (read-line (socket instance))))
 	   (model (pop s))
 	   (method (pop s))
 	   (params (pop s)))
@@ -109,10 +107,9 @@
 ;; Encode method and params with JSON then send over socket as a netstring
 (defmethod send-command ((instance jni-module) mid method &rest params)
   (if (socket instance)
-      (let ((stream (usocket:socket-stream (socket instance))))
-        (progn
-          (netstrings:write-netstring (json:encode-json-to-string (vector mid method params)) stream)
-          (force-output stream)))))
+      (progn
+	(format (socket instance) "~A~%" (json:encode-json-to-string (vector mid method params)))
+	(force-output (socket instance)))))
 
 (defmethod send-mp-time ((instance jni-module))
   (bordeaux-threads:with-recursive-lock-held 
@@ -124,7 +121,7 @@
 (defmethod cleanup ((instance jni-module))
   (if (socket instance)
       (progn
-	(usocket:socket-close (socket instance))
+	(close (socket instance) :abort t)
 	(setf (socket instance) nil))))
     
 
@@ -171,16 +168,17 @@
 	  (handler-case
 	   (progn
 	     (setf (sync instance) sync)
-	     (setf (socket instance) (usocket:socket-connect host port :element-type '(unsigned-byte 8)))
+	     (setf (socket instance) (iolib:make-socket :connect :active
+							:address-family :internet
+							:type :stream
+							:external-format '(:utf-8 :eol-style :crlf)
+							:ipv6 nil))
+	     (iolib:connect (socket instance) (iolib:lookup-hostname host) :port port :wait t)
 	     (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
 	     instance)
-	   (usocket:connection-refused-error
+	   (iolib:socket-connection-refused-error
 	    ()
 	    (print-warning "Connection refused. Is remote environment server running?")
-	    nil)
-	   (usocket:timeout-error
-	    ()
-	    (print-warning "Timeout. Is remote environment server running?")
 	    nil))))))
 
 ;; Create a new instance of the main class
