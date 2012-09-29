@@ -86,7 +86,8 @@ class Environment(object):
             self.state = self.STATE_WAIT
             self.actr = JNI_Server(self)
             self.actr.addDispatcher(self.d)
-            reactor.listenTCP(5555, self.actr)
+            #reactor.listenTCP(5555, self.actr)
+            reactor.listenUNIX("/tmp/actr", self.actr)
 
         self.lc1 = LoopingCall(self.update_env)
         self.lc1.start(1.0 / 30)
