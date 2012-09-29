@@ -417,5 +417,7 @@
   )
 
 (defun test-jni ()
-  (if (install-device (jni-device "localhost" 5555))
-      (run-full-time 10 :real-time T)))
+  (if (install-device (jni-device "localhost" 5555 :sync .1))
+      (let ((start (get-internal-real-time)))
+	(run-full-time 30 :real-time nil)
+	(format nil "~f" (/ (- (get-internal-real-time) start) internal-time-units-per-second)))))

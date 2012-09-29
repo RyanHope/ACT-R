@@ -56,10 +56,13 @@
 ;; Class for the JNI module instance
 ;; Holds per-model device information
 (defclass jni-module ()
-  ((socket :accessor socket :initform nil)
+  ((sync :accessor sync :initform nil)
+   (socket :accessor socket :initform nil)
    (thread :accessor thread :initform nil)
    (ready-cond :accessor ready-cond :initform (bordeaux-threads:make-condition-variable))
    (ready-lock :accessor ready-lock :initform (bordeaux-threads:make-lock))
+   (time-cond :accessor time-cond :initform (bordeaux-threads:make-condition-variable))
+   (time-lock :accessor time-lock :initform (bordeaux-threads:make-lock))
    (display :accessor display :initform nil)
    (cursor-loc :accessor cursor-loc :initform '(0 0))))
 
@@ -76,6 +79,8 @@
       (cond 
        ((string= method "ready")
 	(bordeaux-threads:condition-notify (ready-cond instance)))
+       ((string= method "time-set")
+	(bordeaux-threads:condition-notify (time-cond instance)))
        ((string= method "update-display")
         (progn
           (setf (display instance)
@@ -107,7 +112,14 @@
       (let ((stream (usocket:socket-stream (socket instance))))
         (progn
           (netstrings:write-netstring (json:encode-json-to-string (vector mid method params)) stream)
-          (finish-output stream)))))
+          (force-output stream)))))
+
+(defmethod send-mp-time ((instance jni-module))
+  (bordeaux-threads:with-recursive-lock-held 
+   ((time-lock instance))
+   (progn
+     (send-command instance (current-model) "set-mp-time" (mp-time))
+     (bordeaux-threads:condition-wait (time-cond instance) (time-lock instance)))))
 
 (defmethod cleanup ((instance jni-module))
   (if (socket instance)
@@ -151,13 +163,14 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun jni-device (host port)
+(defun jni-device (host port &key sync)
   (if (current-model)
       (let ((instance (get-module jni)))
         (if (socket instance)
             instance
 	  (handler-case
 	   (progn
+	     (setf (sync instance) sync)
 	     (setf (socket instance) (usocket:socket-connect host port :element-type '(unsigned-byte 8)))
 	     (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
 	     instance)
@@ -192,6 +205,7 @@
       (bordeaux-threads:with-recursive-lock-held 
        ((ready-lock instance))
        (progn
+	 (if (sync instance) (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t))
          (send-command instance (current-model) "model-run")
          (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))
          ))))
