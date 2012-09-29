@@ -21,6 +21,8 @@ from twisted.protocols.basic import NetstringReceiver
 from twisted.internet.protocol import Factory
 import json
 
+from clock import MPClock
+
 class ACTR_Protocol(NetstringReceiver):
 
     def connectionMade(self):
@@ -33,8 +35,12 @@ class ACTR_Protocol(NetstringReceiver):
 
     def stringReceived(self, string):
         model, method, params = json.loads(string)
-        for d in self.factory.dispatchers:
-            d.trigger(e=method, model=model, params=params)
+        if method == 'set-mp-time':
+            self.factory.clock.setTime(float(params[0]))
+            self.sendCommand(self.factory.model, "time-set")
+        else:
+            for d in self.factory.dispatchers:
+                d.trigger(e=method, model=model, params=params)
 
     def sendCommand(self, model, method, *params):
         self.sendString(json.dumps([model, method, params]))
@@ -44,6 +50,8 @@ class JNI_Server(Factory):
     ready = False
     running = True
     model = None
+    
+    clock = MPClock()
 
     def __init__(self, env):
         self.env = env

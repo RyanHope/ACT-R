@@ -232,11 +232,17 @@ class Environment(object):
         @d.listen('reset')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = False
+            self.lc1.stop()
+            self.lc1.clock = reactor
+            self.lc1.start(1.0 / 30)
             self.state = self.STATE_WAIT
             
         @d.listen('model-run')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = True
+            self.lc1.stop()
+            self.lc1.clock = self.actr.clock
+            self.lc1.start(1.0 / 30)
             self.actr.ready()
             
         @d.listen('model-stop')
