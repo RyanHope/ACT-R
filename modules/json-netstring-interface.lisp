@@ -45,7 +45,7 @@
 ;; Load some libraries so that this works on multiple implementations with out
 ;; having to write a lot of implementation specific code
 ;;
-(eval-when (:compile-toplevel :load-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
   (asdf:load-system :iolib)
   (asdf:load-system :bordeaux-threads)
   (asdf:load-system :cl-json))
