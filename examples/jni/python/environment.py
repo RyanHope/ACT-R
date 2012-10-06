@@ -96,6 +96,9 @@ class Environment(object):
 
     def reset(self):
         self.trial += 1
+        self.intro_xs.center = (randint(0, self.screen_rect.width), randint(0, self.screen_rect.height))
+        while not self.screen_rect.contains(self.intro_xs) or self.intro_ts.colliderect(self.intro_xs):
+            self.intro_xs.center = (randint(0, self.screen_rect.width), randint(0, self.screen_rect.height))
         self.start = sample([1, 0, 0, 0], 4)
         colors = sample(["red", "blue"], 2)
         self.letters = sample(string.ascii_uppercase, 4)
@@ -213,11 +216,15 @@ class Environment(object):
                     if self.state == self.STATE_INTRO:
                         if self.intro_xs.collidepoint(e.pos):
                             self.state = self.STATE_RESET
-                    
             yield
-            
+
+    def setDefaultClock(self):
+        self.lc1.stop()
+        self.lc1.clock = reactor
+        self.lc1.start(1.0 / 30)
+
     if ACTR6:
-        
+
         @d.listen('connectionMade')
         def ACTR6_JNI_Event(self, model, params):
             self.state = self.STATE_INTRO
@@ -227,16 +234,15 @@ class Environment(object):
         @d.listen('connectionLost')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = False
+            self.setDefaultClock()
             self.state = self.STATE_WAIT
-            
+
         @d.listen('reset')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = False
-            self.lc1.stop()
-            self.lc1.clock = reactor
-            self.lc1.start(1.0 / 30)
+            self.setDefaultClock()
             self.state = self.STATE_WAIT
-            
+
         @d.listen('model-run')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = True
@@ -244,26 +250,26 @@ class Environment(object):
             self.lc1.clock = self.actr.clock
             self.lc1.start(1.0 / 30)
             self.actr.ready()
-            
+
         @d.listen('model-stop')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = False
-            
+
         @d.listen('keypress')
         def ACTR6_JNI_Event(self, model, params):
             pygame.event.post(pygame.event.Event(pygame.KEYDOWN, unicode=chr(params[0]), key=params[0], mod=None))
-        
+
         @d.listen('mousemotion')
         def ACTR6_JNI_Event(self, model, params):
             # Store "ACT-R" cursor in variable since we are 
             # not going to move the real mouse
             self.fake_cursor = params[0]
-            
+
         @d.listen('mouseclick')
         def ACTR6_JNI_Event(self, model, params):
             # Simulate a button press using the "ACT-R" cursor loc
             pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=self.fake_cursor))
-            
+
 if __name__ == '__main__':
 
     pygame.display.init()
