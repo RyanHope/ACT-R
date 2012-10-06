@@ -47,7 +47,7 @@
 ;;
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((*compile-file-pathname* nil))
-    (asdf:load-system :iolib)
+    (asdf:load-system :usocket)
     (asdf:load-system :bordeaux-threads)
     (asdf:load-system :cl-json)))
 ;;
@@ -58,6 +58,7 @@
 (defclass jni-module ()
   ((sync :accessor sync :initform nil)
    (socket :accessor socket :initform nil)
+   (stream :accessor stream :initform nil)
    (thread :accessor thread :initform nil)
    (ready-cond :accessor ready-cond :initform (bordeaux-threads:make-condition-variable))
    (ready-lock :accessor ready-lock :initform (bordeaux-threads:make-lock))
@@ -69,62 +70,64 @@
 ;; Read TCP stream from remote environment and process the commands
 (defmethod read-stream ((instance jni-module))
   (handler-case
-   (loop
-    (let* ((s (json:decode-json-from-string (read-line (socket instance))))
-	   (model (pop s))
-	   (method (pop s))
-	   (params (pop s)))
-      (declare (ignore model))
-      (cond 
-       ((string= method "ready")
-	(bordeaux-threads:condition-notify (ready-cond instance)))
-       ((string= method "time-set")
-	(bordeaux-threads:condition-notify (time-cond instance)))
-       ((string= method "update-display")
-        (progn
-          (setf (display instance)
-                (pairlis (eval (read-from-string (pop params)))
-                         (eval (read-from-string (pop params)))))
-          (proc-display :clear (pop params))))
-       ((string= method "trigger-reward")
-        (trigger-reward (pop params)))
-       ((string= method "set-visual-center-point")
-        (set-visual-center-point (pop params) (pop params)))
-       ((string= method "set-cursor-loc")
-        (setf (cursor-loc instance) (pop params)))
-       ((string= method "new-digit-sound")
-        (new-digit-sound (pop params)))
-       ((string= method "new-tone-sound")
-        (new-tone-sound (pop params) (pop params)))
-       ((string= method "new-word-sound")
-        (new-word-sound (pop params)))
-       ((string= method "new-other-sound")
-        (new-other-sound (pop params) (pop params) (pop params) (pop params))))))
-   (end-of-file
-    ()
-    (print-warning "Remote connection closed.")
-    (cleanup instance))))
+      (loop
+        (let* ((s (json:decode-json-from-string (read-line (stream instance))))
+               (model (pop s))
+               (method (pop s))
+               (params (pop s)))
+          (declare (ignore model))
+          (cond 
+           ((string= method "ready")
+            (bordeaux-threads:condition-notify (ready-cond instance)))
+           ((string= method "time-set")
+            (bordeaux-threads:condition-notify (time-cond instance)))
+           ((string= method "update-display")
+            (progn
+              (setf (display instance)
+                    (pairlis (eval (read-from-string (pop params)))
+                             (eval (read-from-string (pop params)))))
+              (proc-display :clear (pop params))))
+           ((string= method "trigger-reward")
+            (trigger-reward (pop params)))
+           ((string= method "set-visual-center-point")
+            (set-visual-center-point (pop params) (pop params)))
+           ((string= method "set-cursor-loc")
+            (setf (cursor-loc instance) (pop params)))
+           ((string= method "new-digit-sound")
+            (new-digit-sound (pop params)))
+           ((string= method "new-tone-sound")
+            (new-tone-sound (pop params) (pop params)))
+           ((string= method "new-word-sound")
+            (new-word-sound (pop params)))
+           ((string= method "new-other-sound")
+            (new-other-sound (pop params) (pop params) (pop params) (pop params))))))
+    (end-of-file
+     ()
+     (print-warning "Remote connection closed.")
+     (cleanup instance))))
 
 ;; Encode method and params with JSON then send over socket as a netstring
 (defmethod send-command ((instance jni-module) mid method &rest params)
   (if (socket instance)
-      (progn
-	(format (socket instance) "~A~%" (json:encode-json-to-string (vector mid method params)))
-	(force-output (socket instance)))))
+    (progn
+      (write-string (json:encode-json-to-string (vector mid method params)) (stream instance))
+      (write-char #\return (stream instance))
+      (write-char #\linefeed (stream instance))
+      (force-output (stream instance)))))
 
 (defmethod send-mp-time ((instance jni-module))
   (bordeaux-threads:with-recursive-lock-held 
-   ((time-lock instance))
-   (progn
-     (send-command instance (current-model) "set-mp-time" (mp-time))
-     (bordeaux-threads:condition-wait (time-cond instance) (time-lock instance)))))
+      ((time-lock instance))
+    (progn
+      (send-command instance (current-model) "set-mp-time" (mp-time))
+      (bordeaux-threads:condition-wait (time-cond instance) (time-lock instance)))))
 
 (defmethod cleanup ((instance jni-module))
   (if (socket instance)
-      (progn
-	(close (socket instance) :abort t)
-	(setf (socket instance) nil))))
-    
+    (progn
+      (usocket:socket-close (socket instance))
+      (setf (socket instance) nil))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -138,7 +141,7 @@
 
 (defmethod cursor-to-vis-loc ((instance jni-module))
   nil)
-  
+
 (defmethod device-move-cursor-to ((instance jni-module) loc)
   (send-command instance (current-model) "mousemotion" loc))
 
@@ -151,11 +154,11 @@
 (defmethod build-vis-locs-for ((instance jni-module) vis-mod)
   (declare (ignore vis-mod))
   (if (display instance)
-      (mapcar 'car (display instance))))
+    (mapcar 'car (display instance))))
 
 (defmethod vis-loc-to-obj ((instance jni-module) vis-loc)
   (if (display instance)
-      (cdr (assoc vis-loc (display instance)))))
+    (cdr (assoc vis-loc (display instance)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -163,24 +166,24 @@
 
 (defun jni-device (host port &key sync)
   (if (current-model)
-      (let ((instance (get-module jni)))
-        (if (socket instance)
-            instance
-	  (handler-case
-	   (progn
-	     (setf (sync instance) sync)
-	     (setf (socket instance) (iolib:make-socket :connect :active
-							:address-family :internet
-							:type :stream
-							:external-format '(:utf-8 :eol-style :crlf)
-							:ipv6 nil))
-	     (iolib:connect (socket instance) (iolib:lookup-hostname host) :port port :wait t)
-	     (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
-	     instance)
-	   (iolib:socket-connection-refused-error
-	    ()
-	    (print-warning "Connection refused. Is remote environment server running?")
-	    nil))))))
+    (let ((instance (get-module jni)))
+      (if (socket instance)
+        instance
+        (handler-case
+            (progn
+              (setf (sync instance) sync)
+              (setf (socket instance) (usocket:socket-connect host port))
+              (setf (stream instance) (usocket:socket-stream (socket instance)))
+              (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
+              instance)
+          (usocket:connection-refused-error
+           ()
+           (print-warning "Connection refused. Is remote environment server running?")
+           nil)
+          (usocket:timeout-error
+           ()
+           (print-warning "Timeout. Is remote environment server running?")
+           nil))))))
 
 ;; Create a new instance of the main class
 (defun create-json-netstring-module (name)
@@ -190,9 +193,9 @@
 ;; Signal remote environment to reset itself to a default/initial state
 (defun reset-json-netstring-module (instance)
   (if (current-model)
-      (progn
-	(send-command instance (current-model) "reset")
-	(cleanup instance))))
+    (progn
+      (send-command instance (current-model) "reset")
+      (cleanup instance))))
 
 ;; Close any open sockets
 (defun delete-json-netstring-module (instance)
@@ -201,18 +204,18 @@
 ;; Signal remote environment that model is about to run
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
-      (bordeaux-threads:with-recursive-lock-held 
-       ((ready-lock instance))
-       (progn
-	 (if (sync instance) (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t))
-         (send-command instance (current-model) "model-run")
-         (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))
-         ))))
+    (bordeaux-threads:with-recursive-lock-held 
+        ((ready-lock instance))
+      (progn
+        (if (sync instance) (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t))
+        (send-command instance (current-model) "model-run")
+        (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))
+        ))))
 
 ;; Signal remote environment that model has stopped running
 (defun run-end-json-netstring-module (instance)
   (if (current-model)
-      (send-command instance (current-model) "model-stop")))
+    (send-command instance (current-model) "model-stop")))
 
 ;; JNI Module Definition
 (define-module jni nil nil
