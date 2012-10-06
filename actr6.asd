@@ -17,3 +17,6 @@
 	       :actr6.other
 	       )
   )
+
+(defmethod perform :after ((op asdf:load-op) (system (eql (find-system :actr6))))
+  (funcall (intern (symbol-name 'mp-print-versions))))
