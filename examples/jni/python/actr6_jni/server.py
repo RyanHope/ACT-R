@@ -30,6 +30,8 @@ class ACTR_Protocol(LineReceiver):
             d.trigger(e="connectionMade", model=None, params=None)
 
     def connectionLost(self, reason):
+        self.factory.clock.setTime(0.0)
+        self.clearLineBuffer()
         for d in self.factory.dispatchers:
             d.trigger(e="connectionLost", model=None, params=None)
 
