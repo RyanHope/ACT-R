@@ -46,9 +46,10 @@
 ;; having to write a lot of implementation specific code
 ;;
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (asdf:load-system :iolib)
-  (asdf:load-system :bordeaux-threads)
-  (asdf:load-system :cl-json))
+  (let ((*compile-file-pathname* nil))
+    (asdf:load-system :iolib)
+    (asdf:load-system :bordeaux-threads)
+    (asdf:load-system :cl-json)))
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
