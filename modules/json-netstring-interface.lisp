@@ -1,6 +1,5 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Filename    : json-netstring-interface.lis                                 ;;
+;; Filename    : json-interface.lisp                                          ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Author      : Ryan M. Hope <rmh3093@gmail.com>
@@ -12,13 +11,14 @@
 ;; Description : This module provides a way for any any remote environment to
 ;;               interface with ACT-R over a TCP connection.
 ;;
-;;               Each TCP call is comprised of a Netstring wrapped, JSON
-;;               encoded array. The array has 3 required elements:
+;;               Each TCP call is comprised of a JSON encoded array terminated
+;;               with a carraige return and linefeed. The array has 3 required
+;;               elements:
 ;;                   1) The name or id of current model 
 ;;                   2) The method being invoked
 ;;                   3) An array of optional parameters for the invoked method
 ;;
-;;               Ex: "45:"[\"model1\",\"device-move-cursor-to\",[[234,45]]]","
+;;               Ex: "[\"model1\",\"device-move-cursor-to\",[[234,45]]]"
 ;;
 ;;               The remote environment should implement a server interface
 ;;               which listens for connections from ACT-R on a given port. This
@@ -41,21 +41,14 @@
 ;;               - Add support for PAAV module
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; Load some libraries so that this works on multiple implementations with out
-;; having to write a lot of implementation specific code
-;;
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((*compile-file-pathname* nil))
     (asdf:load-system :usocket)
     (asdf:load-system :bordeaux-threads)
     (asdf:load-system :cl-json)))
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Class for the JNI module instance
-;; Holds per-model device information
-(defclass jni-module ()
+(defclass json-interface-module ()
   ((sync :accessor sync :initform nil)
    (socket :accessor socket :initform nil)
    (stream :accessor stream :initform nil)
@@ -67,8 +60,7 @@
    (display :accessor display :initform nil)
    (cursor-loc :accessor cursor-loc :initform '(0 0))))
 
-;; Read TCP stream from remote environment and process the commands
-(defmethod read-stream ((instance jni-module))
+(defmethod read-stream ((instance json-interface-module))
   (handler-case
       (loop
         (let* ((s (json:decode-json-from-string (read-line (stream instance))))
@@ -101,13 +93,16 @@
             (new-word-sound (pop params)))
            ((string= method "new-other-sound")
             (new-other-sound (pop params) (pop params) (pop params) (pop params))))))
+    (socket-error
+     ()
+     (print-warning "Socket error..")
+     (cleanup instance))
     (end-of-file
      ()
      (print-warning "Remote connection closed.")
      (cleanup instance))))
 
-;; Encode method and params with JSON then send over socket as a netstring
-(defmethod send-command ((instance jni-module) mid method &rest params)
+(defmethod send-command ((instance json-interface-module) mid method &rest params)
   (if (socket instance)
     (progn
       (write-string (json:encode-json-to-string (vector mid method params)) (stream instance))
@@ -115,58 +110,49 @@
       (write-char #\linefeed (stream instance))
       (force-output (stream instance)))))
 
-(defmethod send-mp-time ((instance jni-module))
+(defmethod send-mp-time ((instance json-interface-module))
   (bordeaux-threads:with-recursive-lock-held 
       ((time-lock instance))
     (progn
       (send-command instance (current-model) "set-mp-time" (mp-time))
       (bordeaux-threads:condition-wait (time-cond instance) (time-lock instance)))))
 
-(defmethod cleanup ((instance jni-module))
+(defmethod cleanup ((instance json-interface-module))
   (if (socket instance)
     (progn
       (usocket:socket-close (socket instance))
       (setf (socket instance) nil))))
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defmethod device-handle-keypress ((instance jni-module) key)
+(defmethod device-handle-keypress ((instance json-interface-module) key)
   (send-command instance (current-model) "keypress" (char-code key)))
 
-(defmethod get-mouse-coordinates ((instance jni-module))
+(defmethod get-mouse-coordinates ((instance json-interface-module))
   (cursor-loc instance))
 
-(defmethod cursor-to-vis-loc ((instance jni-module))
+(defmethod cursor-to-vis-loc ((instance json-interface-module))
   nil)
 
-(defmethod device-move-cursor-to ((instance jni-module) loc)
+(defmethod device-move-cursor-to ((instance json-interface-module) loc)
   (send-command instance (current-model) "mousemotion" loc))
 
-(defmethod device-handle-click ((instance jni-module))
+(defmethod device-handle-click ((instance json-interface-module))
   (send-command instance (current-model) "mouseclick"))
 
-(defmethod device-speak-string ((instance jni-module) msg)
+(defmethod device-speak-string ((instance json-interface-module) msg)
   (send-command instance (current-model) "speak" msg))
 
-(defmethod build-vis-locs-for ((instance jni-module) vis-mod)
+(defmethod build-vis-locs-for ((instance json-interface-module) vis-mod)
   (declare (ignore vis-mod))
   (if (display instance)
     (mapcar 'car (display instance))))
 
-(defmethod vis-loc-to-obj ((instance jni-module) vis-loc)
+(defmethod vis-loc-to-obj ((instance json-interface-module) vis-loc)
   (if (display instance)
     (cdr (assoc vis-loc (display instance)))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defun jni-device (host port &key sync)
+(defun json-interface (host port &key sync)
   (if (current-model)
-    (let ((instance (get-module jni)))
+    (let ((instance (get-module json-interface)))
       (if (socket instance)
         instance
         (handler-case
@@ -185,23 +171,19 @@
            (print-warning "Timeout. Is remote environment server running?")
            nil))))))
 
-;; Create a new instance of the main class
 (defun create-json-netstring-module (name)
   (declare (ignore name))
-  (make-instance 'jni-module))
+  (make-instance 'json-interface-module))
 
-;; Signal remote environment to reset itself to a default/initial state
 (defun reset-json-netstring-module (instance)
   (if (current-model)
     (progn
       (send-command instance (current-model) "reset")
       (cleanup instance))))
 
-;; Close any open sockets
 (defun delete-json-netstring-module (instance)
   (cleanup instance))
 
-;; Signal remote environment that model is about to run
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
     (bordeaux-threads:with-recursive-lock-held 
@@ -209,18 +191,15 @@
       (progn
         (if (sync instance) (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t))
         (send-command instance (current-model) "model-run")
-        (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))
-        ))))
+        (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))))))
 
-;; Signal remote environment that model has stopped running
 (defun run-end-json-netstring-module (instance)
   (if (current-model)
     (send-command instance (current-model) "model-stop")))
 
-;; JNI Module Definition
-(define-module jni nil nil
+(define-module json-interface nil nil
   :version "1.0"
-  :documentation "Module based manager for remote TCP environments using JSON & Netstrings"
+  :documentation "Module based manager for remote TCP environments using JSON"
   :creation create-json-netstring-module
   :reset reset-json-netstring-module
   :delete delete-json-netstring-module

@@ -1,6 +1,8 @@
-#-:ACT-R-6.0 (load "~/workspace/actr6/load-act-r-6.lisp")
+(handler-case
+    (asdf:load-system 'actr6)
+  (error () #-:ACT-R-6.0 (load "~/workspace/actr6/load-act-r-6.lisp")))
 
-(define-model jni-test
+(define-model json-test
   
   (chunk-type (visual-location-ext (:include visual-location)) quad)
   (chunk-type (fixation-cross (:include visual-object)))
@@ -416,8 +418,8 @@
   
   )
 
-(defun test-jni ()
-  (if (install-device (jni-device "localhost" 5555 :sync .1))
+(defun test-ji ()
+  (if (install-device (json-interface "localhost" 5555 :sync .1))
       (let ((start (get-internal-real-time)))
 	(run-full-time 30 :real-time nil)
 	(format nil "~f" (/ (- (get-internal-real-time) start) internal-time-units-per-second)))))
