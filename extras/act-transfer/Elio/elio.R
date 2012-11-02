@@ -1,0 +1,53 @@
+# R-file to plot the data from the Elio experiment and model.
+
+# Experimental data. Have to deduce them from the paper
+# First 10 data points are from a power law
+
+t <- 2.28+8.59*(1:10)^(-.98)
+quartz(width=6,height=6)
+par(lwd=2)
+plot((1:10*5),t,type="b",pch=4,ylim=c(0,10),xlim=c(0,100),main="Component Step latency",xlab="Problem",ylab="Time (s)")
+lines(c(62.5,87.5),c(5.89,3.7),type="b",pch=1)
+lines(c(62.5,87.5),c(5.41,3.09),type="b",pch=2)
+lines(c(62.5,87.5),c(4.88,3.48),type="b",pch=3)
+legend(30,9,legend=c("Training","Control","Transferred integrative","Transferred component"),lty=1,pch=c(4,1:3))
+
+t <- 1.49+6.43*(1:10)^(-1.19)
+quartz(width=6,height=6)
+par(lwd=2)
+plot((1:10*5),t,type="b",pch=4,ylim=c(0,10),xlim=c(0,100),main="Integrative Step latency",xlab="Problem",ylab="Time (s)")
+lines(c(62.5,87.5),c(4.16,2.05),type="b",pch=1)
+lines(c(62.5,87.5),c(2.53,1.66),type="b",pch=2)
+lines(c(62.5,87.5),c(3.69,2.14),type="b",pch=3)
+legend(30,9,legend=c("Training","Control","Transferred integrative","Transferred component"),lty=1,pch=c(4,1:3))
+
+
+# Plot of the model data
+
+data <- read.table("elio.dat")
+names(data) <- c("task","trial","line","RT","answer")
+data$block <- trunc((data$trial+4)/5)
+data$bigblock <- trunc((data$trial + 24)/25)
+data$type <- ifelse((data$task %in% c("procedure-a","PROCEDURE-C") & (data$line %in% c(1,2,4))) | (data$task %in% c("PROCEDURE-B","PROCEDURE-D") & (data$line < 4)), "component","integrative")
+
+data.m <- with(data,tapply(RT,list(task,block,type),mean))
+data.mb <- with(data,tapply(RT,list(task,bigblock,type),mean))
+
+quartz(width=6,height=6)
+par(lwd=2)
+plot((1:10*5),data.m[1,,1],type="b",pch=4,ylim=c(0,10),xlim=c(0,100),main="Component Step latency (model)",xlab="Problem",ylab="Time (s)")
+lines(c(62.5,87.5),data.mb[2,,1],type="b",pch=3)
+lines(c(62.5,87.5),data.mb[3,,1],type="b",pch=2)
+lines(c(62.5,87.5),data.mb[4,,1],type="b",pch=1)
+legend(30,9,legend=c("Training","Control","Transferred integrative","Transferred component"),lty=1,pch=c(4,1:3))
+
+
+
+quartz(width=6,height=6)
+par(lwd=2)
+plot((1:10*5),data.m[1,,2],type="b",pch=4,ylim=c(0,10),xlim=c(0,100),main="Integrative Step latency (model)",xlab="Problem",ylab="Time (s)")
+lines(c(62.5,87.5),data.mb[2,,2],type="b",pch=3)
+lines(c(62.5,87.5),data.mb[3,,2],type="b",pch=2)
+lines(c(62.5,87.5),data.mb[4,,2],type="b",pch=1)
+legend(30,9,legend=c("Training","Control","Transferred integrative","Transferred component"),lty=1,pch=c(4,1:3))
+
