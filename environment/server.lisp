@@ -184,6 +184,19 @@
 ;;;             : * Fixed a bug with stopping the environment while the stepper
 ;;;             :   was open that prevented one from using the stepper if a
 ;;;             :   new environment connection was made.
+;;; 2012.09.07 Dan
+;;;             : * Removed the in-package from message-process based on the
+;;;             :   :actr-env-alone feature.
+;;; 2012.09.21 Dan
+;;;             : * Trying to eliminate an intermittent environment error
+;;;             :   with multiple models in CCL (perhaps elsewhere too just
+;;;             :   unreported).  So adding additional lock-outs so that 
+;;;             :   updates can't occur while the model is running by locking
+;;;             :   during the pre-event-hook and unlocking during the post as
+;;;             :   well as during anything else which calls update handlers.
+;;;             : * The problem with that is if someone breaks the system
+;;;             :   between pre and post it leaves the lock set and basically
+;;;             :   kills the environment -- need a better alternative.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -220,6 +233,7 @@
 
 (defun call-model-environment-hooks (hook &optional (value nil given))
   (setf (environment-control-which-hook *environment-control*) hook)
+  
   (dolist (connection (environment-control-connections *environment-control*))
     (dolist (handler (gethash hook (environment-connection-hooks connection)))
       (when (or (eq (handler-model handler) (current-model))
@@ -246,11 +260,13 @@
     val))
 
 (defun call-all-environment-hooks (hook &optional (value nil given))
+  
   (setf (environment-control-which-hook *environment-control*) hook)
   (dolist (connection (environment-control-connections *environment-control*))
     (dolist (handler (gethash hook (environment-connection-hooks connection)))
       (update-handler handler (if given value handler))))
-  (setf (environment-control-which-hook *environment-control*) nil))
+  (setf (environment-control-which-hook *environment-control*) nil)
+  )
   
 (defun add-pre-hook-if-needed ()
   (unless (environment-control-pre-hook *environment-control*)
@@ -405,8 +421,6 @@
 
 
 (defun message-process (connection)
-  #+(and :allegro :ACTR-ENV-ALONE) (in-package :cl-user)
-  
   (let ((old-string "") ;; be careful about new lines with Scott's read-line
         (input-stream (environment-connection-stream connection)))
     

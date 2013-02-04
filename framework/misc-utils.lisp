@@ -176,6 +176,19 @@
 ;;;             :   are evaluated each time the output is performed so something
 ;;;             :   like (incr x) in the output will result in each different output
 ;;;             :   stream getting a different value).
+;;; 2012.09.28 Dan
+;;;             : * Changed print-warning so that if there are multiple models
+;;;             :   defined and there is a current-model it displays that model in 
+;;;             :   the warning the same way model-warning does.
+;;; 2012.10.02 Dan
+;;;             : * Added declaims so the new print-warning doesn't trigger a bunch
+;;;             :   of warnings in functions that use it.
+;;; 2012.12.19 Dan
+;;;             : * Changed dist from a method to a function so it can handle
+;;;             :   any combination of sequences of numbers, extended it so that
+;;;             :   it works for an arbitrary number of dimensions, and removed
+;;;             :   the coersion from the math since it doesn't seem to matter
+;;;             :   anymore.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -237,6 +250,8 @@
 
 (declaim (ftype (function (t &optional t) t) chunk-spec-variable-p))
 (declaim (ftype (function (t) t) act-r-random))
+(declaim (ftype (function () t) current-model))
+(declaim (ftype (function () t) mp-models))
 
 ;;; WHILE      [Macro]
 ;;; From _On Lisp_.
@@ -354,7 +369,7 @@
 
 (defmacro print-warning (message &rest arguments)
   "Outputs a warning of message and arguments."
-  `(format *error-output* "~&#|Warning: ~@? |#~%" ,message ,@arguments))
+  `(format *error-output* "~&#|Warning~:[~*~;~@[ (in model ~a)~]~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,message ,@arguments))
 
 
 (defun hash-table-keys (ht)
@@ -670,19 +685,14 @@
   (polar-move-xy (coerce loc 'vector) (coerce move 'vector)))
 
 ;;; DIST      [Function]
-;;; Description : Computes the distance between two locations (xy pairs, not
-;;;             : chunks) using the  'real' hypoteneuse distance.
+;;; Description : Computes the distance between two points in N-dimensional space
+;;; loc1 and loc2 which can each be any sequence of coordnates and N is the size 
+;;; smaller of the sequences.
 
-(defgeneric dist (loc1 loc2)
-  (:documentation "Computes the distance in pixels between two XY locations"))
-
-(defmethod dist ((loc1 vector) (loc2 vector))
-  (sqrt-coerced (+ (expt-coerced (- (px loc1) (px loc2)) 2)
-                   (expt-coerced (- (py loc1) (py loc2)) 2))))
-
-(defmethod dist ((loc1 list) (loc2 list))
-  (dist (coerce loc1 'vector) (coerce loc2 'vector)))
-
+(defun dist (loc1 loc2)
+  (sqrt (reduce '+ (map 'vector (lambda (x1 x2)
+                                  (expt (- x1 x2) 2))
+                     loc1 loc2) :initial-value 0)))
 
 
 (defgeneric objs-match-slotval (lst slot-name value)

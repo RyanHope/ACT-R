@@ -1571,7 +1571,8 @@
     (mouse-left-click))
   
   (defmethod device-handle-keypress ((device capi:interface) key)
-    (key-press key)  )
+    (capi:activate-pane device) 
+    (capi:execute-with-interface device 'key-press key))
   
   (defmethod device-move-cursor-to ((device capi:interface) xyloc)
     (multiple-value-bind (x y) (capi:convert-relative-position device (capi:element-screen device) (svref xyloc 0) (svref xyloc 1))

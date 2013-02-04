@@ -87,6 +87,18 @@
 ;;;             :   because in a multiple model situation the output should
 ;;;             :   be based on the owning model's settings instead of whichever
 ;;;             :   model (if any) happens to be current.
+;;; 2012.08.10 Dan
+;;;             : * Support more than one fixation ring per window since 
+;;;             :   multiple models may be sharing a device by using the
+;;;             :   model name in a tag.
+;;; 2012.08.31 Dan
+;;;             : * Added env-window-click so that I can catch all the user
+;;;             :   clicks on the environment side window and call the
+;;;             :   rpm-window-click-event-handler appropriately.
+;;; 2012.09.21 Dan
+;;;             : * Grabbing the environment lock before sending the updates
+;;;             :   with send-env-window-update.
+;;;             : * Bad idea - can deadlock things...
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -159,13 +171,13 @@
 (defmethod device-update-attended-loc ((wind visible-virtual-window) xyloc)
   
   (when (and (visual-fixation-marker) (not (eq wind (visual-fixation-marker))))
-    (send-env-window-update (list 'clearattention (id wind))))
+    (send-env-window-update (list 'clearattention (id wind) (current-model))))
   
   (setf (visual-fixation-marker) wind)
   
   (if xyloc
-      (send-env-window-update (list 'attention (id wind) (px xyloc) (py xyloc)))
-    (send-env-window-update (list 'clearattention (id wind)))))
+      (send-env-window-update (list 'attention (id wind) (px xyloc) (py xyloc) (current-model)))
+    (send-env-window-update (list 'clearattention (id wind) (current-model)))))
 
 
 ;;; Redefine the vw-output command since in a multiple model situation
@@ -323,6 +335,10 @@
     (when button
       (vv-click-event-handler button nil))))
 
+(defun env-window-click (win-name x y)
+  (let ((win (map-env-window-name-to-window win-name)))
+    (when win
+      (rpm-window-click-event-handler win (vector x y)))))
 
 #|
 This library is free software; you can redistribute it and/or

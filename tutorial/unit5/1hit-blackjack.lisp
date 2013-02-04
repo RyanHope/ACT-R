@@ -193,7 +193,7 @@
   
   ;; create a device for the model to interact with
   
-  (install-device (make-rpm-window :visible nil))
+  (install-device (open-exp-window "" :visible nil))
   
   ;; This type holds all the game info 
   

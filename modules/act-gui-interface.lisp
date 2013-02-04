@@ -137,6 +137,9 @@
 ;;; 2012.07.12 Dan
 ;;;             : * Added the exp-window-owner function because there are times
 ;;;             :   when it would be useful to know that.
+;;; 2012.12.12 Dan
+;;;             : * Adding a check to make sure that the text is a string in
+;;;             :   add-text-to-exp-window.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -463,17 +466,19 @@
 
 (defun add-text-to-exp-window (&key (x 0) (y 0) (text "") (height 20) (width 75) (color 'black) (window nil))
   "Create and display a text item in the experiment window"
-  (aif (determine-exp-window window)
-       (let ((item (make-static-text-for-rpm-window it
-                                                    :text text 
-                                                    :x x
-                                                    :y y
-                                                    :width width
-                                                    :height height
-                                                    :color color)))
-         (add-visual-items-to-rpm-window it item)
-         item)
-       (print-warning "No window available for adding a text item.")))
+  (if (stringp text)
+      (aif (determine-exp-window window)
+           (let ((item (make-static-text-for-rpm-window it
+                                                        :text text 
+                                                        :x x
+                                                        :y y
+                                                        :width width
+                                                        :height height
+                                                        :color color)))
+             (add-visual-items-to-rpm-window it item)
+             item)
+           (print-warning "No window available for adding a text item."))
+    (print-warning "Text must be a string in add-text-to-exp-window cannot add ~s." text)))
 
 ;;; ADD-BUTTON-TO-EXP-WINDOW  [Function]
 ;;; Description : Build a button item based on the parameters supplied and

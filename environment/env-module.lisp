@@ -93,6 +93,8 @@
 ;;;             :   to existing models.
 ;;; 2011.09.12 Dan
 ;;;             : * Declare env-mode ignored in delete-environment-module.
+;;; 2012.09.07 Dan
+;;;             : * Removed the feature switches for setting the version.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -191,8 +193,7 @@
   :params 'environment-params
   :creation 'create-environment-module
   :reset '(nil reset-environment-module)
-  :version #+:ACTR-ENV-ALONE "3.0-s"
-           #-:ACTR-ENV-ALONE "3.0"
+  :version "3.0"
   :run-start 'update-environment-run-start-hooks
   :run-end 'update-environment-run-end-hooks
   :documentation "A module to handle the environment connection if opened"

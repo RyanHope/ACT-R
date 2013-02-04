@@ -35,7 +35,7 @@ set window_config(.stepper) \
     "500x550+[expr $screen_center_x - 250]+[expr $screen_center_y - 275]"
 
 set window_config(.options) \
-    "350x240+[expr $screen_center_x - 175]+[expr $screen_center_y - 120]"
+    "450x274+[expr $screen_center_x - 225]+[expr $screen_center_y - 137]"
 
 set window_config(.visicon) \
     "660x150+[expr $screen_center_x - 330]+[expr $screen_center_y - 100]"

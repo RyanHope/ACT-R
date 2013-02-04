@@ -174,6 +174,9 @@
 ;;; 2012.05.07 Dan
 ;;;             : * Make the ACL device support dependent on the Windows version
 ;;;             :   only and print a warning for the others.
+;;; 2012.08.24 Dan
+;;;             : * Added the switches to load the new ccl-cocoa device and
+;;;             :   removed the mcl device.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -517,10 +520,11 @@
 
 #+(and :allegro-ide (not :mswindows)) (print-warning "Native ACL device not available for Mac or Linux versions because~%they lack the commands for controlling the mouse and keyboard as described here~%http://www.franz.com/support/documentation/6.2/doc/cggtk-relnotes.html#2.3~%")
 
-#+:digitool (setf *device-interface-pathname* "ACT-R6:devices;mcl;")
+;; #+:digitool (setf *device-interface-pathname* "ACT-R6:devices;mcl;")
 
 #+:lispworks (setf *device-interface-pathname* "ACT-R6:devices;lw;")
 
+#+(and :clozure :darwin :apple-objc :ccl-1.8) (setf *device-interface-pathname* "ACT-R6:devices;ccl-cocoa;")
 
 ;;; Load the virtual device
 

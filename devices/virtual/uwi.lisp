@@ -50,6 +50,10 @@
 ;;;             : * The loc-chunk slot now holds a hash-table since multiple
 ;;;             :   models could be sharing the window and each will have its
 ;;;             :   own cursor chunk.
+;;; 2012.10.02 Dan
+;;;             : * Make-rpm-window now uses print warning to report when there
+;;;             :   isn't a visible window available when one is requested and
+;;;             :   returns a virtual on instead.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -215,8 +219,10 @@
   (if visible
       (if (and (visible-virtuals-available?) (null class))
           (make-instance 'visible-virtual-window :window-title title :width width :height height :x-pos x :y-pos y)
-        (format t "Cannot make a visible window, you must use virtual.~%"))
-      (make-instance (if class class 'rpm-virtual-window) :window-title title :width width :height height :x-pos x :y-pos y)))
+        (progn
+          (print-warning "Cannot create a visible window.  Using a virtual window instead.")
+          (make-instance 'rpm-virtual-window :window-title title :width width :height height :x-pos x :y-pos y)))
+    (make-instance (if class class 'rpm-virtual-window) :window-title title :width width :height height :x-pos x :y-pos y)))
 
 ;;; MAKE-BUTTON-FOR-RPM-WINDOW  [Method]
 ;;; Description : Build and return a button-dialog-item based on the

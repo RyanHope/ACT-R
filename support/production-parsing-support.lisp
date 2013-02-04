@@ -111,6 +111,8 @@
 ;;;             :   original *error-stream* since otherwise they are lost.
 ;;;             :   So, create-production has to do that when it is successful
 ;;;             :   as well as when it fails.
+;;; 2012.12.06 Dan
+;;;             : * Don't allow an unnecessary empty buffer modification now.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -1322,7 +1324,10 @@
           
           (#\=
            (cond ((= (length seg) 1)
-                  (push-last (list cmd) actions))
+                  (push-last (list cmd) actions)
+                  (unless (find (cons #\= (cdr cmd)) conditions :test #'equal :key #'car)
+                    (print-warning "Empty buffer modification action for untested buffer ~s." seg)
+                    (return-from parse-actions :error)))
                  ((= (length seg) 2)
                   (push-last (list cmd (cdr seg)) actions))
                  (t

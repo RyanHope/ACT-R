@@ -388,6 +388,10 @@
 ;;;             :   is specified it will be called with 3 parameters -- the p1 index
 ;;;             :   the p2 index and either the name of a test function which failed
 ;;;             :   or nil if no test function was called.
+;;; 2012.11.20 Dan
+;;;             : * Fixed a bug with how the comment string for the compiled production
+;;;             :   was set when there's a dropout buffer which only occurs in the
+;;;             :   conditions of the second production.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -1493,6 +1497,7 @@
                   (mapcan #'(lambda (x)
                               (let ((comp-type (get-compilation-type-struct x module)))
                                 (when (and (comp-buffer-type-drop-out comp-type)
+                                           (numberp (cdr (assoc x (production-buffer-indices p1))))
                                            (not (zerop (logand (cdr (assoc x (production-buffer-indices p1))) 4))))  ;; require the request bit be set in the first production's usage
                                   (list (aif (chunk-copied-from-fct (cdr (assoc (read-from-string (format nil "=~a" x)) (production-bindings p2))))
                                              it

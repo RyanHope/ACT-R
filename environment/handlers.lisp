@@ -94,6 +94,17 @@
 ;;; 2012.03.21 Dan
 ;;;             : * Use with-parameters instead of explicitly saving and 
 ;;;             :   restoring :cmdt in the output handler.
+;;; 2012.09.21 Dan
+;;;             : * Moving the let for *standard-output* in the output 
+;;;             :   handler to avoid potential issues between the closeing
+;;;             :   of the string stream and restoring *standard-output*.
+;;; 2012.09.24 Dan
+;;;             : * Adding a finish-output to the output-handler before 
+;;;             :   closing the stream to be even more careful...
+;;; 2012.10.25 Dan
+;;;             : * Fix a problem with the output-handler when there isn't
+;;;             :   a current model -- it doesn't use with-parameters now when
+;;;             :   there isn't a model.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -234,10 +245,42 @@
   (let ((model (aif (handler-model handler) it (current-model))))
     (cond ((and (use-model handler) (valid-model model))
            (with-model-eval model
-             (let* ((s (make-string-output-stream))
-                    (*standard-output* s))
+             (let* ((s (make-string-output-stream)))
                (unwind-protect 
-                   (with-parameters-fct (:cmdt s)
+                   (let ((*standard-output* s))
+                     (with-parameters-fct (:cmdt s)
+                       (multiple-value-bind (result success)
+                           (safe-update-evaluation handler arg)
+                         (when success
+                           (setf (update-value handler) (get-output-stream-string s))
+                           (when (zerop (length (update-value handler)))
+                             (setf (update-value handler) "EMPTY_ENV_STRING"))
+                           (send-update handler)
+                           result))))
+                 (progn
+                   (finish-output s)
+                   (close s))))))
+          ((use-model handler)
+           (print-warning "Environment trying to use model ~s which no longer exists." model))
+          (t
+           (let* ((s (make-string-output-stream)))
+             (if (valid-model model)
+                 (unwind-protect 
+                     (let ((*standard-output* s))
+                       (with-parameters-fct (:cmdt s)
+                         (multiple-value-bind (result success)
+                             (safe-update-evaluation handler arg)
+                           (when success
+                             (setf (update-value handler) (get-output-stream-string s))
+                             (when (zerop (length (update-value handler)))
+                               (setf (update-value handler) "EMPTY_ENV_STRING"))
+                             (send-update handler)
+                             result))))
+                   (progn
+                     (finish-output s)
+                     (close s)))
+               (unwind-protect 
+                   (let ((*standard-output* s))
                      (multiple-value-bind (result success)
                          (safe-update-evaluation handler arg)
                        (when success
@@ -247,21 +290,10 @@
                          (send-update handler)
                          result)))
                  (progn
-                   (close s))))))
-          ((use-model handler)
-           (print-warning "Environment trying to use model ~s which no longer exists." model))
-          (t
-           (let* ((s (make-string-output-stream))
-                  (*standard-output* s))
-             (multiple-value-bind (result success)
-                 (safe-update-evaluation handler arg)
-               (when success
-                 (setf (update-value handler) (get-output-stream-string s))
-                 (when (zerop (length (update-value handler)))
-                   (setf (update-value handler) "EMPTY_ENV_STRING"))
-                 (send-update handler)
-                 (close s)
-                 result)))))))
+                   (finish-output s)
+                   (close s)))
+               
+               ))))))
     
 
 (defmethod delete-handler ((handler environment-handler) connection)

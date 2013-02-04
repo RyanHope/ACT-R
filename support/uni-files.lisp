@@ -228,6 +228,18 @@
 ;;;            : * Added a uni-report-error that gets defined even when 
 ;;;            :   everything else doesn't so that all Lisps have that and
 ;;;            :   can report a meaningful error in some places.
+;;; 2012.09.07 Dan
+;;;            : * Removed all the code which was needed with :actr-env-alone.
+;;;            : * Moved the (require :sock) for ACL here from the environment-
+;;;            :   loader file.
+;;;            : * Changed uni-run-process so that it always runs in the same
+;;;            :   package as the ACT-R code was loaded into.  Previously it
+;;;            :   only forced a package if :packaged-actr was set, but that
+;;;            :   caused issues if some other "non-default" package was set
+;;;            :   since some Lisps run new threads in cl-user by default.
+;;;            : * The allegro-ide uni-process-system-events now includes the
+;;;            :   cg:: package on process-pending-events so it works right
+;;;            :   when ACT-R is loaded in some other package.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -247,9 +259,10 @@
 
 #+:sbcl (eval-when (:compile-toplevel :load-toplevel) (require 'sb-bsd-sockets))
 
-;(in-package :cl-user)
+#+:allegro (eval-when (:compile-toplevel :load-toplevel :execute)
+             (require :sock))
 
-#+(and :allegro-ide (not :packaged-actr) (not :ACTR-ENV-ALONE)) (in-package :cg-user)
+(defparameter *actr-default-package-name* *package*)
 
 ;;; The following functions need to be defined for every Lisp with which
 ;;; The environment is going to be used.  Note the ordering of the allegro/
@@ -303,34 +316,23 @@
 ;;; in a new process.  It creates a new process that runs the specified 
 ;;; function (in the appropriate package) and returns that process.
 
-#+:allegro 
+#+(and :allegro (not :allegro-ide))
 (defun uni-run-process (name function)
   (mp::process-run-function name
                             #'(lambda ()
-                                #-:packaged-actr (in-package :cl-user)
-                                #+:packaged-actr (in-package :act-r)
-                                (funcall function))))
+                                (let ((*package* *actr-default-package-name*))
+                                  (funcall function)))))
 
 
-#+(and :allegro-ide (not :ACTR-ENV-ALONE))
+#+:allegro-ide
 (defun uni-run-process (name function)
   (let ((debug-pane *standard-output*))
     (mp::process-run-function name 
                               #'(lambda ()
                                   (let ((*standard-output* debug-pane)
-                                        (*error-output* debug-pane))
-                                    #-:packaged-actr (in-package :cg-user)
-                                    #+:packaged-actr (in-package :act-r)
+                                        (*error-output* debug-pane)
+                                        (*package* *actr-default-package-name*))
                                     (funcall function)))))) 
-
-#+(and :allegro :ACTR-ENV-ALONE)
-(defun uni-run-process (name function)
-    (mp::process-run-function name 
-                              #'(lambda ()
-                                  (let ((*standard-output* *global-output-stream*)
-                                        (*error-output* *global-output-stream*))
-                                    (in-package :cl-user)
-                                    (funcall function))))) 
 
 
 
@@ -341,44 +343,21 @@
                           #'(lambda ()
                               (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
                                     (*standard-output* front)
-                                    (*error-output* front))
-                                #+:packaged-actr (in-package :act-r)
+                                    (*error-output* front)
+                                    (*package* *actr-default-package-name*))
                                 (funcall function))))))
 
 
-#+(and :openmcl (not :ACTR-ENV-ALONE))
+#+:openmcl
 (defun uni-run-process (name function)
   (let ((front *standard-output*)) 
     (process-run-function (list :name name) 
                           #'(lambda ()
                               (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
                                     (*standard-output* front)
-                                    (*error-output* front))
-                                #+:packaged-actr (in-package :act-r)
+                                    (*error-output* front)
+                                    (*package* *actr-default-package-name*))
                                 (funcall function))))))
-#|
-#+(and :openmcl :ACTR-ENV-ALONE)
-(defun uni-run-process (name function)
-    (process-run-function (list :name name) 
-                              #'(lambda ()
-                                  (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
-                                        (*standard-output* *global-output-stream*)
-                                        (*error-output* *global-output-stream*))
-                                    (funcall function)))))
-|#
-
-
-#+(and :openmcl :ACTR-ENV-ALONE)
-(defun uni-run-process (name function)
-  (let ((front *standard-output*)) 
-    (process-run-function (list :name name) 
-                          #'(lambda ()
-                              (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
-                                    (*standard-output* front)
-                                    (*error-output* front))
-                                #+:packaged-actr (in-package :act-r)
-                                (funcall function))))))
-
 
 
 #+:lispworks
@@ -387,23 +366,23 @@
     (mp::process-run-function name nil
                               #'(lambda ()
                                   (let ((*standard-output* front)
-                                        (*error-output* front)) 
-                                    #+:packaged-actr (in-package :act-r)
+                                        (*error-output* front)
+                                        (*package* *actr-default-package-name*)) 
                                     (funcall function))))))
 
 #+:cmu
 (defun uni-run-process (name function)
   (mp:make-process #'(lambda ()
-                       #+:packaged-actr (in-package :act-r)
-                       (funcall function))
+                       (let ((*package* *actr-default-package-name*))
+                         (funcall function)))
                    :name name))
 
 #+:sbcl
 (defun uni-run-process (name function)
   (sb-thread:make-thread #'(lambda ()
-                       #+:packaged-actr (in-package :act-r)
-                       (funcall function))
-                   :name name))
+                             (let ((*package* *actr-default-package-name*))
+                               (funcall function)))
+                             :name name))
 
 
 ;;; uni-process-kill
@@ -832,7 +811,7 @@
 
 #+:allegro-ide
 (defun uni-process-system-events ()
-  (process-pending-events))
+  (cg::process-pending-events))
 
 #+(and :mcl (not :openmcl))
 (defun uni-process-system-events ()

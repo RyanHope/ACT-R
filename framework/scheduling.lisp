@@ -33,7 +33,7 @@
 ;;;             : [x] The break events and "stopping reason" trace don't go to
 ;;;             :     the output of all models but probably should so that if
 ;;;             :     the traces are split at the model level they all show it.
-;;;             : [ ] Run-full-time and run-until-time both still rely on the
+;;;             : [x] Run-full-time and run-until-time both still rely on the
 ;;;             :     time count in seconds to determine the "end" but that's
 ;;;             :     still got potential problems.
 
@@ -298,6 +298,10 @@
 ;;;             : * Send all the notifications (start, stop, update, terminate)
 ;;;             :   to the models in order using meta-p-model-order instead of
 ;;;             :   maphashing over the model table for consistency.
+;;; 2012.12.06 Dan
+;;;             : * Changed run-sched-queue so that it returns the time in ms
+;;;             :   and then convert that as needed in the "run" functions to
+;;;             :   try and avoid other float issues with math on times.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -415,7 +419,7 @@
         
         (setf (meta-p-events mp) (remove 'dummy-event-function (meta-p-events mp) :key #'evt-action))
         
-        (values (ms->seconds (- (meta-p-time mp) (meta-p-start-time mp))) event-count (meta-p-break mp)))
+        (values (- (meta-p-time mp) (meta-p-start-time mp)) event-count (meta-p-break mp)))
     
     (progn
       (setf (meta-p-running mp) nil)
@@ -566,7 +570,7 @@
              (run-sched-queue (current-mp) #'test :real-time real-time)
            (unless break
              (send-run-terminated-events (current-mp))
-             (if (< time run-time)
+             (if (< time ms-time)
                  (if (null (meta-p-events (current-mp)))
                      (meta-p-output (format-event (make-act-r-event 
                                                    :mstime (meta-p-time (current-mp))
@@ -577,8 +581,8 @@
                                                    :output t
                                                    :mp (current-meta-process))))
                    (progn
-                     (run-full-time (- run-time time) :real-time nil)
-                     (setf time run-time)))
+                     (run-full-time (- run-time (ms->seconds time)) :real-time nil)
+                     (setf time ms-time)))
                (meta-p-output (format-event (make-act-r-event 
                                              :mstime (meta-p-time (current-mp))
                                              :module "------"
@@ -586,7 +590,7 @@
                                              :details "Stopped because time limit reached"
                                              :output t
                                              :mp (current-meta-process))))))
-           (values time events break))))))))
+           (values (ms->seconds time) events break))))))))
 
 (defun run-until-condition (condition &key (real-time nil))
   (verify-current-mp  
@@ -618,7 +622,7 @@
                                            :details "Stopped because condition is true"
                                            :output t
                                            :mp (current-meta-process))))))
-         (values time events break))))))
+         (values (ms->seconds time) events break))))))
 
 (defun run-full-time (run-time &key (real-time nil))
   (verify-current-mp  
@@ -658,7 +662,7 @@
                                              :details "Stopped because time limit reached"
                                              :output t
                                              :mp (current-meta-process)))))
-             (values time events break))))))))
+             (values (ms->seconds time) events break))))))))
 
 (defun dummy-event-function ())
 
@@ -710,7 +714,7 @@
                                                :details "Stopped because time limit reached"
                                                :output t
                                                :mp (current-meta-process)))))
-               (values time events break)))))))))
+               (values (ms->seconds time) events break)))))))))
 
 
 (defun run-n-events (event-count &key (real-time nil))
@@ -743,7 +747,7 @@
                                              :details "Stopped because event limit reached"
                                              :output t
                                              :mp (current-meta-process))))))
-           (values time events break)))))))
+           (values (ms->seconds time) events break)))))))
 
 
 
@@ -793,7 +797,7 @@
                                          :details "Stepping stopped"
                                          :output t
                                          :mp (current-meta-process)))))
-         (values time events break))))))
+         (values (ms->seconds time) events break))))))
 
 (defun schedule-event (time action 
                             &key (maintenance nil)

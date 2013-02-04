@@ -175,6 +175,9 @@
 ;;;             : * Also updating some other code that seems to have been neglected
 ;;;             :   along the way (particularly the :delete-visicon-chunks,
 ;;;             :   :scene-change-threshold, and :viewing-distance parameters).
+;;; 2012.09.07 Dan
+;;;             : * Adding an eye spot for CCL since there's now a device for it.
+;;;             : * Fixed a bug in the environment version of the eye-spot code.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -686,6 +689,38 @@ object, which is used to compute the recognition time."))
 )
 |#
 
+
+
+;;; The CCL code is very similar to the MCL code and basically just copied
+;;; from the attended-loc code in the ccl device by Clayton Stanley and Mike Byrne.
+
+#+(and :clozure :darwin :apple-objc :ccl-1.8)
+(progn
+  (require-compiled "CCL-SIMPLE-VIEW" "ACT-R6:support;ccl-simple-view")
+  
+  (defclass eye-spot (focus-ring)
+  ((easygui::foreground :reader color :initform *blue-color*))
+  (:default-initargs 
+    :view-size #@(9 9)
+    :offset #@(-5 -5)))
+
+(defmethod device-update-eye-loc ((wind window) xyloc)
+  (unless (aand (eye-spot-marker) (eq (type-of it) 'eye-spot)
+                (view-window (eye-spot-marker)) (eq it wind))
+    (setf (eye-spot-marker) (make-instance 'eye-spot)))
+  (when (wptr wind)
+    (update-me (eye-spot-marker) wind xyloc)))
+
+
+(defmethod device-update-eye-loc ((wind window) (xyloc (eql nil)))
+  (when (aand (eye-spot-marker) (eq (type-of it) 'eye-spot)
+              (view-window (eye-spot-marker)) (eq it wind) (wptr wind))
+    (remove-subviews wind (eye-spot-marker)))
+  (setf (eye-spot-marker) nil)))
+  
+  
+
+
 #+:lispworks  ;;mjs
 (progn
   (defvar *eye-diameter* 14)
@@ -889,13 +924,13 @@ object, which is used to compute the recognition time."))
 (defmethod device-update-eye-loc ((wind visible-virtual-window) xyloc)
   
   (when (and (eye-spot-marker) (not (eq wind (eye-spot-marker))))
-    (send-env-window-update (list 'cleareyeloc (id wind))))
+    (send-env-window-update (list 'cleareyeloc (id wind) (current-model))))
   
   (setf (eye-spot-marker) wind)
   
   (if xyloc
-      (send-env-window-update (list 'eyeloc (id wind) (px xyloc) (py xyloc)))
-    (send-env-window-update (list 'cleareyeloc (id wind)))))
+      (send-env-window-update (list 'eyeloc (id wind) (px xyloc) (py xyloc) (current-model)))
+    (send-env-window-update (list 'cleareyeloc (id wind) (current-model)))))
 
 
 ;;; Also need to redefine the AGI open-exp-window function so that

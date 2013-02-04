@@ -560,6 +560,16 @@
 ;;;             :   device.
 ;;; 2012.06.29 Dan
 ;;;             : * Added gray as one of the default color chunks.
+;;; 2012.08.09 Dan
+;;;             : * The state change for update-attended-loc now happens both
+;;;             :   immediately and in an event to avoid issues with multiple
+;;;             :   simultaneous updates and to still allow for proper recording
+;;;             :   of the state transitions.
+;;; 2012.12.19 Dan
+;;;             : * Added xyz-loc to get the vector of screen-x, screen-y, and
+;;;             :   distance. 
+;;;             : * Use xyz-loc in the nearest calculation so that distance 
+;;;             :   matters too (doesn't change anything for default 2D devices).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General description of update
@@ -913,6 +923,10 @@
   (vector (fast-chunk-slot-value-fct chunk 'screen-x)
           (fast-chunk-slot-value-fct chunk 'screen-y)))
           
+(defun xyz-loc (chunk)
+  (vector (fast-chunk-slot-value-fct chunk 'screen-x)
+          (fast-chunk-slot-value-fct chunk 'screen-y)
+          (fast-chunk-slot-value-fct chunk 'distance)))
 
 (defgeneric visicon-update (vis-mod &optional count)
   (:documentation "To be called after every time the visicon changes."))
@@ -947,8 +961,14 @@
                  (null (currently-attended vis-mod))
                  (within-move vis-mod (xy-loc (current-marker vis-mod)))))
     
-      
-    (schedule-event-relative 0 (lambda () (change-state vis-mod :exec 'busy)) :module :vision :output nil)
+    ;; Change it now to avoid problems with simultaneous non-scheduled updates
+    
+    (change-state vis-mod :exec 'busy)
+    
+    ;; Still want to schedule the change so that it gets recorded properly
+    ;; for module tracking purposes.
+    
+    (schedule-event-relative 0 'change-state :params (list vis-mod :exec 'busy) :module :vision :output nil :priority :max)
     
     (schedule-event-relative 
      (randomize-time (move-attn-latency vis-mod))
@@ -1178,19 +1198,19 @@
                                       (when (or (eq (third nearest) 'current)
                                                 (eq (third nearest) 'current-x)
                                                 (eq (third nearest) 'current-y))
-                                        (model-warning "No location has yet been attended so current is assumed to be at 0,0."))
-                                      (car (define-chunks (isa visual-location screen-x 0 screen-y 0)))))))
+                                        (model-warning "No location has yet been attended so current is assumed to be at 0,0,~d." (view-dist vis-mod)))
+                                      (car (define-chunks-fct `((isa visual-location screen-x 0 screen-y 0 distance ,(view-dist vis-mod)))))))))
           
           ;; find the min value
           (dolist (y matching-chunks)
             (let ((cur-val (cond ((eq test 'current)
-                                  (dist (xy-loc y) (xy-loc current-loc)))
+                                  (dist (xyz-loc y) (xyz-loc current-loc)))
                                  ((eq test 'current-x)
                                   (abs (- (fast-chunk-slot-value-fct y 'screen-x) (fast-chunk-slot-value-fct current-loc 'screen-x))))
                                  ((eq test 'current-y)
                                   (abs (- (fast-chunk-slot-value-fct y 'screen-y) (fast-chunk-slot-value-fct current-loc 'screen-y))))
                                  (t
-                                  (dist (xy-loc y) (xy-loc test))))))
+                                  (dist (xyz-loc y) (xyz-loc test))))))
               (if (or (null value) 
                       (< cur-val value))
                   (progn
@@ -1231,15 +1251,9 @@
           
                 (setf matching-chunks matches))
             
-            
-            
-              
-              
-              
             (progn
               (print-warning "Nearest test in a visual-location request must be current, current-x, current-y, clockwise, counterclockwise, or a chunk that is a subtype of visual-location.")
-              (print-warning "Ignoring nearest request for ~S." (third nearest)))))
-          ) 
+              (print-warning "Ignoring nearest request for ~S." (third nearest)))))) 
       
       ;; undo the value slots that were changed for matching purposes
       

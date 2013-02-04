@@ -43,6 +43,11 @@
 ;;;             : * Fixed a bug in the make-line-for-rpm-window method
 ;;;             :   because it wasn't setting the right slot for the color in
 ;;;             :   all cases.
+;;; 2012.08.31  : Dan
+;;;             : * Put the call-next-method back in the rpm-window-click-event-handler
+;;;             :   so that a user method on the rpm-window class gets called.
+;;;             : * Also changed it to passing a vector of the x-y position 
+;;;             :   instead of a list so that it works the same as virtuals.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -85,7 +90,7 @@
 ;;;             : to be defined by the modeler.
 
 (defmethod view-click-event-handler  ((self capi:pinboard-layout) x y )
-  (rpm-window-click-event-handler (capi:element-interface self) (list x y))
+  (rpm-window-click-event-handler (capi:element-interface self) (vector x y))
  ; (call-next-method)
   )
 
@@ -96,7 +101,7 @@
 
 (defmethod rpm-window-click-event-handler ((device rpm-real-window) position)
   (declare (ignore device position))
-  ;(call-next-method)
+  (call-next-method)
   )
 
 

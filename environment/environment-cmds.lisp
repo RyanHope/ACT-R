@@ -61,6 +61,14 @@
 ;;; 2012.02.09 Dan
 ;;;             : * Explicitly close streams made with make-string-output-stream 
 ;;;             :   to be safe.
+;;; 2012.12.18 Dan
+;;;             : * Changed reload-model and safe-load so that they can signal
+;;;             :   an error without opening the interactive debugger because
+;;;             :   that's an issue in the environment particularly with the
+;;;             :   standalones since the error would have to be cleared before
+;;;             :   the environment notice can be displayed, but with CCL that's
+;;;             :   very difficult becuase the background process doesn't have
+;;;             :   access to the terminal...
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -110,7 +118,8 @@
          (error-stream (make-broadcast-stream *error-output* save-stream))
          (*standard-output* display-stream)
          (*error-output* error-stream)
-         (*one-stream-hack* t))
+         (*one-stream-hack* t)
+         (internal-error nil))
     
     (if (or (stepper-open-p) (environment-busy-p))
         (list 0 "Cannot reload if ACT-R is running or if the stepper is open.")
@@ -119,13 +128,19 @@
             (set-environment-busy)   
             (multiple-value-bind (s err) 
                 (ignore-errors 
-                 (if smart-load?
+                 (let ((*debugger-hook* (lambda (c o) 
+                                          (declare (ignore o)) 
+                                          (print-warning "Error aborted automatically by environment.") 
+                                          (setf internal-error c)
+                                          (error c))))
+                   (if smart-load?
                      (reload t)
-                   (reload)))
+                   (reload))))
       
-              (cond ((and (subtypep (type-of err) 'condition)
-                          (not (equal (type-of err) 'unbound-variable)))
-                     (uni-report-error err "Error during reload")
+              (cond ((or internal-error
+                         (and (subtypep (type-of err) 'condition)
+                              (not (equal (type-of err) 'unbound-variable))))
+                     (uni-report-error (if internal-error internal-error err) "Error during reload")
                      (list 0 (get-output-stream-string save-stream)))
                     ((eq s :none)
                      (print-warning "Cannot use reload")
@@ -149,19 +164,27 @@
          (error-stream (make-broadcast-stream *error-output* save-stream))
          (*standard-output* display-stream)
          (*error-output* error-stream)
-         (*one-stream-hack* t))
+         (*one-stream-hack* t)
+         (internal-error nil))
     
     (unwind-protect
         (multiple-value-bind (s err) 
             (ignore-errors 
-             (if compile-it
-                 (compile-and-load file)
-               (load file)))
+             (let ((*debugger-hook* (lambda (c o) 
+                                      (declare (ignore o)) 
+                                      (print-warning "Error aborted automatically by environment.") 
+                                      (setf internal-error c)
+                                      (error c))))
+               
+               (if compile-it
+                   (compile-and-load file)
+                 (load file))))
           (declare (ignore s))
           
-          (cond ((and (subtypep (type-of err) 'condition)
-                      (not (equal (type-of err) 'unbound-variable)))
-                 (uni-report-error err "Error during load model")
+          (cond ((or internal-error
+                     (and (subtypep (type-of err) 'condition)
+                          (not (equal (type-of err) 'unbound-variable))))
+                 (uni-report-error (if internal-error internal-error err) "Error during load model")
                  (list 0 (get-output-stream-string save-stream)))
                 (t
                  (format t "~%#|##  load model complete ##|#~%")

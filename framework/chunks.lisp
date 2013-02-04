@@ -257,6 +257,11 @@
 ;;;             :   add new chunk names that refer to existing chunks.
 ;;; 2012.05.30 Dan
 ;;;             : * Fixed a bug in the create-chunk-alias macro.
+;;; 2012.10.15 Dan
+;;;             : * Changed chunk-back-links to use a hash-table instead of a
+;;;             :   list of lists to improve performance.  Significant reduction
+;;;             :   in time and memory usage when :ncnar is t found in test 
+;;;             :   cases.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -509,7 +514,12 @@
           (dolist (slot-name (act-r-chunk-type-slots (act-r-chunk-chunk-type chunk)))
             (let ((old (gethash slot-name (act-r-chunk-slot-value-lists chunk))))
               (when (chunk-p-fct old)
-                (push (cons new-name slot-name) (chunk-back-links old))))))
+                (let ((bl (chunk-back-links old)))
+                  (if (hash-table-p bl)
+                      (push slot-name (gethash new-name bl))
+                    (let ((ht (make-hash-table)))
+                      (setf (gethash new-name ht) (list slot-name))
+                      (setf (chunk-back-links old) ht))))))))
         
         ;; update its parameters for only those that need it
         
@@ -696,7 +706,13 @@
             (when (and (chunk-p-fct slot-value) (update-chunks-on-the-fly))
               (setf slot-value (true-chunk-name-fct slot-value))
               ;; make the back links
-              (push (cons (act-r-chunk-name chunk) slot-name) (chunk-back-links slot-value)))
+              
+              (let ((bl (chunk-back-links slot-value)))
+                  (if (hash-table-p bl)
+                      (push slot-name (gethash (act-r-chunk-name chunk) bl))
+                    (let ((ht (make-hash-table)))
+                      (setf (gethash (act-r-chunk-name chunk) ht) (list slot-name))
+                      (setf (chunk-back-links slot-value) ht)))))
             
             (setf (gethash slot-name slots-table) slot-value))
           
@@ -763,8 +779,11 @@
   (when (update-chunks-on-the-fly)
     (let ((old (gethash slot-name (act-r-chunk-slot-value-lists c))))
       (when (chunk-p-fct old)
-        (setf (chunk-back-links old) 
-          (remove (cons (act-r-chunk-name c) slot-name) (chunk-back-links old) :test #'equal)))))
+        (let* ((bl (chunk-back-links old))
+               (new-links (remove slot-name (gethash (act-r-chunk-name c) bl))))
+          (if new-links
+              (setf (gethash (act-r-chunk-name c) bl) new-links)
+            (remhash (act-r-chunk-name c) bl))))))
   
   ;; If the new value should be a chunk but isn't
   ;; create one for it
@@ -781,7 +800,12 @@
   (when (and (chunk-p-fct value) (update-chunks-on-the-fly))
     (setf value (true-chunk-name-fct value))
     ;; If it's a chunk save the back link to this chunk
-    (push (cons (act-r-chunk-name c) slot-name) (chunk-back-links value)))
+    (let ((bl (chunk-back-links value)))
+      (if (hash-table-p bl)
+          (push slot-name (gethash (act-r-chunk-name c) bl))
+        (let ((ht (make-hash-table)))
+          (setf (gethash (act-r-chunk-name c) ht) (list slot-name))
+          (setf (chunk-back-links value) ht)))))
   
   ;; Set the new slot value
   
@@ -868,10 +892,10 @@
         ;; that's likely a problem
         
         (when (update-chunks-on-the-fly) 
-          (when (chunk-back-links chunk-name)
+          (when (and (hash-table-p (chunk-back-links chunk-name)) (not (zerop (hash-table-count (chunk-back-links chunk-name)))))
             (model-warning "Chunk ~s is being deleted but it is still used as a slot value in other chunks." chunk-name))
           
-          (when (and (chunk-back-links tn) (not (eq tn chunk-name)))
+          (when (and (not (eq tn chunk-name)) (hash-table-p (chunk-back-links tn)) (not (zerop (hash-table-count (chunk-back-links tn)))))
             (model-warning "Chunk ~s is being deleted but its true name ~s is still used as a slot value in other chunks." chunk-name tn))
           
           ;; Delete all of the back-links to this chunk
@@ -879,8 +903,11 @@
           (dolist (slot-name (act-r-chunk-type-slots (act-r-chunk-chunk-type c)))
             (let ((old (gethash slot-name (act-r-chunk-slot-value-lists c))))
               (when (chunk-p-fct old)
-                (setf (chunk-back-links old) 
-                  (remove (cons tn slot-name) (chunk-back-links old) :test #'equal))))))
+                (let* ((bl (chunk-back-links old))
+                       (new-links (remove slot-name (gethash tn bl))))
+                  (if new-links
+                      (setf (gethash tn bl) new-links)
+                    (remhash tn bl)))))))
         
         ;; Take all the related chunks out of the main hash-table
         
@@ -940,17 +967,23 @@
           (dolist (slot-name (act-r-chunk-type-slots (act-r-chunk-chunk-type c2)))
             (let ((old (gethash slot-name (act-r-chunk-slot-value-lists c2))))
               (when (chunk-p-fct old)
-                (setf (chunk-back-links old) 
-                  (remove (cons chunk-name2 slot-name) (chunk-back-links old) :test #'equal)))))
+                (let* ((bl (chunk-back-links old))
+                       (new-links (remove slot-name (gethash chunk-name2 bl))))
+                  (if new-links
+                      (setf (gethash chunk-name2 bl) new-links)
+                    (remhash chunk-name2 bl))))))
           
           ;; replace all the slot values which hold chunk-name2 with chunk-name1
           
-          (dolist (x (chunk-back-links chunk-name2))
-            (fast-set-chunk-slot-value-fct (car x) (cdr x) chunk-name1)
-            (dolist (notify (notify-on-the-fly-hooks))
-              (funcall notify (car x))))
           
-          (setf (chunk-back-links chunk-name2) nil)))
+          (when (hash-table-p (chunk-back-links chunk-name2))
+            (maphash (lambda (chunk slots)
+                       (dolist (x slots)
+                         (fast-set-chunk-slot-value-fct chunk x chunk-name1)
+                         (dolist (notify (notify-on-the-fly-hooks))
+                           (funcall notify chunk))))
+                     (chunk-back-links chunk-name2))
+            (clrhash (chunk-back-links chunk-name2)))))
       
       chunk-name1)))
 
@@ -1121,13 +1154,16 @@
                        
                        ;; Square up all names for unused chunks
                        
-                       (awhen (chunk-back-links key)
-                              (let ((tn (true-chunk-name-fct key)))
-                                (dolist (x it)
-                                  (fast-set-chunk-slot-value-fct (car x) (cdr x) tn)
-                                  (dolist (notify (notify-on-the-fly-hooks))
-                                    (funcall notify (car x)))))
-                              (setf (chunk-back-links key) nil))
+                       (let ((bl (chunk-back-links key)))
+                         (when (hash-table-p bl)
+                           (let ((tn (true-chunk-name-fct key)))
+                             (maphash (lambda (c ss)
+                                        (dolist (s ss)
+                                          (fast-set-chunk-slot-value-fct c s tn)
+                                          (dolist (notify (notify-on-the-fly-hooks))
+                                            (funcall notify c))))
+                                      bl))
+                           (clrhash bl)))
                        
                        ;; release names of unused chunks
                        
