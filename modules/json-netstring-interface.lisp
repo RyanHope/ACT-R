@@ -51,7 +51,7 @@
 (defclass json-interface-module ()
   ((sync :accessor sync :initform nil)
    (socket :accessor socket :initform nil)
-   (stream :accessor stream :initform nil)
+   (jstream :accessor jstream :initform nil)
    (thread :accessor thread :initform nil)
    (ready-cond :accessor ready-cond :initform (bordeaux-threads:make-condition-variable))
    (ready-lock :accessor ready-lock :initform (bordeaux-threads:make-lock))
@@ -63,7 +63,7 @@
 (defmethod read-stream ((instance json-interface-module))
   (handler-case
       (loop
-        (let* ((s (json:decode-json-from-string (read-line (stream instance))))
+        (let* ((s (json:decode-json-from-string (read-line (jstream instance))))
                (model (pop s))
                (method (pop s))
                (params (pop s)))
@@ -105,10 +105,10 @@
 (defmethod send-command ((instance json-interface-module) mid method &rest params)
   (if (socket instance)
     (progn
-      (write-string (json:encode-json-to-string (vector mid method params)) (stream instance))
-      (write-char #\return (stream instance))
-      (write-char #\linefeed (stream instance))
-      (force-output (stream instance)))))
+      (write-string (json:encode-json-to-string (vector mid method params)) (jstream instance))
+      (write-char #\return (jstream instance))
+      (write-char #\linefeed (jstream instance))
+      (force-output (jstream instance)))))
 
 (defmethod send-mp-time ((instance json-interface-module))
   (bordeaux-threads:with-recursive-lock-held 
@@ -159,7 +159,7 @@
             (progn
               (setf (sync instance) sync)
               (setf (socket instance) (usocket:socket-connect host port))
-              (setf (stream instance) (usocket:socket-stream (socket instance)))
+              (setf (jstream instance) (usocket:socket-stream (socket instance)))
               (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
               instance)
           (usocket:connection-refused-error
