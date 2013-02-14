@@ -131,10 +131,13 @@
       (usocket:socket-close (socket instance)))
   (if (sync-event instance)
       (delete-event (sync-event instance)))
+  (bordeaux-threads:condition-notify (ready-cond instance))
+  (bordeaux-threads:condition-notify (reset-cond instance))
+  (bordeaux-threads:condition-notify (time-cond instance))
   (setf (jstream instance) nil)
   (setf (socket instance) nil)
   (setf (thread instance) nil)
-  (setf (sync-event instance) nil)
+  (setf (sync-event instance) nil))
 
 (defmethod device-handle-keypress ((instance json-interface-module) key)
   (send-command instance (current-model) "keypress" (char-code key)))
@@ -201,6 +204,8 @@
         (bordeaux-threads:with-recursive-lock-held
             ((ready-lock instance))
           (progn
+            (if (not (current-device))
+                (install-device instance))
             (if (sync instance)
                 (setf (sync-event instance)
                       (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
