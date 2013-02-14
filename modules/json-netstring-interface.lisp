@@ -49,12 +49,17 @@
     (asdf:load-system :cl-json)))
 
 (defclass json-interface-module ()
-  ((sync :accessor sync :initform nil)
+  ((hostname :accessor hostname :initform nil)
+   (port :accessor port :initform nil)
+   (sync :accessor sync :initform nil)
+   (sync-event :accessor sync-event :initform nil)
    (socket :accessor socket :initform nil)
    (jstream :accessor jstream :initform nil)
    (thread :accessor thread :initform nil)
    (ready-cond :accessor ready-cond :initform (bordeaux-threads:make-condition-variable))
    (ready-lock :accessor ready-lock :initform (bordeaux-threads:make-lock))
+   (reset-cond :accessor reset-cond :initform (bordeaux-threads:make-condition-variable))
+   (reset-lock :accessor reset-lock :initform (bordeaux-threads:make-lock))
    (time-cond :accessor time-cond :initform (bordeaux-threads:make-condition-variable))
    (time-lock :accessor time-lock :initform (bordeaux-threads:make-lock))
    (display :accessor display :initform nil)
@@ -63,44 +68,46 @@
 (defmethod read-stream ((instance json-interface-module))
   (handler-case
       (loop
-        (let* ((s (json:decode-json-from-string (read-line (jstream instance))))
-               (model (pop s))
-               (method (pop s))
-               (params (pop s)))
-          (declare (ignore model))
-          (cond 
-           ((string= method "ready")
-            (bordeaux-threads:condition-notify (ready-cond instance)))
-           ((string= method "time-set")
-            (bordeaux-threads:condition-notify (time-cond instance)))
-           ((string= method "update-display")
-            (progn
-              (setf (display instance)
-                    (pairlis (eval (read-from-string (pop params)))
-                             (eval (read-from-string (pop params)))))
-              (proc-display :clear (pop params))))
-           ((string= method "trigger-reward")
-            (trigger-reward (pop params)))
-           ((string= method "set-visual-center-point")
-            (set-visual-center-point (pop params) (pop params)))
-           ((string= method "set-cursor-loc")
-            (setf (cursor-loc instance) (pop params)))
-           ((string= method "new-digit-sound")
-            (new-digit-sound (pop params)))
-           ((string= method "new-tone-sound")
-            (new-tone-sound (pop params) (pop params)))
-           ((string= method "new-word-sound")
-            (new-word-sound (pop params)))
-           ((string= method "new-other-sound")
-            (new-other-sound (pop params) (pop params) (pop params) (pop params))))))
-    (socket-error
-     ()
-     (print-warning "Socket error..")
-     (cleanup instance))
-    (end-of-file
-     ()
-     (print-warning "Remote connection closed.")
-     (cleanup instance))))
+       (if (usocket:wait-for-input (list (socket instance)) :timeout 1)
+           (let ((line (read-line (jstream instance))))
+             (if line
+                 (let* ((o (json:decode-json-from-string line))
+                        (model (pop o))
+                        (method (pop o))
+                        (params (pop o)))
+                   (cond 
+                    ((string= method "ready")
+                     (bordeaux-threads:condition-notify (ready-cond instance)))
+                    ((string= method "reset")
+                     (bordeaux-threads:condition-notify (reset-cond instance)))
+                    ((string= method "time-set")
+                     (bordeaux-threads:condition-notify (time-cond instance)))
+                    ((string= method "update-display")
+                     (progn
+                       (setf (display instance)
+                             (pairlis (eval (read-from-string (pop params)))
+                                      (eval (read-from-string (pop params)))))
+                       (proc-display :clear (pop params))))
+                    ((string= method "trigger-reward")
+                     (trigger-reward (pop params)))
+                    ((string= method "set-visual-center-point")
+                     (set-visual-center-point (pop params) (pop params)))
+                    ((string= method "set-cursor-loc")
+                     (setf (cursor-loc instance) (pop params)))
+                    ((string= method "new-digit-sound")
+                     (new-digit-sound (pop params)))
+                    ((string= method "new-tone-sound")
+                     (new-tone-sound (pop params) (pop params)))
+                    ((string= method "new-word-sound")
+                     (new-word-sound (pop params)))
+                    ((string= method "new-other-sound")
+                     (new-other-sound (pop params) (pop params) (pop params) (pop params)))))
+               (return)))
+         (return)))
+    (usocket:bad-file-descriptor-error () (print-warning "Bad file descriptor..."))
+    (usocket:socket-error () (print-warning "Socket error..."))
+    (end-of-file () (print-warning "End of file...")))
+  (cleanup instance))
 
 (defmethod send-command ((instance json-interface-module) mid method &rest params)
   (if (socket instance)
@@ -118,10 +125,16 @@
       (bordeaux-threads:condition-wait (time-cond instance) (time-lock instance)))))
 
 (defmethod cleanup ((instance json-interface-module))
+  (if (jstream instance)
+      (close (jstream instance)))
   (if (socket instance)
-    (progn
-      (usocket:socket-close (socket instance))
-      (setf (socket instance) nil))))
+      (usocket:socket-close (socket instance)))
+  (if (sync-event instance)
+      (delete-event (sync-event instance)))
+  (setf (jstream instance) nil)
+  (setf (socket instance) nil)
+  (setf (thread instance) nil)
+  (setf (sync-event instance) nil)
 
 (defmethod device-handle-keypress ((instance json-interface-module) key)
   (send-command instance (current-model) "keypress" (char-code key)))
@@ -150,58 +163,77 @@
   (if (display instance)
     (cdr (assoc vis-loc (display instance)))))
 
-(defun json-interface (host port &key sync)
-  (if (current-model)
-    (let ((instance (get-module json-interface)))
-      (if (socket instance)
-        instance
-        (handler-case
-            (progn
-              (setf (sync instance) sync)
-              (setf (socket instance) (usocket:socket-connect host port))
-              (setf (jstream instance) (usocket:socket-stream (socket instance)))
-              (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
-              instance)
-          (usocket:connection-refused-error
-           ()
-           (print-warning "Connection refused. Is remote environment server running?")
-           nil)
-          (usocket:timeout-error
-           ()
-           (print-warning "Timeout. Is remote environment server running?")
-           nil))))))
-
 (defun create-json-netstring-module (name)
   (declare (ignore name))
   (make-instance 'json-interface-module))
 
 (defun reset-json-netstring-module (instance)
-  (if (current-model)
-    (progn
-      (send-command instance (current-model) "reset")
-      (cleanup instance))))
+  (print-warning "reset-0")
+  (if (and (socket instance) (jstream instance) (thread instance))
+      (bordeaux-threads:with-recursive-lock-held
+          ((reset-lock instance))
+        (progn
+          (print-warning "reset-1")
+          (send-command instance (current-model) "reset")
+          (bordeaux-threads:condition-wait (reset-cond instance) (reset-lock instance))))
+    (if (and (current-model) (hostname instance) (port instance))
+        (handler-case
+            (progn
+              (print-warning "reset-2")
+              (setf (socket instance) (usocket:socket-connect (hostname instance) (port instance)))
+              (setf (jstream instance) (usocket:socket-stream (socket instance)))
+              (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance)))))
+          (usocket:connection-refused-error () 
+            (progn
+              (print-warning "Connection refused. Is remote environment server running?")
+              (cleanup instance)))
+          (usocket:timeout-error () 
+            (progn
+              (print-warning "Timeout. Is remote environment server running?")
+              (cleanup instance)))))))
 
 (defun delete-json-netstring-module (instance)
   (cleanup instance))
 
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
-    (bordeaux-threads:with-recursive-lock-held 
-        ((ready-lock instance))
       (progn
-        (if (sync instance) (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t))
-        (send-command instance (current-model) "model-run")
-        (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance))))))
+        (bordeaux-threads:with-recursive-lock-held
+            ((ready-lock instance))
+          (progn
+            (if (sync instance)
+                (setf (sync-event instance)
+                      (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
+            (send-command instance (current-model) "model-run")
+            (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance)))))))
 
 (defun run-end-json-netstring-module (instance)
   (if (current-model)
-    (send-command instance (current-model) "model-stop")))
+      (progn
+        (if (sync-event instance)
+            (delete-event (sync-event instance)))
+        (send-command instance (current-model) "model-stop"))))
 
-(define-module json-interface nil nil
-  :version "1.0"
-  :documentation "Module based manager for remote TCP environments using JSON"
-  :creation create-json-netstring-module
-  :reset reset-json-netstring-module
-  :delete delete-json-netstring-module
-  :run-start run-start-json-netstring-module
-  :run-end run-end-json-netstring-module)
+(defun params-json-netstring-module (instance param)
+  (if (consp param)
+      (case (car param)
+        (:jni-hostname (setf (hostname instance) (cdr param)))
+        (:jni-port (setf (port instance) (cdr param)))
+        (:jni-sync (setf (sync instance) (cdr param))))
+    (case param
+      (:jni-hostname (hostname instance))
+      (:jni-port (port instance))
+      (:jni-sync (sync instance)))))
+
+(define-module-fct 'json-interface nil
+                   (list (define-parameter :jni-hostname)
+                         (define-parameter :jni-port)
+                         (define-parameter :jni-sync))
+                   :version "1.0"
+                   :documentation "Module based manager for remote TCP environments using JSON"
+                   :params 'params-json-netstring-module
+                   :creation 'create-json-netstring-module
+                   :reset (list nil nil 'reset-json-netstring-module)
+                   :delete 'delete-json-netstring-module
+                   :run-start 'run-start-json-netstring-module
+                   :run-end 'run-end-json-netstring-module)
