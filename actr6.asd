@@ -6,8 +6,8 @@
   :licence "LGPL-2.1"
   :serial t
   :depends-on (
-	       :actr6.framework
 	       :actr6.support
+	       :actr6.framework
 	       :actr6.core-modules
 	       :actr6.devices
 	       :actr6.commands
