@@ -76,6 +76,8 @@
                         (method (pop o))
                         (params (pop o)))
                    (cond 
+                    ((string= method "disconnect")
+                     (return))
                     ((string= method "ready")
                      (bordeaux-threads:condition-notify (ready-cond instance)))
                     ((string= method "reset")
