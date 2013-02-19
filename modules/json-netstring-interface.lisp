@@ -58,6 +58,8 @@
    (thread :accessor thread :initform nil)
    (ready-cond :accessor ready-cond :initform (bordeaux-threads:make-condition-variable))
    (ready-lock :accessor ready-lock :initform (bordeaux-threads:make-lock))
+   (sync-cond :accessor sync-cond :initform (bordeaux-threads:make-condition-variable))
+   (sync-lock :accessor sync-lock :initform (bordeaux-threads:make-lock))
    (reset-cond :accessor reset-cond :initform (bordeaux-threads:make-condition-variable))
    (reset-lock :accessor reset-lock :initform (bordeaux-threads:make-lock))
    (time-cond :accessor time-cond :initform (bordeaux-threads:make-condition-variable))
@@ -78,6 +80,8 @@
                    (cond 
                     ((string= method "disconnect")
                      (return))
+                    ((string= method "sync")
+                     (bordeaux-threads:condition-notify (sync-cond instance)))
                     ((string= method "ready")
                      (bordeaux-threads:condition-notify (ready-cond instance)))
                     ((string= method "reset")
@@ -117,7 +121,16 @@
       (write-string (json:encode-json-to-string (vector mid method params)) (jstream instance))
       (write-char #\return (jstream instance))
       (write-char #\linefeed (jstream instance))
-      (force-output (jstream instance)))))
+      (force-output (jstream instance))
+      (if (and (sync instance) (not (numberp (sync instance))))
+          (bordeaux-threads:with-recursive-lock-held 
+              ((sync-lock instance))
+            (progn
+              (write-string (json:encode-json-to-string (vector mid "sync" nil)) (jstream instance))
+              (write-char #\return (jstream instance))
+              (write-char #\linefeed (jstream instance))
+              (force-output (jstream instance))
+              (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance))))))))
 
 (defmethod send-mp-time ((instance json-interface-module))
   (bordeaux-threads:with-recursive-lock-held 
@@ -180,14 +193,16 @@
         (progn
           (print-warning "reset-1")
           (send-command instance (current-model) "reset")
-          (bordeaux-threads:condition-wait (reset-cond instance) (reset-lock instance))))
+          (bordeaux-threads:condition-wait (reset-cond instance) (reset-lock instance))
+          (install-device instance)))
     (if (and (current-model) (hostname instance) (port instance))
         (handler-case
             (progn
               (print-warning "reset-2")
               (setf (socket instance) (usocket:socket-connect (hostname instance) (port instance)))
               (setf (jstream instance) (usocket:socket-stream (socket instance)))
-              (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance)))))
+              (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
+              (install-device instance))
           (usocket:connection-refused-error () 
             (progn
               (print-warning "Connection refused. Is remote environment server running?")
@@ -206,9 +221,7 @@
         (bordeaux-threads:with-recursive-lock-held
             ((ready-lock instance))
           (progn
-            (if (not (current-device))
-                (install-device instance))
-            (if (sync instance)
+            (if (numberp (sync instance))
                 (setf (sync-event instance)
                       (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
             (send-command instance (current-model) "model-run")
