@@ -129,9 +129,7 @@
   (if (and (jni-sync instance) (not (numberp (jni-sync instance))))
       (bordeaux-threads:with-recursive-lock-held 
           ((sync-lock instance))
-        (progn
-          (print-warning "Command: ~s, waiting for sync response" method)
-          (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance))))))
+        (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance)))))
 
 (defmethod send-mp-time ((instance json-interface-module))
   (bordeaux-threads:with-recursive-lock-held 
@@ -187,19 +185,16 @@
   (make-instance 'json-interface-module))
 
 (defun reset-json-netstring-module (instance)
-  (print-warning "reset-0")
   (if (and (socket instance) (jstream instance) (thread instance))
       (bordeaux-threads:with-recursive-lock-held
           ((reset-lock instance))
         (progn
-          (print-warning "reset-1")
           (send-command instance (current-model) "reset")
           (bordeaux-threads:condition-wait (reset-cond instance) (reset-lock instance))
           (install-device instance)))
     (if (and (current-model) (jni-hostname instance) (jni-port instance))
         (handler-case
             (progn
-              (print-warning "reset-2")
               (setf (socket instance) (usocket:socket-connect (jni-hostname instance) (jni-port instance)))
               (setf (jstream instance) (usocket:socket-stream (socket instance)))
               (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
