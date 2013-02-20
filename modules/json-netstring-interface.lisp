@@ -4,7 +4,7 @@
 ;;
 ;; Author      : Ryan M. Hope <rmh3093@gmail.com>
 ;;
-;; Copyright   : (c)2012 Ryan M. Hope
+;; Copyright   : (c)2012-2013 Ryan M. Hope
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -49,9 +49,9 @@
     (asdf:load-system :cl-json)))
 
 (defclass json-interface-module ()
-  ((hostname :accessor hostname :initform nil)
-   (port :accessor port :initform nil)
-   (sync :accessor sync :initform nil)
+  ((jni-hostname :accessor jni-hostname :initform nil)
+   (jni-port :accessor jni-port :initform nil)
+   (jni-sync :accessor jni-sync :initform nil)
    (sync-event :accessor sync-event :initform nil)
    (socket :accessor socket :initform nil)
    (jstream :accessor jstream :initform nil)
@@ -115,22 +115,23 @@
     (end-of-file () (print-warning "End of file...")))
   (cleanup instance))
 
+(defmethod send-raw ((instance json-interface-module) string)
+  (write-string string (jstream instance))
+  (write-char #\return (jstream instance))
+  (write-char #\linefeed (jstream instance))
+  (force-output (jstream instance)))
+
 (defmethod send-command ((instance json-interface-module) mid method &rest params)
-  (if (socket instance)
-    (progn
-      (write-string (json:encode-json-to-string (vector mid method params)) (jstream instance))
-      (write-char #\return (jstream instance))
-      (write-char #\linefeed (jstream instance))
-      (force-output (jstream instance))
-      (if (and (sync instance) (not (numberp (sync instance))))
-          (bordeaux-threads:with-recursive-lock-held 
-              ((sync-lock instance))
-            (progn
-              (write-string (json:encode-json-to-string (vector mid "sync" nil)) (jstream instance))
-              (write-char #\return (jstream instance))
-              (write-char #\linefeed (jstream instance))
-              (force-output (jstream instance))
-              (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance))))))))
+  (send-raw instance (json:encode-json-to-string (vector mid method params))))
+
+(defmethod send-command-sync ((instance json-interface-module) mid method &rest params)
+  (send-raw instance (json:encode-json-to-string (vector mid method params)))
+  (if (and (jni-sync instance) (not (numberp (jni-sync instance))))
+      (bordeaux-threads:with-recursive-lock-held 
+          ((sync-lock instance))
+        (progn
+          (print-warning "Command: ~s, waiting for sync response" method)
+          (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance))))))
 
 (defmethod send-mp-time ((instance json-interface-module))
   (bordeaux-threads:with-recursive-lock-held 
@@ -155,7 +156,7 @@
   (setf (sync-event instance) nil))
 
 (defmethod device-handle-keypress ((instance json-interface-module) key)
-  (send-command instance (current-model) "keypress" (char-code key)))
+  (send-command-sync instance (current-model) "keypress" (char-code key)))
 
 (defmethod get-mouse-coordinates ((instance json-interface-module))
   (cursor-loc instance))
@@ -164,13 +165,13 @@
   nil)
 
 (defmethod device-move-cursor-to ((instance json-interface-module) loc)
-  (send-command instance (current-model) "mousemotion" loc))
+  (send-command-sync instance (current-model) "mousemotion" loc))
 
 (defmethod device-handle-click ((instance json-interface-module))
-  (send-command instance (current-model) "mouseclick"))
+  (send-command-sync instance (current-model) "mouseclick"))
 
 (defmethod device-speak-string ((instance json-interface-module) msg)
-  (send-command instance (current-model) "speak" msg))
+  (send-command-sync instance (current-model) "speak" msg))
 
 (defmethod build-vis-locs-for ((instance json-interface-module) vis-mod)
   (declare (ignore vis-mod))
@@ -195,11 +196,11 @@
           (send-command instance (current-model) "reset")
           (bordeaux-threads:condition-wait (reset-cond instance) (reset-lock instance))
           (install-device instance)))
-    (if (and (current-model) (hostname instance) (port instance))
+    (if (and (current-model) (jni-hostname instance) (jni-port instance))
         (handler-case
             (progn
               (print-warning "reset-2")
-              (setf (socket instance) (usocket:socket-connect (hostname instance) (port instance)))
+              (setf (socket instance) (usocket:socket-connect (jni-hostname instance) (jni-port instance)))
               (setf (jstream instance) (usocket:socket-stream (socket instance)))
               (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
               (install-device instance))
@@ -221,9 +222,9 @@
         (bordeaux-threads:with-recursive-lock-held
             ((ready-lock instance))
           (progn
-            (if (numberp (sync instance))
+            (if (numberp (jni-sync instance))
                 (setf (sync-event instance)
-                      (schedule-periodic-event (sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
+                      (schedule-periodic-event (jni-sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
             (send-command instance (current-model) "model-run")
             (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance)))))))
 
@@ -237,19 +238,19 @@
 (defun params-json-netstring-module (instance param)
   (if (consp param)
       (case (car param)
-        (:jni-hostname (setf (hostname instance) (cdr param)))
-        (:jni-port (setf (port instance) (cdr param)))
-        (:jni-sync (setf (sync instance) (cdr param))))
+        (:jni-hostname (setf (jni-hostname instance) (cdr param)))
+        (:jni-port (setf (jni-port instance) (cdr param)))
+        (:jni-sync (setf (jni-sync instance) (cdr param))))
     (case param
-      (:jni-hostname (hostname instance))
-      (:jni-port (port instance))
-      (:jni-sync (sync instance)))))
+      (:jni-hostname (jni-hostname instance))
+      (:jni-port (jni-port instance))
+      (:jni-sync (jni-sync instance)))))
 
 (define-module-fct 'json-interface nil
                    (list (define-parameter :jni-hostname)
                          (define-parameter :jni-port)
                          (define-parameter :jni-sync))
-                   :version "1.0"
+                   :version "2.0"
                    :documentation "Module based manager for remote TCP environments using JSON"
                    :params 'params-json-netstring-module
                    :creation 'create-json-netstring-module
