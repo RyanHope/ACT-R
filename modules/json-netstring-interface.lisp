@@ -56,14 +56,8 @@
    (socket :accessor socket :initform nil)
    (jstream :accessor jstream :initform nil)
    (thread :accessor thread :initform nil)
-   (ready-cond :accessor ready-cond :initform (bordeaux-threads:make-condition-variable))
-   (ready-lock :accessor ready-lock :initform (bordeaux-threads:make-lock))
    (sync-cond :accessor sync-cond :initform (bordeaux-threads:make-condition-variable))
    (sync-lock :accessor sync-lock :initform (bordeaux-threads:make-lock))
-   (reset-cond :accessor reset-cond :initform (bordeaux-threads:make-condition-variable))
-   (reset-lock :accessor reset-lock :initform (bordeaux-threads:make-lock))
-   (time-cond :accessor time-cond :initform (bordeaux-threads:make-condition-variable))
-   (time-lock :accessor time-lock :initform (bordeaux-threads:make-lock))
    (display :accessor display :initform nil)
    (cursor-loc :accessor cursor-loc :initform '(0 0))))
 
@@ -82,12 +76,6 @@
                      (return))
                     ((string= method "sync")
                      (bordeaux-threads:condition-notify (sync-cond instance)))
-                    ((string= method "ready")
-                     (bordeaux-threads:condition-notify (ready-cond instance)))
-                    ((string= method "reset")
-                     (bordeaux-threads:condition-notify (reset-cond instance)))
-                    ((string= method "time-set")
-                     (bordeaux-threads:condition-notify (time-cond instance)))
                     ((string= method "update-display")
                      (progn
                        (setf (display instance)
@@ -121,23 +109,17 @@
   (write-char #\linefeed (jstream instance))
   (force-output (jstream instance)))
 
-(defmethod send-command ((instance json-interface-module) mid method &rest params)
-  (send-raw instance (json:encode-json-to-string (vector mid method params))))
-
-(defmethod send-command-sync ((instance json-interface-module) mid method &rest params)
+(defmethod send-command ((instance json-interface-module) mid method params &key sync)
   (send-raw instance (json:encode-json-to-string (vector mid method params)))
-  (if (and (jni-sync instance) (not (numberp (jni-sync instance))))
+  (if sync
       (bordeaux-threads:with-recursive-lock-held 
           ((sync-lock instance))
         (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance)))))
 
 (defmethod send-mp-time ((instance json-interface-module))
-  (bordeaux-threads:with-recursive-lock-held 
-      ((time-lock instance))
-    (progn
-      (send-command instance (current-model) "set-mp-time" (mp-time))
-      (bordeaux-threads:condition-wait (time-cond instance) (time-lock instance)))))
-
+  (if (jstream instance)
+      (send-command instance (current-model) "set-mp-time" `((mp-time)) :sync t)))
+      
 (defmethod cleanup ((instance json-interface-module))
   (if (jstream instance)
       (close (jstream instance)))
@@ -145,16 +127,14 @@
       (usocket:socket-close (socket instance)))
   (if (sync-event instance)
       (delete-event (sync-event instance)))
-  (bordeaux-threads:condition-notify (ready-cond instance))
-  (bordeaux-threads:condition-notify (reset-cond instance))
-  (bordeaux-threads:condition-notify (time-cond instance))
+  (bordeaux-threads:condition-notify (sync-cond instance))
   (setf (jstream instance) nil)
   (setf (socket instance) nil)
   (setf (thread instance) nil)
   (setf (sync-event instance) nil))
 
 (defmethod device-handle-keypress ((instance json-interface-module) key)
-  (send-command-sync instance (current-model) "keypress" (char-code key)))
+  (send-command instance (current-model) "keypress" (list (char-code key)) :sync (not (numberp (jni-sync instance)))))
 
 (defmethod get-mouse-coordinates ((instance json-interface-module))
   (cursor-loc instance))
@@ -163,13 +143,13 @@
   nil)
 
 (defmethod device-move-cursor-to ((instance json-interface-module) loc)
-  (send-command-sync instance (current-model) "mousemotion" loc))
+  (send-command instance (current-model) "mousemotion" (list loc) :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-handle-click ((instance json-interface-module))
-  (send-command-sync instance (current-model) "mouseclick"))
+  (send-command instance (current-model) "mouseclick" nil :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-speak-string ((instance json-interface-module) msg)
-  (send-command-sync instance (current-model) "speak" msg))
+  (send-command instance (current-model) "speak" (list msg) :sync (not (numberp (jni-sync instance)))))
 
 (defmethod build-vis-locs-for ((instance json-interface-module) vis-mod)
   (declare (ignore vis-mod))
@@ -186,12 +166,9 @@
 
 (defun reset-json-netstring-module (instance)
   (if (and (socket instance) (jstream instance) (thread instance))
-      (bordeaux-threads:with-recursive-lock-held
-          ((reset-lock instance))
-        (progn
-          (send-command instance (current-model) "reset")
-          (bordeaux-threads:condition-wait (reset-cond instance) (reset-lock instance))
-          (install-device instance)))
+      (progn
+        (send-command instance (current-model) "reset" nil :sync t)
+        (install-device instance))
     (if (and (current-model) (jni-hostname instance) (jni-port instance))
         (handler-case
             (progn
@@ -214,21 +191,17 @@
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
       (progn
-        (bordeaux-threads:with-recursive-lock-held
-            ((ready-lock instance))
-          (progn
-            (if (numberp (jni-sync instance))
-                (setf (sync-event instance)
-                      (schedule-periodic-event (jni-sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
-            (send-command instance (current-model) "model-run")
-            (bordeaux-threads:condition-wait (ready-cond instance) (ready-lock instance)))))))
+        (if (numberp (jni-sync instance))
+            (setf (sync-event instance)
+                  (schedule-periodic-event (jni-sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
+        (send-command instance (current-model) "model-run" nil :sync t))))
 
 (defun run-end-json-netstring-module (instance)
   (if (current-model)
       (progn
         (if (sync-event instance)
             (delete-event (sync-event instance)))
-        (send-command instance (current-model) "model-stop"))))
+        (send-command instance (current-model) "model-stop" nil))))
 
 (defun params-json-netstring-module (instance param)
   (if (consp param)
