@@ -46,7 +46,7 @@
   (let ((*compile-file-pathname* nil))
     (asdf:load-system :usocket)
     (asdf:load-system :bordeaux-threads)
-    (asdf:load-system :cl-json)))
+    (asdf:load-system :jsown)))
 
 (defclass json-interface-module ()
   ((jni-hostname :accessor jni-hostname :initform nil)
@@ -67,10 +67,10 @@
        (if (usocket:wait-for-input (list (socket instance)) :timeout 1)
            (let ((line (read-line (jstream instance))))
              (if line
-                 (let* ((o (json:decode-json-from-string line))
-                        (model (pop o))
-                        (method (pop o))
-                        (params (pop o)))
+                 (let* ((o (jsown:parse line))
+                        (model (first o))
+                        (method (second o))
+                        (params (third o)))
                    (cond 
                     ((string= method "disconnect")
                      (return))
@@ -110,15 +110,16 @@
   (force-output (jstream instance)))
 
 (defmethod send-command ((instance json-interface-module) mid method params &key sync)
-  (send-raw instance (json:encode-json-to-string (vector mid method params)))
-  (if sync
-      (bordeaux-threads:with-recursive-lock-held 
-          ((sync-lock instance))
-        (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance)))))
+  (let ((mid (format nil "~a" (current-model))))
+    (send-raw instance (jsown:to-json (list mid method params)))
+    (if sync
+        (bordeaux-threads:with-recursive-lock-held 
+            ((sync-lock instance))
+          (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance))))))
 
 (defmethod send-mp-time ((instance json-interface-module))
   (if (jstream instance)
-      (send-command instance (current-model) "set-mp-time" `((mp-time)) :sync t)))
+      (send-command instance (current-model) "set-mp-time" (list (mp-time)) :sync t)))
       
 (defmethod cleanup ((instance json-interface-module))
   (if (jstream instance)
@@ -134,7 +135,8 @@
   (setf (sync-event instance) nil))
 
 (defmethod device-handle-keypress ((instance json-interface-module) key)
-  (send-command instance (current-model) "keypress" (list (char-code key)) :sync (not (numberp (jni-sync instance)))))
+  (send-command instance (current-model) "keypress" (list (char-code key))
+                :sync (not (numberp (jni-sync instance)))))
 
 (defmethod get-mouse-coordinates ((instance json-interface-module))
   (cursor-loc instance))
@@ -143,13 +145,16 @@
   nil)
 
 (defmethod device-move-cursor-to ((instance json-interface-module) loc)
-  (send-command instance (current-model) "mousemotion" (list loc) :sync (not (numberp (jni-sync instance)))))
+  (send-command instance (current-model) "mousemotion" (list (list (aref loc 0) (aref loc 1)))
+                :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-handle-click ((instance json-interface-module))
-  (send-command instance (current-model) "mouseclick" nil :sync (not (numberp (jni-sync instance)))))
+  (send-command instance (current-model) "mouseclick" nil
+                :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-speak-string ((instance json-interface-module) msg)
-  (send-command instance (current-model) "speak" (list msg) :sync (not (numberp (jni-sync instance)))))
+  (send-command instance (current-model) "speak" (list msg)
+                :sync (not (numberp (jni-sync instance)))))
 
 (defmethod build-vis-locs-for ((instance json-interface-module) vis-mod)
   (declare (ignore vis-mod))
