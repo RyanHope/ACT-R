@@ -61,6 +61,34 @@
    (display :accessor display :initform nil)
    (cursor-loc :accessor cursor-loc :initform '(0 0))))
 
+(defun json->chunk (lst-of-lsts)
+  "generate one define-chunks call from a list of chunk specs"
+  (let ((expressions nil))
+    (dolist (lst lst-of-lsts)
+      (cond ((eql :obj (first lst))
+             (let ((typ  (read-from-string (cdr (first (rest lst)))))
+                   (slots (rest (rest lst)))) 
+               (let ((type-expression `(isa ,typ)))
+                 (dolist (s slots)
+                   (let ((name-values (subseq s 2)))
+                     (dolist (n-v name-values)
+                       (let* ((n (read-from-string (car n-v)))
+                              (v1 (cdr n-v))
+                              (v (if (stringp v1) (read-from-string v1) v1)))
+                         (setq type-expression (append type-expression `(,n ,v)))))))
+                 (setq expressions (append expressions (list type-expression))))))))
+   ; `(define-chunks ,@expressions)
+    (funcall 'define-chunks-fct expressions)  ;;
+    ))
+
+(defun json->chunkpairs (lst-of-lsts)
+  "iterate through each list in in list of json objects returns dotted lists of visloc visobj pairs"
+  (let ((expressions nil))
+    (dolist (lst lst-of-lsts)
+      (setq expressions (append expressions (list (json->chunk lst)))))
+    ;expressions
+    (pairlis (first expressions ) (second expressions ))))
+
 (defmethod read-stream ((instance json-interface-module))
   (handler-case
       (loop
@@ -78,9 +106,7 @@
                      (bordeaux-threads:condition-notify (sync-cond instance)))
                     ((string= method "update-display")
                      (progn
-                       (setf (display instance)
-                             (pairlis (eval (read-from-string (pop params)))
-                                      (eval (read-from-string (pop params)))))
+                       (setf (display instance) (json->chunkpairs (pop params)))
                        (proc-display :clear (pop params))))
                     ((string= method "trigger-reward")
                      (trigger-reward (pop params)))
