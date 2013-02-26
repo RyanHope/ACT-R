@@ -35,7 +35,9 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; TODOs       : - Handle 'cursor-to-vis-loc' properly
+;; TODOs       : - Strings to symbols if prefixed with ":" (ex. ":nameofchunk")
+;;               - Support chunk names
+;;               - Handle 'cursor-to-vis-loc' properly
 ;;               - Add support for 'onset' param for new-*-sound commands
 ;;               - Support multiple simultaneous models
 ;;               - Add support for PAAV module
