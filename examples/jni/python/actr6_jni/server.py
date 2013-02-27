@@ -1,7 +1,7 @@
 # -*- coding:    utf-8 -*-
 #===============================================================================
 # This file is part of ACTR6_JNI.
-# Copyright (C) 2012 Ryan Hope <rmh3093@gmail.com>
+# Copyright (C) 2012-2013 Ryan Hope <rmh3093@gmail.com>
 #
 # ACTR6_JNI is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,8 +21,6 @@ from twisted.protocols.basic import LineReceiver
 from twisted.internet.protocol import Factory
 import json
 
-from clock import MPClock
-
 class ACTR_Protocol(LineReceiver):
 
     def connectionMade(self):
@@ -30,7 +28,6 @@ class ACTR_Protocol(LineReceiver):
             d.trigger(e="connectionMade", model=None, params=None)
 
     def connectionLost(self, reason):
-        self.factory.clock.setTime(0.0)
         self.clearLineBuffer()
         for d in self.factory.dispatchers:
             d.trigger(e="connectionLost", model=None, params=None)
@@ -38,25 +35,26 @@ class ACTR_Protocol(LineReceiver):
     def lineReceived(self, string):
         model, method, params = json.loads(string)
         if method == 'set-mp-time':
-            self.factory.clock.setTime(float(params[0]))
-            self.sendCommand(self.factory.model, "time-set")
+            if self.factory.clock:
+                self.factory.clock.setTime(float(params[0]))
         else:
+            if method == 'reset':
+                if self.factory.clock:
+                    self.factory.clock.setTime(0.0)
             for d in self.factory.dispatchers:
                 d.trigger(e=method, model=model, params=params)
+        self.sendLine(json.dumps([model, "sync", None]))
 
     def sendCommand(self, model, method, *params):
         self.sendLine(json.dumps([model, method, params]))
 
 class JNI_Server(Factory):
 
-    ready = False
-    running = True
     model = None
-    
-    clock = MPClock()
 
-    def __init__(self, env):
+    def __init__(self, env, clock=None):
         self.env = env
+        self.clock = clock
         self.dispatchers = []
 
     def addDispatcher(self, dispatcher):
@@ -68,9 +66,9 @@ class JNI_Server(Factory):
         return self.p
 
     def update_display(self, chunks, clear=False):
-        visual_locations = "(define-chunks %s)" % " ".join([chunk.get_visual_location() for chunk in chunks])
-        visual_objects = "(define-chunks %s)" % " ".join([chunk.get_visual_object() for chunk in chunks])
-        self.p.sendCommand(self.model, "update-display", visual_locations, visual_objects, clear)
+        visual_locations = [chunk.get_visual_location() for chunk in chunks]
+        visual_objects = [chunk.get_visual_object() for chunk in chunks]
+        self.p.sendCommand(self.model, "update-display", [visual_locations, visual_objects], clear)
         
     def set_cursor_location(self, loc):
         self.p.sendCommand(self.model, "set-cursor-loc", loc)
@@ -93,5 +91,5 @@ class JNI_Server(Factory):
     def set_visual_center_pint(self, (x, y)):
         self.p.sendCommand(self.model, "set-visual-center-point", x, y)
 
-    def ready(self):
-        self.p.sendCommand(self.model, "ready")
+    def disconnect(self):
+        self.p.sendCommand(self.model, "disconnect")

@@ -1,12 +1,11 @@
-(handler-case
-    (asdf:load-system 'actr6)
-  (error () #-:ACT-R-6.0 (load "~/workspace/actr6/load-act-r-6.lisp")))
+(clear-all)
 
 (define-model json-test
+
+  (sgp :jni-hostname "localhost" :jni-port 5555 :jni-sync t)
   
-  (chunk-type (visual-location-ext (:include visual-location)) quad)
   (chunk-type (fixation-cross (:include visual-object)))
-  (chunk-type (letterobj (:include visual-object)) quad)
+  (chunk-type (letterobj (:include visual-object)) value letter)
   (chunk-type (background (:include visual-object)))
   (chunk-type color-opposite color opposite)
   (chunk-type find-color found quad)
@@ -178,7 +177,7 @@
      ==>
      =imaginal>
      +visual-location>
-     isa visual-location-ext
+     isa visual-location
      kind letterobj
      )
   
@@ -186,10 +185,10 @@
      =goal>
      isa chunk
      =visual-location>
-     isa visual-location-ext
+     isa visual-location
      kind letterobj
      color =color
-     quad =quad
+     value =quad
      =imaginal>
      isa respond
      start-color nil
@@ -212,15 +211,15 @@
      ==>
      =imaginal>
      +visual-location>
-     isa visual-location-ext
+     isa visual-location
      kind letterobj
      color =color
-     - quad =quad
+     - value =quad
      )
   
   (p found-same-color
      =visual-location>
-     isa visual-location-ext
+     isa visual-location
      kind letterobj
      color =color
      =goal>
@@ -317,7 +316,7 @@
      ==>
      =imaginal>
      +visual-location>
-     isa visual-location-ext
+     isa visual-location
      kind letterobj
      color =start-color
      )
@@ -333,10 +332,10 @@
      start-color =start-color
      start-quad nil
      =visual-location>
-     isa visual-location-ext
+     isa visual-location
      kind letterobj
      color =start-color
-     quad =quad
+     value =quad
      ==>
      =visual-location>
      +goal>
@@ -351,7 +350,7 @@
      isa respond
      - start-quad nil
      =visual-location>
-     isa visual-location-ext
+     isa visual-location
      kind letterobj
      ==>
      +visual>
@@ -359,28 +358,28 @@
      screen-pos =visual-location
      )
   
-  (p* respond-letter
-      =goal>
-      isa respond
-      start-quad =start-quad
-      letter nil
-      - direction nil
-      =visual>
-      isa letterobj
-      value =letter
-      quad =quad
-      ?manual>
-      preparation free 
-      ==>
-      +retrieval>
-      isa quad
-      quad =quad
-      +manual>
-      ISA press-key
-      key =letter
-      =goal>
-      letter =letter
-      )
+  (p respond-letter
+     =goal>
+     isa respond
+     start-quad =start-quad
+     letter nil
+     - direction nil
+     =visual>
+     isa letterobj
+     letter =letter
+     value =quad
+     ?manual>
+     preparation free 
+     ==>
+     +retrieval>
+     isa quad
+     quad =quad
+     +manual>
+     ISA press-key
+     key =letter
+     =goal>
+     letter =letter
+     )
   
   (p* get-next-response
       =goal>
@@ -394,9 +393,9 @@
       - =direction =start-quad
       ==>
       +visual-location>
-      isa visual-location-ext
+      isa visual-location
       kind letterobj
-      quad =next-quad
+      value =next-quad
       =goal>
       letter nil
       )

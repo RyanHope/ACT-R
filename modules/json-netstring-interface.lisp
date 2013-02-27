@@ -212,11 +212,14 @@
           (usocket:connection-refused-error () 
             (progn
               (print-warning "Connection refused. Is remote environment server running?")
-              (cleanup instance)))
+              (cleanup instance)
+              (return-from reset-json-netstring-module)))
           (usocket:timeout-error () 
             (progn
               (print-warning "Timeout. Is remote environment server running?")
-              (cleanup instance)))))))
+              (cleanup instance)
+              (return-from reset-json-netstring-module))))))
+  (send-command instance (current-model) "time-lock" (list (numberp (jni-sync instance))) :sync t))
 
 (defun delete-json-netstring-module (instance)
   (cleanup instance))

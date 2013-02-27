@@ -17,13 +17,9 @@
 # along with ACTR6_JNI.  If not, see <http://www.gnu.org/licenses/>.
 #===============================================================================
 
-from chunks import VisualChunk
-from server import JNI_Server
-from dispatcher import Dispatcher
-from twisted_clock import Twisted_MPClock
-try:
-    from pyglet_clock import Pyglet_MPClock
-except ImportError:
-    pass
+from twisted.internet.task import Clock
 
-__version__ = '1.2.0'
+class Twisted_MPClock(Clock):
+
+    def setTime(self, newTime):
+        self.advance(newTime-self.seconds())

@@ -1,7 +1,7 @@
 # -*- coding:    utf-8 -*-
 #===============================================================================
 # This file is part of ACTR6_JNI.
-# Copyright (C) 2012 Ryan Hope <rmh3093@gmail.com>
+# Copyright (C) 2012-2013 Ryan Hope <rmh3093@gmail.com>
 #
 # ACTR6_JNI is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -32,36 +32,34 @@ class VisualChunk(object):
         self.slots = slots
 
     def get_visual_object( self ):
-        chunk = []#[self.name]
-        chunk.append( "isa %s" % self.isa )
+        chunk = {"isa": self.isa,
+                 "slots": {}}
         if self.width:
-            chunk.append( "width %d" % self.width )
+            chunk["slots"]["width"] = self.width
         if self.height:
-            chunk.append( "height %d" % self.height )
+            chunk["slots"]["height"] = self.height
         if self.color:
-            chunk.append( "color %s" % self.color )
+            chunk["slots"]["color"] = self.color
         if self.value:
-            chunk.append( "value %s" % self.value )
+            chunk["slots"]["value"] =  self.value
         for s, v in self.slots.iteritems():
-            chunk.append( "%s %s" % ( s, str( v ) ) )
-        return "(%s)" % " ".join( chunk )
+            chunk["slots"][s] = str(v)
+        return chunk
 
     def get_visual_location( self ):
-        chunk = []#[self.name]
-        chunk.append( "isa visual-location-ext" )
-        chunk.append( "kind %s" % self.isa )
-        chunk.append( "screen-x %d" % self.screenx )
-        chunk.append( "screen-y %d" % self.screeny )
+        chunk = {"isa": "visual-location",
+                 "slots": {"kind": self.isa,
+                           "screen-x": self.screenx,
+                           "screen-y": self.screeny,
+                           }}
         if self.width:
-            chunk.append( "width %d" % self.width )
+            chunk["slots"]["width"] = self.width
         if self.height:
-            chunk.append( "height %d" % self.height )
+            chunk["slots"]["height"] = self.height
         if self.color:
-            chunk.append( "color %s" % self.color )
+            chunk["slots"]["color"] = self.color
         if self.size:
-            chunk.append( "size %d" % self.size )
+            chunk["slots"]["size"] = self.size
         if self.value:
-            chunk.append( "value %s" % self.value )
-        for s, v in self.slots.iteritems():
-            chunk.append( "%s %s" % ( s, str( v ) ) )
-        return "(%s)" % " ".join( chunk )
+            chunk["slots"]["value"] =  self.value
+        return chunk
