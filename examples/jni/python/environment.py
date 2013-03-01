@@ -261,14 +261,12 @@ class Environment(object):
             self.actr_running = False
             self.setDefaultClock()
             self.state = self.STATE_WAIT_CONNECT
-            print self.lc1.clock
 
         @d.listen('reset')
         def ACTR6_JNI_Event(self, model, params):
             self.actr_running = False
             self.setDefaultClock()
             self.state = self.STATE_WAIT_MODEL
-            print self.lc1.clock
             
         @d.listen('model-run')
         def ACTR6_JNI_Event(self, model, params):
