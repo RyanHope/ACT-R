@@ -112,8 +112,6 @@
                        (proc-display :clear (pop params))))
                     ((string= method "trigger-reward")
                      (trigger-reward (pop params)))
-                    ((string= method "set-visual-center-point")
-                     (set-visual-center-point (pop params) (pop params)))
                     ((string= method "set-cursor-loc")
                      (setf (cursor-loc instance) (pop params)))
                     ((string= method "new-digit-sound")
