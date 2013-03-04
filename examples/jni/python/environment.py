@@ -82,7 +82,6 @@ class Environment(object):
 
         self.state = self.STATE_INTRO
         self.actr = actr
-        self.actr_running = False
         self.actr_time_lock = False
         if ACTR6 and self.actr:
             self.state = self.STATE_WAIT_CONNECT
@@ -121,11 +120,11 @@ class Environment(object):
     def validate(self):
         if self.answer == self.response:
             self.snd_correct.play()
-            if self.actr and self.actr_running:
+            if self.actr:
                 self.actr.tone_sound(1320, .25)
         else:
             self.snd_incorrect.play()
-            if self.actr and self.actr_running:
+            if self.actr:
                 self.actr.tone_sound(440, .25)
         self.state = self.STATE_DONE
 
@@ -198,13 +197,13 @@ class Environment(object):
         if self.state == self.STATE_RESET:
             self.reset()
             self.state = self.STATE_FIXATION
-            if self.actr and self.actr_running:
+            if self.actr:
                 fix = VisualChunk("f%d" % self.trial, "fixation-cross", self.screen_rect.centerx, self.screen_rect.centery)
                 self.actr.update_display([fix], clear=True)
         if self.state == self.STATE_UPDATE:
             self.update_objects()
             self.state = self.STATE_SEARCH
-            if self.actr and self.actr_running:
+            if self.actr:
                 chunks = [obj.toChunk() for obj in self.objects]
                 chunks.append(VisualChunk(None, "background", self.screen_rect.centerx, self.screen_rect.centery, self.screen_rect.width, self.screen_rect.height, self.bgcolorname))
                 self.actr.update_display(chunks, clear=True)
@@ -252,25 +251,20 @@ class Environment(object):
         def ACTR6_JNI_Event(self, model, params):
             self.state = self.STATE_WAIT_MODEL
 
-        @d.listen('time-lock')
-        def ACTR6_JNI_Event(self, model, params):
-            self.actr_time_lock = params[0]
-
         @d.listen('connectionLost')
         def ACTR6_JNI_Event(self, model, params):
-            self.actr_running = False
             self.setDefaultClock()
             self.state = self.STATE_WAIT_CONNECT
 
         @d.listen('reset')
         def ACTR6_JNI_Event(self, model, params):
-            self.actr_running = False
+            self.actr_time_lock = params[0]
             self.setDefaultClock()
             self.state = self.STATE_WAIT_MODEL
             
         @d.listen('model-run')
         def ACTR6_JNI_Event(self, model, params):
-            if not self.actr_running:
+            if not params[0]:
                 self.state = self.STATE_INTRO
                 X = VisualChunk(None, "letterobj", self.intro_xs.centerx, self.intro_xs.centery, color="red")
                 self.actr.update_display([X], clear=True)
