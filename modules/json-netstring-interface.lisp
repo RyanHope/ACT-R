@@ -61,7 +61,8 @@
    (sync-cond :accessor sync-cond :initform (bordeaux-threads:make-condition-variable))
    (sync-lock :accessor sync-lock :initform (bordeaux-threads:make-lock))
    (display :accessor display :initform nil)
-   (cursor-loc :accessor cursor-loc :initform '(0 0))))
+   (cursor-loc :accessor cursor-loc :initform '(0 0))
+   (running :accessor running :initform nil)))
 
 (defun json->chunk (lst-of-lsts)
   "generate one define-chunks call from a list of chunk specs"
@@ -175,7 +176,7 @@
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-handle-click ((instance json-interface-module))
-  (send-command instance (current-model) "mouseclick" nil
+  (send-command instance (current-model) "mouseclick" 1
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-speak-string ((instance json-interface-module) msg)
@@ -196,9 +197,10 @@
   (make-instance 'json-interface-module))
 
 (defun reset-json-netstring-module (instance)
+  (setf (running instance) nil)
   (if (and (socket instance) (jstream instance) (thread instance))
       (progn
-        (send-command instance (current-model) "reset" nil :sync t)
+        (send-command instance (current-model) "reset" (list (numberp (jni-sync instance))) :sync t)
         (install-device instance))
     (if (and (current-model) (jni-hostname instance) (jni-port instance))
         (handler-case
@@ -216,8 +218,8 @@
             (progn
               (print-warning "Timeout. Is remote environment server running?")
               (cleanup instance)
-              (return-from reset-json-netstring-module))))))
-  (send-command instance (current-model) "time-lock" (list (numberp (jni-sync instance))) :sync t))
+              (return-from reset-json-netstring-module)))))))
+
 
 (defun delete-json-netstring-module (instance)
   (cleanup instance))
@@ -228,7 +230,8 @@
         (if (numberp (jni-sync instance))
             (setf (sync-event instance)
                   (schedule-periodic-event (jni-sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
-        (send-command instance (current-model) "model-run" nil :sync t))))
+        (send-command instance (current-model) "model-run" (list (running instance)) :sync t)
+        (setf (running instance) t))))
 
 (defun run-end-json-netstring-module (instance)
   (if (current-model)
