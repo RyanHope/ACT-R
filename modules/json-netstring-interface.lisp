@@ -62,6 +62,8 @@
    (sync-lock :accessor sync-lock :initform (bordeaux-threads:make-lock))
    (display :accessor display :initform nil)
    (cursor-loc :accessor cursor-loc :initform '(0 0))
+   (width :accessor width :initform 0)
+   (height :accessor height :initform 0)
    (running :accessor running :initform nil)))
 
 (defun json->chunk (lst-of-lsts)
@@ -105,6 +107,10 @@
                    (cond 
                     ((string= method "disconnect")
                      (return))
+                    ((string= method "setup")
+                     (setf (width instance) (pop params))
+                     (setf (height instance) (pop params))
+                     (format *terminal-io* "~A ~A~%" (width instance) (height instance)))
                     ((string= method "sync")
                      (bordeaux-threads:condition-notify (sync-cond instance)))
                     ((string= method "update-display")
