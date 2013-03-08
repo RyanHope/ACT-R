@@ -93,3 +93,6 @@ class JNI_Server(Factory):
 
     def disconnect(self):
         self.p.sendCommand(self.model, "disconnect")
+        
+    def setup(self, width, height):
+        self.p.sendCommand(self.model, "setup", width, height)
