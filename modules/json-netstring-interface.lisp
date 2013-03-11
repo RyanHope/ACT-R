@@ -35,8 +35,7 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; TODOs       : - Strings to symbols if prefixed with ":" (ex. ":nameofchunk")
-;;               - Support chunk names
+;; TODOs       : - Support chunk names
 ;;               - Handle 'cursor-to-vis-loc' properly
 ;;               - Add support for 'onset' param for new-*-sound commands
 ;;               - Support multiple simultaneous models
