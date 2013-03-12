@@ -3257,6 +3257,10 @@
 	
 	;;;; [SC] [PAAV] updating the eye location with new visual-location coordinates
 	(set-gaze-loc paav-mod new-gaze-loc)
+
+	;;;; [RMH] tell the current device where the eye is looking
+	(when (show-focus-p (current-device-interface))
+		(device-update-eye-loc (device (current-device-interface)) new-gaze-loc))
 				
 	;;;; [SC] [PAAV] saccade end update of visual memory
 	;;;; [TODO]
