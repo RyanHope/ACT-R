@@ -200,6 +200,10 @@
   (if (display instance)
     (cdr (assoc vis-loc (display instance)))))
 
+(defmethod device-update-eye-loc ((instance json-interface-module) loc)
+  (send-command instance (current-model) "fixation" (list (list (aref loc 0) (aref loc 1)))
+                :sync (not (numberp (jni-sync instance)))))
+
 (defmethod disconnect ((instance json-interface-module))
   (send-command instance (current-model) "disconnect" nil))
 
@@ -232,8 +236,10 @@
               (return-from reset-json-netstring-module)))))))
 
 (defun delete-json-netstring-module (instance)
-  (disconnect instance)
-  (bordeaux-threads:join-thread (thread instance)))
+  (if (socket instance)
+      (disconnect instance))
+  (if (thread instance)
+      (bordeaux-threads:join-thread (thread instance))))
 
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
