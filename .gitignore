@@ -2,4 +2,6 @@
 environment/GUI/init/10-userguisettings.tcl
 *.xfasl
 .DS_Store
+*.pyc
+
 
