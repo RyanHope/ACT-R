@@ -37,6 +37,8 @@ class ACTR_Protocol(LineReceiver):
         if method == 'set-mp-time':
             if self.factory.clock:
                 self.factory.clock.setTime(float(params[0]))
+        elif method == 'disconnect':
+            self.factory.p.transport.loseConnection()
         else:
             if method == 'reset':
                 if self.factory.clock:
