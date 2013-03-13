@@ -205,7 +205,9 @@
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod disconnect ((instance json-interface-module))
-  (send-command instance (current-model) "disconnect" nil))
+  (send-command instance (current-model) "disconnect" nil)
+  (if (thread instance)
+      (bordeaux-threads:join-thread (thread instance))))
 
 (defun create-json-netstring-module (name)
   (declare (ignore name))
@@ -218,28 +220,29 @@
         (send-command instance (current-model) "reset" (list (numberp (jni-sync instance))) :sync t)
         (install-device instance))
     (if (and (current-model) (jni-hostname instance) (jni-port instance))
-        (handler-case
-            (progn
-              (setf (socket instance) (usocket:socket-connect (jni-hostname instance) (jni-port instance)))
-              (setf (jstream instance) (usocket:socket-stream (socket instance)))
-              (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
-              (install-device instance))
-          (usocket:connection-refused-error () 
-            (progn
-              (print-warning "Connection refused. Is remote environment server running?")
-              (cleanup instance)
-              (return-from reset-json-netstring-module)))
-          (usocket:timeout-error () 
-            (progn
-              (print-warning "Timeout. Is remote environment server running?")
-              (cleanup instance)
-              (return-from reset-json-netstring-module)))))))
+        (connect instance))))
 
 (defun delete-json-netstring-module (instance)
   (if (socket instance)
-      (disconnect instance))
-  (if (thread instance)
-      (bordeaux-threads:join-thread (thread instance))))
+      (disconnect instance)))
+
+(defmethod connect ((instance json-interface-module))
+  (handler-case
+      (progn
+        (setf (socket instance) (usocket:socket-connect (jni-hostname instance) (jni-port instance)))
+        (setf (jstream instance) (usocket:socket-stream (socket instance)))
+        (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
+        (install-device instance))
+    (usocket:connection-refused-error () 
+      (progn
+        (print-warning "Connection refused. Is remote environment server running?")
+        (cleanup instance)
+        (return-from connect)))
+    (usocket:timeout-error () 
+      (progn
+        (print-warning "Timeout. Is remote environment server running?")
+        (cleanup instance)
+        (return-from connect)))))
 
 (defun run-start-json-netstring-module (instance)
   (if (current-model)
@@ -259,10 +262,18 @@
 
 (defun params-json-netstring-module (instance param)
   (if (consp param)
-      (case (car param)
-        (:jni-hostname (setf (jni-hostname instance) (cdr param)))
-        (:jni-port (setf (jni-port instance) (cdr param)))
-        (:jni-sync (setf (jni-sync instance) (cdr param))))
+      (let ((hostname (jni-hostname instance))
+            (port (jni-port instance)))
+        (progn
+          (let ((ret nil))
+            (case (car param)
+              (:jni-hostname (setf ret (setf (jni-hostname instance) (cdr param))))
+              (:jni-port (setf ret (setf (jni-port instance) (cdr param))))
+              (:jni-sync (setf ret (setf (jni-sync instance) (cdr param)))))
+          (if (and (jni-hostname instance) (jni-port instance))
+              (if (or (not (string= hostname (jni-hostname instance))) (not (equal port (jni-port instance))))
+                  (connect instance)))
+          ret)))
     (case param
       (:jni-hostname (jni-hostname instance))
       (:jni-port (jni-port instance))
