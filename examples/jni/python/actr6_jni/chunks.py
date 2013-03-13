@@ -43,12 +43,12 @@ class VisualChunk(object):
         if self.value:
             chunk["slots"]["value"] =  self.value
         for s, v in self.slots.iteritems():
-            chunk["slots"][s] = str(v)
+            chunk["slots"][s] = v
         return chunk
 
     def get_visual_location( self ):
         chunk = {"isa": "visual-location",
-                 "slots": {"kind": self.isa,
+                 "slots": {"kind": ":%s" % self.isa,
                            "screen-x": self.screenx,
                            "screen-y": self.screeny,
                            }}
@@ -63,3 +63,13 @@ class VisualChunk(object):
         if self.value:
             chunk["slots"]["value"] =  self.value
         return chunk
+
+class PAAVChunk(VisualChunk):
+    
+    def get_visual_location( self ):
+        chunk = super(PAAVChunk, self).get_visual_location()
+        for s, v in self.slots.iteritems():
+            if s in ["fcolor", "fshape", "fsize", "fshading", "forient"]:
+                chunk["slots"][s] = v
+        return chunk
+    
