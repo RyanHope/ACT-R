@@ -206,7 +206,13 @@
     (cdr (assoc vis-loc (display instance)))))
 
 (defmethod device-update-eye-loc ((instance json-interface-module) loc)
-  (send-command instance (current-model) "fixation" (list (list (aref loc 0) (aref loc 1)))
+  (when loc (setf loc (list (aref loc 0) (aref loc 1))))
+  (send-command instance (current-model) "gaze-loc" (list loc)
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-update-attended-loc ((instance json-interface-module) loc)
+  (when loc (setf loc (list (aref loc 0) (aref loc 1))))
+  (send-command instance (current-model) "attention-loc" (list loc)
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod disconnect ((instance json-interface-module))
