@@ -52,6 +52,7 @@
   ((jni-hostname :accessor jni-hostname :initform nil)
    (jni-port :accessor jni-port :initform nil)
    (jni-sync :accessor jni-sync :initform nil)
+   (event-hooks :accessor event-hooks :initform (make-hash-table))
    (sync-event :accessor sync-event :initform nil)
    (socket :accessor socket :initform nil)
    (jstream :accessor jstream :initform nil)
@@ -110,6 +111,10 @@
                (cond 
                 ((string= method "disconnect")
                  (return))
+                ((string= method "trigger-event")
+                 (let ((callback (gethash (read-from-string (pop params)) (event-hooks instance))))
+                   (if callback
+                       (apply callback params))))
                 ((string= method "setup")
                  (setf (width instance) (pop params))
                  (setf (height instance) (pop params)))
@@ -260,6 +265,9 @@
             (delete-event (sync-event instance)))
         (send-command instance (current-model) "model-stop" nil))))
 
+(defun jni-register-event-hook (event hook)
+  (setf (gethash event (event-hooks (get-module json-interface))) hook))
+  
 (defun params-json-netstring-module (instance param)
   (if (consp param)
       (let ((hostname (jni-hostname instance))
