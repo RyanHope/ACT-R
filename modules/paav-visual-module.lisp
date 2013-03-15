@@ -3977,6 +3977,7 @@
 ;;;; [RMH] update the available visicon chunks when the display is updated
 (defmethod process-display :after ((devin device-interface) 
                                    (vis-mod vision-module) &optional (clear nil))
+  (delete-decayed-features-from-vis-memory vis-mod)
   (get-visible-visicon-chunks vis-mod))
 
 ;;;; [SC] sets the current gaze location at center of the device (window)
