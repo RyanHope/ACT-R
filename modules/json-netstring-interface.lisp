@@ -122,8 +122,10 @@
                  (bordeaux-threads:condition-notify (sync-cond instance)))
                 ((string= method "update-display")
                  (progn
+                   (lock-device (current-device-interface))
                    (setf (display instance) (json->chunkpairs (pop params)))
-                   (proc-display :clear (pop params))))
+                   (proc-display :clear (pop params))
+                   (unlock-device (current-device-interface))))
                 ((string= method "trigger-reward")
                  (trigger-reward (pop params)))
                 ((string= method "set-cursor-loc")
