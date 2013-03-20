@@ -73,7 +73,7 @@
 
 (defp *jitter-left
  =goal> isa arrow-task state proc-arrow 
- =visual> isa arrow < value 465 value =x
+ =visual> isa arrow < value 640 value =x
  ?manual> state free
 ==>
 ; !output! (proc-arrow = =x left)
@@ -83,7 +83,7 @@
 
 (defp *jitter-right
  =goal> isa arrow-task state proc-arrow 
- =visual> isa arrow > value 465 value =x
+ =visual> isa arrow > value 640 value =x
  ?manual> state free
 ==>
  ;!output! (proc-arrow = =x right)
@@ -93,7 +93,7 @@
 
 (defp *jitter-middle
  =goal> isa arrow-task state proc-arrow
- =visual> isa arrow = value 465 value =x
+ =visual> isa arrow = value 640 value =x
  ?manual> state free
 ==>
 ;!output! (proc-arrow = =x middle)

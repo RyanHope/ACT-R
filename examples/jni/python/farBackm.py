@@ -470,7 +470,7 @@ class Arrow():
         return
 
     def toChunk(self):
-            return VisualChunk(None, ":Arrow", self.arrow_x_pos,self.arrow_y_pos,
+            return VisualChunk(None, "Arrow", self.arrow_x_pos,self.arrow_y_pos, value = self.arrow_x_pos,
                                width = 2 * self.offset, height = 70, color=':green')
 
 
@@ -604,13 +604,13 @@ class Task_Environment():
             reactor.stop()
         elif key == pygame.K_SPACE:
             pass
-        elif key >= pygame.K_a:
+        elif key == pygame.K_a:
             self.jitter_task.arrow.arrow_x_pos -= 5
             self.jitter_task.arrow.draw_arrow()
             logger.LogInfo('Keyboard', 'a', self.jitter_task.arrow.arrow_x_pos,
                            self.jitter_task.arrow.arrow_x_pos - self.mid_x)
             self.jitter_task.jitter_seq.append(abs(self.jitter_task.arrow.arrow_x_pos - self.mid_x))
-        elif event.key == pygame.K_d:
+        elif key == pygame.K_d:
             self.jitter_task.arrow.arrow_x_pos += 5
             self.jitter_task.arrow.draw_arrow()
             logger.LogInfo('Keyboard', 'd', self.jitter_task.arrow.arrow_x_pos,
@@ -1010,7 +1010,8 @@ class Task_Environment():
     
         @d.listen('model-stop')
         def ACTR6_JNI_Event(self, model, params):
-            pass
+            print("model-stop")
+            self.state = 'stop'
     
         @d.listen('keypress')
         def ACTR6_JNI_Event(self, model, params):
