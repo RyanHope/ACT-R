@@ -131,15 +131,17 @@
 (p4 isa fact slot1 property slot2 fish slot3 animal))
 
 
-(add-instr count :input (Vstart Vend) :working-memory (WMcount) :declarative ((RTcount-fact RTfirst RTsecond))
+(add-instr count :input (Vstart Vend) :working-memory (WMcount) :declarative ((RTtype RTfirst RTsecond))
 :pm-function do-action
 :init init-count
 :reward 10.0
 :parameters ((sgp :lf 0.15 :egs 0.2 :ans 0.1 :rt -0.5  :alpha 0.2))  
 
-  (ins :condition (Vstart<>nil WMcount=nil) :action (Vstart->WMcount  (say WMcount)->AC  (count-fact WMcount)->RT) :description "Initialize Count")
-  (ins :condition (Vend<>RTsecond  WMcount=RTfirst) :action (RTsecond->WMcount  (say WMcount)->AC (count-fact WMcount)->RT) :description "Counting Step")
-  (ins :condition (Vend=RTsecond) :action ((answer RTsecond)->AC finish->Gtask) :description "Finalize count"))
+(ins :condition (Vstart<>nil WMcount=nil) :action (Vstart->WMcount  (say WMcount)->AC  (count-fact WMcount)->RT) :description "Initialize Count")
+(ins :condition (Vend<>RTsecond  WMcount=RTfirst) :action (RTsecond->WMcount  (say WMcount)->AC (count-fact WMcount)->RT) :description "Counting Step")
+(ins :condition (Vend=RTsecond) :action ((answer RTsecond)->AC finish->Gtask) :description "Finalize count")
+
+)
 
 (add-instr semantic :input (Vanimal Vcategory) :working-memory (WMcurrent) :declarative ((RTprop RTitem RTmember-of))
 :pm-function do-action
@@ -151,7 +153,6 @@
   (ins :condition (Vcategory<>RTmember-of  WMcurrent = RTitem) :action (RTmember-of->WMcurrent  (say WMcurrent)->AC (property WMcurrent)->RT) :description "Chain up")
   (ins :condition (Vcategory = RTmember-of) :action ((answer yes)->AC finish->Gtask) :description "Match found")
   (ins :condition (RTprop = error) :action ((answer no)->AC finish->Gtask) :description "No Match"))
-
 
 )
 

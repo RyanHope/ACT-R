@@ -171,7 +171,7 @@
      (init-task)
      (when nolearn (sgp :alpha 0))
      (run 10000)
-     (with-open-file (f (concatenate 'string *outputdir* "stroopChein.txt") :direction :output :if-exists :append :if-does-not-exist :create)
+     (with-open-file (f (concatenate 'string *outputdir* "stroopCheinNR.txt") :direction :output :if-exists :append :if-does-not-exist :create)
        (dolist (x (reverse *results*))
          (format t "~%STROOP ~A ~D ~D ~D ~A ~D ~6,3F" condition (1+ i) day (first x) (third x)(if (fourth x) 1 0)(second x))
          (format f "STROOP ~A ~D ~D ~D ~A ~D ~6,3F~%" condition (1+ i) day (first x) (third x)(if (fourth x) 1 0)(second x))
@@ -195,11 +195,9 @@
 (defun do-chein ()
   (reset)
   (do-stroop 1 'CONTROL)  ;; put back later
-  (reset)
  (do-stroop 21 'CONTROL)
   (reset)
   (do-stroop 1 'EXP)
-  (reset)
    (set-task 'verbal-CWM)
 
    (dotimes (i 2) (format t  "~%*** Practice Session ~D ***~%" (1+ i))
@@ -215,7 +213,7 @@
 
      (dotimes (j 16) (run 200))
      (push (reverse (vcwm-spans *cstask*)) *results*)
-   (with-open-file (f (concatenate 'string *outputdir* "WMChein.txt") :direction :output :if-exists :append :if-does-not-exist :create)
+   (with-open-file (f (concatenate 'string *outputdir* "WMCheinNR.txt") :direction :output :if-exists :append :if-does-not-exist :create)
      (dolist (x (first *results*))
         (format f "~D  ~D ~D ~%"  (1+ i) (first x)(if (second x) 1 0))
       
@@ -236,40 +234,54 @@
 
     (otherwise (print "1 - Stroop  2 - Verbal CWM"))))
 
+(defun do-bugtest ()
+  (reset)
+;  (do-stroop 1 'EXP)
+   (set-task 'verbal-CWM)
 
-;;; In order to run this uncomment the simple model first
+   (dotimes (i 2) (format t  "~%*** Practice Session ~D ***~%" (1+ i))
+    (init-task)
+    (sgp :v nil :save-buffer-trace nil)
+     (setf *verbose* t)
+    (dotimes (j 16) (run 200)))
+   (setf *results* nil)    
+   (dotimes (i 20)
+     (format t "~%*** Session ~D ***~%" (1+ i))
+     (init-task)
+     (sgp :v nil :save-buffer-trace nil)
+     (setf *verbose* t)
+     (dotimes (j 16) (run 200))
+     (push (reverse (vcwm-spans *cstask*)) *results*))
+
+)
 
 (clear-all)
 
 (define-model-transfer
 
+;;; Verbal-CWM task without rehearsal and therefore without control state
 
 (add-instr verbal-CWM :input (Vobject Videntity) :working-memory (WMconcept WMprev) :declarative ((RTisword RTlexical RTanswer)(RTconcept RTprev))
+
 :pm-function VCWM-action
 :init init-VCWM
 :reward 10.0 
 :facts ((isa fact slot1 is-word slot2 tantrum slot3 yes)(isa fact slot1 is-word slot2 umbrella slot3 yes))  ; for lexical decision
-:parameters ((sgp :lf 0.1 :egs 0.3 :ans 0.1 :rt -0.6 :perception-activation 0.0  :mas nil :alpha 0.02)(setf *condition-spread* 1.0) (spp retrieve-instruction :u 2.0)             (setf *verbose* nil))  ;; :rt was 0.0, :lf was 0.05
+:parameters ((sgp :lf 0.1 :egs 0.3 :ans 0.1 :rt -0.7 :perception-activation 0.0 :mas nil :alpha 0.02)(setf *condition-spread* 1.0)             (setf *verbose* nil))  ;; :rt was 0.0
+(ins :condition (Gtop = nil) :action (WMid -> Gtop) :description "Initiating the list")
+(ins :condition (Vobject = pending) :action ((wait) -> AC) :description "Wait for something to happen")
+(ins :condition (Vobject = word RT1 = nil) :action ( (is-word Videntity) -> RT) :description "A word appears, so retrieve it")
+(ins :condition (Vobject = word RTanswer = yes) :action ((type "Y") -> AC) :description "Successful retrieve, say yes")
+(ins :condition (Vobject = word RT1 = error) :action ((type "N") -> AC) :description "Failed to retrieve the word, say no")
+(ins :condition (Vobject = letter WMconcept = nil Gtop<>nil) :action (Videntity -> WMconcept (? WMid) -> newWM (wait) -> AC) :description "New item") 
+(ins :condition (Vobject = report RT1 = nil) :action (Gtop -> RTid) :description "Report prompt came up: retrieve first item")
+(ins :condition (Vobject = report RT1 <> error) :action ((type RTconcept) -> AC RTid -> RTprev) :description "Report item and retrieve next")
+(ins :condition (Vobject = report RT1 = error) :action ((enter) -> AC finish -> Gtask) :description "No more items: press enter and end")
 
-(ins :condition (Gcontrol = nil) :action (lexdec -> Gcontrol WMid -> Gtop) :description "Start with lexical decision")
-(ins :condition (Vobject = pending Gcontrol = lexdec) :action ((wait) -> AC) :description "Wait for the next word")
-
-(ins :condition (Vobject = word Gcontrol = rehearse) :action (lexdec -> Gcontrol) :description "Next word appeared so we stop rehearsing")
-(ins :condition (Vobject = word RT1 = nil Gcontrol = lexdec) :action ( (is-word Videntity) -> RT) :description "Retrieve the word")
-(ins :condition (RTanswer = yes Gcontrol = lexdec) :action ((type "Y") -> AC) :description "Successful retrieve: respond 'yes'")
-(ins :condition (RT1 = error Gcontrol = lexdec) :action ((type "N") -> AC) :description "Retrieval failure: respond 'no'")
-(ins :condition (Vobject = letter Gcontrol = lexdec WMconcept = nil) :action (Videntity -> WMconcept (wait) -> AC) :description "A letter is presented: put it in WM")
-(ins :condition (Vobject = letter Gcontrol = lexdec WMconcept <> nil) :action ((Videntity WMid) -> newWM rehearse -> Gcontrol) :description "A letter is presented: put it in DM")
-(ins :condition (Vobject = letter RT1 = nil Gcontrol = rehearse) :action (Gtop -> RTid) :description "Start rehearsal by retrieving first item")
-(ins :condition (Vobject = letter RT1 <> error Gcontrol = rehearse) :action (RTid -> RTprev) :description "Rehearse next item")
-(ins :condition (Vobject = letter RT1 = error  Gcontrol = rehearse) :action (Gtop -> RTid) :description "End of list, return to top")
-(ins :condition (Vobject = report Gcontrol = rehearse) :action (Gtop -> RTid report -> Gcontrol) :description "Report prompt came up: retrieve first item")
-(ins :condition (Vobject = report Gcontrol = lexdec) :action (Gtop -> RTid report -> Gcontrol) :description "Report prompt came up: retrieve first item")
-(ins :condition (Vobject = report RT1 <> error Gcontrol = report) :action ((type RTconcept) -> AC RTid -> RTprev) :description "Report item and retrieve next")
-(ins :condition (Vobject = report RT1 = error Gcontrol = report) :action ((type WMconcept) -> AC end -> Gcontrol) :description "Type last item")
-(ins :condition (Gcontrol = end) :action ((enter) -> AC finish -> Gtask) :description "No more items: press enter and end")
 
 )
+
+
 
 
 
@@ -303,7 +315,6 @@
 (ins :condition (Vobject = pending) :action ((wait) -> AC) :description "Wait for the next stimulus without preparation")
 (ins :condition (Vobject = last) :action (finish -> Gtask) :description "Done with this block")
 )
-
 
 
 (sdp :reference-count 3000 :creation-time -1000000)

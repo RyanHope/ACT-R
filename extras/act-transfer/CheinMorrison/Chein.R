@@ -11,7 +11,7 @@ dat.m <- with(dat[dat$correct==1,],tapply(span,day,mean))
 #dat.m <- with(dat,tapply(span,day,mean))
 quartz(width=5,height=5)
 par(lwd=2)
-plot(dat.m,type="b",ylab="WM Span (items)",xlab="Training session",ylim=c(1,6))
+plot(dat.m,type="b",ylab="WM Span (items)",xlab="Training session",ylim=c(1,7))
 lines(dada,type="b",pch=2)
 legend(1,6,legend=c("Data","Model"),pch=c(2,1),lty=1)
 
@@ -20,7 +20,7 @@ legend(1,6,legend=c("Data","Model"),pch=c(2,1),lty=1)
 
 dat <- read.table("stroopChein.txt")
 names(dat) <- c("task","condition","block","day","trial","type","correct","RT")
-res <- with(dat,tapply(RT,list(day,condition,type),mean))
+res <- with(dat[dat$block>0,],tapply(RT,list(day,condition,type),mean))
 
 exp.stroop <- rbind(c(120,95),c(120,60))
 
@@ -32,6 +32,10 @@ lines(4:5,(res[,1,2]-res[,1,1])*1000,type="b")
 lines(4:5,(res[,2,2]-res[,2,1])*1000,type="b",pch=2)
 axis(1,at=2:5,labels=c("Data Pre","Data Post","Model Pre","Model Post"))
 legend(1,160,legend=c("No training","WM training"),pch=1:2,lty=1)
+
+dat$subject <- as.factor(as.integer((as.numeric(rownames(dat))-1)/768))
+res <- with(dat,tapply(RT,list(day,condition,type,subject),mean))
+res[,,2,]-res[,,1,]
 
 # This plots just the WMC data (as it is in the paper)
 
@@ -70,9 +74,9 @@ dat2.m <- with(dat2[dat2$correct==1,],tapply(span,day,mean))
 #dat.m <- with(dat,tapply(span,day,mean))
 quartz(width=5,height=5)
 par(lwd=2)
-plot(dat.m,type="b",ylab="WM Span (items)",xlab="Training session",ylim=c(1,6))
+plot(dat.m,type="b",ylab="WM Span (items)",xlab="Training session",ylim=c(1,7))
 lines(dat2.m,type="b",pch=2)
-legend(1,6,legend=c("No rehearsal model","Rehearsal model"),pch=c(2,1),lty=1)
+legend(1,7,legend=c("Reactive model","Proactive model"),pch=c(2,1),lty=1,bty="n")
 
 
 # Stroop comparison
@@ -88,13 +92,13 @@ res2 <- with(dat2,tapply(RT,list(day,condition,type),mean))
 
 quartz(width=7,height=5)
 par(lwd=2)
-plot(2:3,(res2[,1,2]-res2[,1,1])*1000,ylim=c(0,160),type="b",xlab="",xaxt="n",xlim=c(1,6),ylab="Interference (ms)")
+plot(2:3,(res2[,1,2]-res2[,1,1])*1000,ylim=c(0,200),type="b",xlab="",xaxt="n",xlim=c(1,6),ylab="Interference (ms)")
 lines(2:3,(res2[,2,2]-res2[,2,1])*1000,type="b",pch=2)
 lines(4:5,(res[,1,2]-res[,1,1])*1000,type="b")
 lines(4:5,(res[,2,2]-res[,2,1])*1000,type="b",pch=2)
 axis(1,at=2:5,labels=c("Pre","Post","Pre","Post"))
-text(c(2.8,5),c(110,90),labels=c("No rehearsal\nmodel","Rehearsal\nmodel"))
-legend(1,50,legend=c("No training","WM training"),pch=1:2,lty=1)
+text(c(2.5,5),c(115,90),labels=c("Reactive\nmodel","Proactive\nmodel"))
+legend(1,50,legend=c("No training","WM training"),pch=1:2,lty=1,bty="n")
 
 
 

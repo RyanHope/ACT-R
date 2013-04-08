@@ -43,17 +43,45 @@ plot(g,layout=layout.fruchterman.reingold,vertex.size=18,edge.width=4)
 legend("topright",legend=tasks,pch=15,col=colors,cex=1)
 dev.off()
 
-# For the really large graphs, it is better to removed the labels except the task names.
+# For the really large graphs, it is better to remove the labels except the task names.
 # Also, the weights are modified to make action and condition lists stick more together.
 # This one was used for the final figure in the paper.
 
-V(g)$label <- ifelse(V(g)$label %in% c("ED","EMACS","EDT","INDEX2-MIN-MINERAL","GREATER-ALGAE","TASK-SWITCHING-AB","SOLID-LIME-DIFF","PART-PLUS-MINERAL","COUNT-SPAN" ,"SINGLE-TASK-A","VERBAL-CWM","STROOP" ,"PROCEDURE-A","INDEX1-DIV-MARINE","MEAN-TOXIN"),V(g)$label,"")
+save.labels <- V(g)$label
+V(g)$label <- ifelse(V(g)$label %in% c("ED","EMACS","EDT","INDEX2-MIN-MINERAL","GREATER-ALGAE","TASK-SWITCHING-AB","SOLID-LIME-DIFF","PART-PLUS-MINERAL","COUNT-SPAN" ,"SINGLE-TASK-A","SINGLE-TASK-B","VERBAL-CWM","STROOP" ,"PROCEDURE-A","INDEX1-DIV-MARINE","MEAN-TOXIN","SEMANTIC","COUNT"),V(g)$label,"")
 V(g)$size <- ifelse(V(g)$label == "",3,10)
-
+for (i in 1:10) {
 lay <- layout.fruchterman.reingold(g,weightsA=edges$weight,niterNumeric=5000, coolexpNumeric = 1.2)
-pdf(file="transferTask.pdf",width=20,height=20)
-plot(g,layout=lay,vertex.size=V(g)$size,edge.width=1,edge.color="black",vertex.label.cex=1.5)
+V(g)$label <- ifelse(V(g)$label %in% c("ED","EMACS","EDT","INDEX2-MIN-MINERAL","GREATER-ALGAE","TASK-SWITCHING-AB","SOLID-LIME-DIFF","PART-PLUS-MINERAL","COUNT-SPAN" ,"SINGLE-TASK-A","SINGLE-TASK-B","VERBAL-CWM","STROOP" ,"PROCEDURE-A","INDEX1-DIV-MARINE","MEAN-TOXIN","SEMANTIC","COUNT"),V(g)$label,"")
+proactiveC <- which(V(g)$name=="CD2")
+E(g)$edgeW <- 1
+E(g)$edgeC <- "black"
+E(g)[1:length(V(g)) %->% proactiveC]$edgeW <- 4
+E(g)[1:length(V(g)) %->% proactiveC]$edgeC <- "red"
+proactiveC2 <- which(V(g)$name=="CD1")
+E(g)[proactiveC %->% proactiveC2]$edgeW <- 4
+E(g)[proactiveC %->% proactiveC2]$edgeC <- "red"
+
+#E(g)[1:length(V(g)) %->% proactiveC2]$edgeW <- 4
+#E(g)[1:length(V(g)) %->% proactiveC2]$edgeC <- "red"
+reactive <- which(V(g)$name=="CD22")
+E(g)[1:length(V(g)) %->% reactive]$edgeW <- 4
+E(g)[1:length(V(g)) %->% reactive]$edgeC <- "blue"
+V(g)$linecolor <- "black"
+V(g)$linecolor[proactiveC] <- "red"
+V(g)$linecolor[proactiveC2] <- "red"
+V(g)$linecolor[reactive] <- "blue"
+
+pdf(file=paste("transferTask",i,".pdf",sep=""),width=20,height=20)
+plot(g,layout=lay,vertex.size=V(g)$size,edge.width=E(g)$edgeW,edge.color=E(g)$edgeC,edge.arrow.size=0.6,edge.arrow.width=1,vertex.label.cex=1.5,vertex.frame.color = V(g)$linecolor)
+#legend("topright",legend=tasks,pch=15,col=colors,cex=1.5)
+dev.off()
+pdf(file=paste("transferTaskMAP",i,".pdf",sep=""),width=20,height=20)
+V(g)$label <- save.labels
+plot(g,layout=lay,vertex.size=V(g)$size,edge.width=1,edge.color="black",vertex.label.cex=0.8)
 #legend("topright",legend=tasks,pch=15,col=colors,cex=1.5)
 dev.off()
 
+
+}
 

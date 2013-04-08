@@ -21,6 +21,7 @@
 (defstruct countspantask nums numbers trials responses)
 
 (defvar *cstask*)
+(defvar *outputdir* "~/")
 
 (defun get-next-symbol ()
    (case (pop (countspantask-numbers *cstask*))
@@ -120,7 +121,7 @@
   (dolist (x (Reverse *results*))
     (let ((score (score-lists (fourth x)(mapcar #'(lambda (x) (nth x '(zero one two three four five six seven eight nine))) (second x)))))
     (format t "~%~D ~9A ~D ~D ~D ~6,3F" day condition (first x) (third x) score (/ score (first x)))))
-  (with-open-file (f "~/digitspan.txt" :direction :output :if-exists :append :if-does-not-exist :create)
+  (with-open-file (f (concatenate 'string *outputdir* "digitspan.txt") :direction :output :if-exists :append :if-does-not-exist :create)
   (dolist (x (Reverse *results*))
     (let ((score (score-lists (fourth x)(mapcar #'(lambda (x) (nth x '(zero one two three four five six seven eight nine))) (second x)))))
     (format f "~D ~9A ~D ~D ~D ~6,3F~%" day condition (first x) (third x) score (/ score (first x)))))))
@@ -191,7 +192,7 @@
      (init-task)
      (when nolearn (sgp :alpha 0))
      (run 10000)
-     (with-open-file (f "~/stroop.txt" :direction :output :if-exists :append :if-does-not-exist :create)
+     (with-open-file (f (concatenate 'string *outputdir* "stroop.txt") :direction :output :if-exists :append :if-does-not-exist :create)
        (dolist (x (reverse *results*))
          (format t "~%STROOP ~A ~D ~D ~D ~A ~D ~6,3F" condition (1+ i) day (first x) (third x)(if (fourth x) 1 0)(second x))
          (format f "STROOP ~A ~D ~D ~D ~A ~D ~6,3F~%" condition (1+ i) day (first x) (third x)(if (fourth x) 1 0)(second x))
@@ -304,8 +305,6 @@
 ;;;
 ;;; Day 6: same as day 1
 
-
-
   
 (defun do-karbach-full (&optional (conditions '(single switch)))
  (dolist (cnd conditions)
@@ -313,17 +312,22 @@
   (sgp :v nil :save-buffer-trace nil)
   (setf *verbose* nil)
   ;;; Day 1
-  (do-count-span t)
+  (do-count-span)
   (report-count-span 1 cnd)
-  (do-stroop 1 cnd t) 
+  (reset)
+  (sgp :v nil :save-buffer-trace nil)
+  (setf *verbose* nil)
+  (do-stroop 1 cnd) 
+  (reset)
+  (sgp :v nil :save-buffer-trace nil)
+  (setf *verbose* nil)
  (let ((schedule '(A B A B AB AB A B AB AB A AB AB B AB AB A AB AB B AB AB))
         (alist '((A single-task-a)(B single-task-b)(AB task-switching-AB))))
     (dolist (x schedule)
        (set-task (second (assoc x alist)))
        (init-task)
-       (sgp :alpha 0.0) ;;; no learning during the pretest of task switching, because it messes up other stuff
        (run 500)
-     (with-open-file (f "~/task-switching.txt" :direction :output :if-exists :append :if-does-not-exist :create)
+     (with-open-file (f (concatenate 'string *outputdir* "task-switching.txt") :direction :output :if-exists :append :if-does-not-exist :create)
 
        (dolist (y (reverse *Results*))
        	(let ((tp (cond ((and (eq x 'AB)(= (mod (first y) 2) 0)) 'repeat)
@@ -332,6 +336,9 @@
          (Format t "~%~A 1 ~A ~A ~D ~6,3F" cnd x tp (first y)(second y))
          (Format f "~A 1 ~A ~A ~D ~6,3F~%" cnd x tp (first y)(second y))
          )))))
+  (reset)
+  (sgp :v nil :save-buffer-trace nil)
+  (setf *verbose* nil)
    ;;; Day 2-5
    (dotimes (day 4)
   (let ((schedule (if (eq cnd 'single)
@@ -358,7 +365,7 @@
        (set-task (second (assoc x alist)))
        (init-task)
        (run 500)
-     (with-open-file (f "~/task-switching.txt" :direction :output :if-exists :append :if-does-not-exist :create)
+     (with-open-file (f (concatenate 'string *outputdir* "task-switching.txt") :direction :output :if-exists :append :if-does-not-exist :create)
        (dolist (y (reverse *Results*))
        	(let ((tp (cond ((and (eq x 'AB)(= (mod (first y) 2) 0)) 'repeat)
        				     ((eq x 'AB) 'switch)
@@ -418,30 +425,30 @@
 
 ;;; Instructions for the count span task
 
-(add-instr count-span :input (Vobject Vcolor Vshape) :variables (WMcount WMtop WMcurrent)  :declarative ((RTcount RTfirst RTsecond))
+(add-instr count-span :input (Vobject Vcolor Vshape) :variables (WMcount WMprev)  :declarative ((RTcount RTfirst RTsecond)(RTcount RTprev))
 :pm-function count-span-action
 :init init-count-span
 :reward 10.0 ;; might take long
-:parameters ((sgp :lf 0.05 :egs 0.3 :ans 0.1 :rt -0.8 :state-activation 0.0 :imaginal-activation 1.0 :mas nil :alpha 0.03)(setf *condition-spread* 1.0)             (setf *verbose* nil)
+:parameters ((sgp :lf 0.05 :egs 0.3 :ans 0.1 :rt -0.7 :perception-activation 0.0 :imaginal-activation 1.0 :mas nil :alpha 0.03)(setf *condition-spread* 1.0)   
+             (spp retrieve-instruction :u 2.0)
+          (setf *verbose* nil)
 )  ;; :ans was 0.2
-(ins :condition (WMcount = nil) :action (count-squares -> Gcontrol zero -> WMcount  (wait) -> AC) :description "Set count to zero and wait for first screen")
+(ins :condition (WMcount = nil) :action (count-squares -> Gcontrol zero -> WMcount WMid -> Gtop (wait) -> AC) :description "Set count to zero and wait for first screen")
 (ins :condition (Vobject = yes  Vcolor <> blue  Gcontrol = count-squares) :action ((attend-next) -> AC) :description "Green thing, so ignore")
 (ins :condition (Vobject = yes  Vshape <> circle  Gcontrol = count-squares) :action ((attend-next) -> AC) :description "Square, so ignore")
 (ins :condition (Vcolor = blue  Vshape = circle  RTsecond = nil  Gcontrol = count-squares) :action ( (count-fact WMcount) -> RT) :description "Blue circle, retrieve next count")
 (ins :condition (RTsecond <> nil  Gcontrol = count-squares) :action (RTsecond -> WMcount (attend-next) -> AC) :description "Update count, attend next object")
-(ins :condition (Vobject = last  WMtop = nil Gcontrol = count-squares) :action (  (top WMcount) -> EP EPself -> WMtop EPself -> WMcurrent pre-rehearse -> Gcontrol  (say WMcount) -> AC) :description "No more objects, remember count as first item")
-(ins :condition (Vobject = last  WMtop <> nil  Gcontrol = count-squares) :action ( (WMcurrent WMcount) -> EP EPself -> WMcurrent pre-rehearse -> Gcontrol (say WMcount) -> AC) :description "No more objects, remember count as next item on the list")
+(ins :condition (Vobject = last Gcontrol = count-squares) :action ((zero WMid) -> newWM pre-rehearse -> Gcontrol (say WMcount) -> AC) :description "No more object, remember count")
+;(ins :condition (Vobject = last  WMtop = nil Gcontrol = count-squares) :action (  (top WMcount) -> EP EPself -> WMtop EPself -> WMcurrent pre-rehearse -> Gcontrol  (say WMcount) -> AC) :description "No more objects, remember count as first item")
+;(ins :condition (Vobject = last  WMtop <> nil  Gcontrol = count-squares) :action ( (WMcurrent WMcount) -> EP EPself -> WMcurrent pre-rehearse -> Gcontrol (say WMcount) -> AC) :description "No more objects, remember count as next item on the list")
 (ins :condition (Vobject = pending) :action ((wait) -> AC) :description "If there is nothing to see, just wait")
-(ins :condition (Vobject = pending  Gcontrol = pre-rehearse) :action ((WMtop) -> RT (suppress-pending) -> AC rehearse-top -> Gcontrol) :description "If there is nothing to see, start rehearsing!")
-(ins :condition (Gcontrol = rehearse-top RT1 <> error) :action ((? RTself) -> RT rehearse -> Gcontrol) :description "Rehearse the next item")
-(ins :condition (Gcontrol = rehearse-top RT1 = error) :action ((top WMcount) -> EP EPself -> WMtop EPself -> WMcurrent pre-rehearse -> Gcontrol) :description "If we have lost the list, start a new one")
-(ins :condition (Vobject = yes Gcontrol = pre-rehearse) :action (count-squares -> Gcontrol zero -> WMcount) :description "If a new screen is up, start a new count")
-
-(ins :condition (RT1 <> error Gcontrol = rehearse) :action ((? RTself) -> RT) :description "Rehearse the next item")
+(ins :condition (Vobject = pending  Gcontrol = pre-rehearse) :action (Gtop -> RTid (suppress-pending) -> AC rehearse -> Gcontrol) :description "If there is nothing to see, start rehearsing!")
+(ins :condition (Gcontrol = rehearse RT1 <> error) :action (RTid -> RTprev rehearse -> Gcontrol) :description "Rehearse the next item")
+(ins :condition (Vobject = yes Gcontrol = pre-rehearse) :action (count-squares -> Gcontrol) :description "If a new screen is up, start a new count")
 (ins :condition (RT1 = error  Gcontrol = rehearse) :action (pre-rehearse -> Gcontrol) :description "If we're done with the list, start again!")
-(ins :condition (Vobject = report  Gcontrol = pre-rehearse) :action ((WMtop) -> RT  report -> Gcontrol ) :description "Report is asked for, retrieve first item")
+(ins :condition (Vobject = report  Gcontrol = pre-rehearse) :action (Gtop -> RTid  report -> Gcontrol ) :description "Report is asked for, retrieve first item")
 
-(ins :condition (RT1 <> error Gcontrol = report) :action ((? RTself) -> RT  (report  RTitem1) -> AC) :description "Report item and retrieve next")
+(ins :condition (RT1 <> error Gcontrol = report) :action (RTid -> RTprev  (report  RTcount) -> AC) :description "Report item and retrieve next")
 (ins :condition (RT1 = error  Gcontrol = report) :action (finish -> Gtask) :description "No more items: done")
 )
 
@@ -460,7 +467,8 @@
 :init init-single-task-AB
 :reward 10.0
 :facts ((isa fact slot1 mapping slot2 vegetable slot3 "s")(isa fact slot1 mapping slot2 fruit slot3 "k"))
-:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :state-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )(setf *condition-spread* 1.0)             (setf *verbose* nil)
+:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :perception-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )             (spp retrieve-instruction :u 2.0)
+(setf *condition-spread* 1.0)             (setf *verbose* nil)
 )
 ;;; Initialize the first trial
 (ins :condition (Vobject = pending) :action ((wait) -> AC) :description "Wait for next stimulus")
@@ -476,7 +484,8 @@
 :init init-single-task-AB
 :reward 10.0
 :facts ((isa fact slot1 mapping slot2 small slot3 "s")(isa fact slot1 mapping slot2 large slot3 "k"))
-:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :state-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )(setf *condition-spread* 1.0)             (setf *verbose* nil)
+:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :perception-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )             (spp retrieve-instruction :u 2.0)
+(setf *condition-spread* 1.0)             (setf *verbose* nil)
 )
 ;;; Initialize the first trial
 (ins :condition (Vobject = pending) :action ((wait) -> AC))
@@ -493,19 +502,21 @@
 :init init-single-task-AB
 :reward 10.0
 :facts ((isa fact slot1 other-task slot2 food-task slot3 size-task)(isa fact slot1 other-task slot2 size-task slot3 food-task))
-:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :state-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )(setf *condition-spread* 1.0)             (setf *verbose* nil)
+:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :perception-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )             (spp retrieve-instruction :u 2.0)
+(setf *condition-spread* 1.0)             (setf *verbose* nil)
 )
 
 (ins :condition (WMcur-task = nil) :action (food-task -> WMcur-task  one -> WMcount do-task -> Gcontrol (wait) -> AC) :description "Initialize task, set task to food, wait for first stimulus")
 (ins :condition (Gcontrol = do-task Vobject = yes WMcur-task = food-task ) :action ((get-property food-property) -> AC) :description "Task is food so get food property")
 (ins :condition (Gcontrol = do-task Vobject = yes WMcur-task = size-task) :action  ((get-property size-property) -> AC) :description "Task is size so get size property")
-(ins :condition (Vfood <> nil RTkey = nil WMcur-task = food-task) :action ((mapping Vfood) -> RT) :description "Get food - key mapping")
-(ins :condition (Vsize <> nil RTkey = nil WMcur-task = size-task) :action ((mapping Vsize) -> RT) :description "Get Size - key mapping")
+(ins :condition (Vfood <> nil RTkey = nil) :action ((mapping Vfood) -> RT) :description "Get food - key mapping")
+(ins :condition (Vsize <> nil RTkey = nil) :action ((mapping Vsize) -> RT) :description "Get Size - key mapping")
 (ins :condition (Gcontrol = do-task RTkey <> nil) :action ((press-key RTkey) -> AC) :description "Press appropriate key")
 (ins :condition (Vobject = pending  Gcontrol = do-task) :action (choose-task -> Gcontrol) :description "While waiting determine next task")
+(ins :condition (Vobject = pending  Gcontrol <> choose-task) :action (choose-task -> Gcontrol (wait) -> AC) :description "Not preparing but waiting")
 (ins :condition (WMcount = one Gcontrol = choose-task) :action (do-task -> Gcontrol two -> WMcount (wait) -> AC) :description "If we have done the task once increase count and wait")
 (ins :condition (RTsecond = nil WMcount = two Gcontrol = choose-task ) :action ((other-task WMcur-task) -> RT) :description "If we have done it twice retrieve the other task")
-(ins :condition (RTsecond <> nil WMcount = two Gcontrol = choose-task ) :action (do-task -> Gcontrol one -> WMcount RTsecond -> WMcur-task (wait) -> AC) :description "Set the task to the retrieved task, counter to one, and wait")
+(ins :condition (RTsecond <> nil Gcontrol = choose-task ) :action (do-task -> Gcontrol one -> WMcount RTsecond -> WMcur-task (wait) -> AC) :description "Set the task to the retrieved task, counter to one, and wait")
 (ins :condition (Vobject = last) :action (finish -> Gtask) :description "Done with the block")
 )
 
@@ -517,7 +528,8 @@
 :init init-single-task-AB
 :reward 10.0
 :facts ((isa fact slot1 mapping slot2 plane slot3 "s")(isa fact slot1 mapping slot2 car slot3 "k"))
-:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :state-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )(setf *condition-spread* 1.0)             (setf *verbose* nil)
+:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :perception-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )             (spp retrieve-instruction :u 2.0)
+(setf *condition-spread* 1.0)             (setf *verbose* nil)
 )
 ;;; Initialize the first trial
 (ins :condition (Vobject = pending) :action ((wait) -> AC))
@@ -534,7 +546,8 @@
 :init init-single-task-AB
 :reward 10.0
 :facts ((isa fact slot1 mapping slot2 one slot3 "s")(isa fact slot1 mapping slot2 two slot3 "k"))
-:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :state-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )(setf *condition-spread* 1.0)             (setf *verbose* nil)
+:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :perception-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )             (spp retrieve-instruction :u 2.0)
+(setf *condition-spread* 1.0)             (setf *verbose* nil)
 )
 ;;; Initialize the first trial
 (ins :condition (Vobject = pending) :action ((wait) -> AC))
@@ -549,24 +562,26 @@
 :init init-single-task-AB
 :reward 10.0
 :facts ((isa fact slot1 other-task slot2 transport-task slot3 number-task)(isa fact slot1 other-task slot2 number-task slot3 transport-task))
-:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :state-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )(setf *condition-spread* 1.0)             (setf *verbose* nil)
+:parameters ((sgp :lf 0.05 :egs 0.04 :rt 0.0 :perception-activation 0.0 :mas nil :alpha 0.03 :imaginal-activation 0.0 )             (spp retrieve-instruction :u 2.0)
+(setf *condition-spread* 1.0)             (setf *verbose* nil)
 )
 
 (ins :condition (WMcur-task = nil) :action (transport-task -> WMcur-task  one -> WMcount do-task -> Gcontrol (wait) -> AC))
 (ins :condition (Gcontrol = do-task Vobject = yes WMcur-task = transport-task ) :action ((get-property transport-property) -> AC))
 (ins :condition (Gcontrol = do-task Vobject = yes WMcur-task = number-task) :action  ((get-property number-property) -> AC))
-(ins :condition (Vtransport <> nil RTkey = nil WMcur-task = transport-task) :action ((mapping Vtransport) -> RT))
-(ins :condition (Vnumber <> nil RTkey = nil WMcur-task = number-task) :action ((mapping Vnumber) -> RT))
+(ins :condition (Vtransport <> nil RTkey = nil) :action ((mapping Vtransport) -> RT))
+(ins :condition (Vnumber <> nil RTkey = nil) :action ((mapping Vnumber) -> RT))
 (ins :condition (Gcontrol = do-task RTkey <> nil) :action ((press-key RTkey) -> AC))
 (ins :condition (Vobject = pending  Gcontrol = do-task) :action (choose-task -> Gcontrol))  ;; 32
+;(ins :condition (Vobject = pending  Gcontrol <> choose-task) :action (choose-task -> Gcontrol (wait) -> AC) :description "Not preparing but waiting")
 (ins :condition (WMcount = one Gcontrol = choose-task) :action (do-task -> Gcontrol two -> WMcount (wait) -> AC))
 (ins :condition (RTsecond = nil WMcount = two Gcontrol = choose-task ) :action ((other-task WMcur-task) -> RT))
-(ins :condition (RTsecond <> nil WMcount = two Gcontrol = choose-task ) :action (do-task -> Gcontrol one -> WMcount RTsecond -> WMcur-task (wait) -> AC))
+(ins :condition (RTsecond <> nil Gcontrol = choose-task ) :action (do-task -> Gcontrol one -> WMcount RTsecond -> WMcur-task (wait) -> AC))
 (ins :condition (Vobject = last) :action (finish -> Gtask))
 )
 
 
-(add-instr stroop :input (Vobject Vcolor Vword) :variables (WMconcept) :declarative ((RTmapping RTstimulus RTconcept RTstim-type))
+(add-instr stroop :input (Vobject Vcolor Vword)  :declarative ((RTmapping RTstimulus RTconcept RTstim-type))
 :pm-function stroop-pm
 :init stroop-init
 :reward 13.0
@@ -575,8 +590,9 @@
         (red-color-assoc isa fact slot1 s-mapping slot2 red-color slot3 red-concept slot4 color-task)
         (blue-color-assoc isa fact slot1 s-mapping slot2 blue-color slot3 blue-concept slot4 color-task)
         (red-color isa chunk)(red-word isa chunk)(blue-color isa chunk)(blue-word isa chunk)(train-word isa chunk))
-:parameters ((sgp :lf 0.05 :egs 0.3 :rt -2.0 :state-activation 2.0 :mas 3.0 :alpha 0.02 :imaginal-activation 0.0 )(setf *condition-spread* 1.0) 
-             (sdp (red-color-assoc blue-color-assoc red-word-assoc blue-word-assoc) :references 1000 :creation-time -20000000)
+:parameters ((sgp :lf 0.05 :egs 0.3 :rt -3.0 :perception-activation 2.0 :mas 3.0 :alpha 0.02 :imaginal-activation 0.0 )             (spp retrieve-instruction :u 1.0)
+(setf *condition-spread* 1.0) 
+             (sdp (red-color-assoc blue-color-assoc red-word-assoc blue-word-assoc) :references 1000 :creation-time -40000000)
              (add-sji (red-word red-word-assoc 1.5)(red-word blue-word-assoc -1.5)
              		  (red-color blue-color-assoc -1.5)(red-color red-color-assoc 1.5)
              		  (blue-word red-word-assoc -1.5)(blue-word blue-word-assoc 1.5)
@@ -587,12 +603,12 @@
              
              )
 
-(ins :condition (Gcontrol = nil) :action (color-task -> Gcontrol  (wait) -> AC) :description "Start Stroop task, wait for stimulus")
-(ins :condition (Vobject = yes Gcontrol = color-task) :action ((get-property color-property) -> AC) :description "Object seen, focus on just color") 
+(ins :condition (Gcontrol = nil) :action (prepare -> Gcontrol  (wait) -> AC) :description "Start Stroop task, wait for stimulus")
+(ins :condition (Vobject = yes Gcontrol = prepare) :action ((get-property color-property) -> AC) :description "Object seen, focus on just color") 
 (ins :condition (Vobject = yes) :action ((get-property both) -> AC) :description "Object seen, focus on all")
 (ins :condition (Vcolor <> nil RTconcept = nil) :action ( (s-mapping Vcolor) -> RT) :description "Retrieve color concept of the ink color")
-(ins :condition (RTconcept <> nil) :action ((say RTconcept) -> AC none -> Gcontrol) :description "Say the answer") 
-(ins :condition (Vobject = pending  Gcontrol = none) :action (color-task -> Gcontrol wait -> AC1) :description "Prepare to focus on the color of the next stimulus")  
+(ins :condition (RTconcept <> nil) :action ((say RTconcept) -> AC neutral -> Gcontrol) :description "Say the answer") 
+(ins :condition (Vobject = pending  Gcontrol = neutral) :action (wait -> AC1 prepare -> Gcontrol) :description "Prepare to focus on the color of the next stimulus")  
 (ins :condition (Vobject = pending) :action ((wait) -> AC) :description "Wait for the next stimulus without preparation")
 (ins :condition (Vobject = last) :action (finish -> Gtask) :description "Done with this block")
 
