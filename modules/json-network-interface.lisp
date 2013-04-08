@@ -141,7 +141,7 @@
       (send-command instance "set-mp-time" (jsown:new-js ("time" (mp-time))) :sync t)))
 
 (defmethod device-handle-keypress ((instance json-interface-module) key)
-  (send-command instance "keypress" (jsown:new-js ("keycode" char-code) ("unicode" key))
+  (send-command instance "keypress" (jsown:new-js ("keycode" (char-code key)))
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-move-cursor-to ((instance json-interface-module) loc)
