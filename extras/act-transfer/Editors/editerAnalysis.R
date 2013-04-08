@@ -33,6 +33,37 @@ lines(dat.edtedemacs,type="b",pch=2,lty=2)
 lines(dat.emacsemacsemacs,type="b",pch=1)
 legend(3.5,90,legend=c("edt-edt-emacs","ed-ed-emacs","edt-ed-emacs","ed-edt-emacs","emacs-emacs-emacs"),lty=c(1,1,3,3,1),pch=c(4,2,2,4,1),bg="white")
 
+# Data plot, but now split into three panels
+
+quartz(width=6,height=6)
+
+par(lwd=2)
+plot(1:6,dat.ededemacs,ylim=c(0,100),xlab="Day",ylab="Seconds/correct operation",type="b",pch=2)
+abline(v=2.5,lty=3,lwd=1)
+abline(v=4.5,lty=3,lwd=1)
+
+lines(dat.edtedtemacs,type="b",pch=4)
+#lines(dat.ededtemacs,type="b",pch=4,lty=2)
+#lines(dat.edtedemacs,type="b",pch=2,lty=2)
+lines(dat.emacsemacsemacs,type="b",pch=1)
+legend(3.5,90,legend=c("edt-edt-emacs","ed-ed-emacs","emacs-emacs-emacs"),lty=1,pch=c(4,2,1),bg="white")
+
+quartz(width=6,height=6)
+par(lwd=2)
+plot(1:6,dat.ededemacs,ylim=c(0,100),type="b",pch=2,xlab="Day",ylab="Seconds/correct operation",)
+abline(v=2.5,lty=3,lwd=1)
+abline(v=4.5,lty=3,lwd=1)
+lines(dat.edtedemacs,type="b",pch=4,lty=2)
+legend(3.5,90,legend=c("edt-ed-emacs","ed-ed-emacs"),pch=2,lty=c(3,1),bg="white")
+
+quartz(width=6,height=6)
+par(lwd=2)
+plot(1:6,dat.edtedtemacs,ylim=c(0,100),type="b",pch=4,xlab="Day",ylab="Seconds/correct operation",)
+abline(v=2.5,lty=3,lwd=1)
+abline(v=4.5,lty=3,lwd=1)
+lines(dat.ededtemacs,type="b",pch=4,lty=2)
+legend(3.5,90,legend=c("edt-edt-emacs","ed-edt-emacs"),pch=4,lty=c(1,3),bg="white")
+
 # Plot the model
 
 quartz(width=6,height=6)
@@ -43,6 +74,38 @@ lines(dat.m["ED-EDT-EMACS",],type="b",pch=4,lty=2)
 lines(dat.m["EDT-ED-EMACS",],type="b",pch=2,lty=2)
 lines(dat.m["EMACS-EMACS-EMACS",],type="b")
 legend(3.5,90,legend=c("edt-edt-emacs","ed-ed-emacs","edt-ed-emacs","ed-edt-emacs","emacs-emacs-emacs"),lty=c(1,1,3,3,1),pch=c(4,2,2,4,1),bg="white")
+
+# Same, but now split into three panels
+
+quartz(width=6,height=6)
+
+par(lwd=2)
+plot(1:6,dat.m["ED-ED-EMACS",],ylim=c(0,100),xlab="Day",ylab="Seconds/correct operation",type="b",pch=2)
+abline(v=2.5,lty=3,lwd=1)
+abline(v=4.5,lty=3,lwd=1)
+
+lines(dat.m["EDT-EDT-EMACS",],type="b",pch=4)
+lines(dat.m["EMACS-EMACS-EMACS",],type="b")
+legend(3.5,90,legend=c("edt-edt-emacs","ed-ed-emacs","emacs-emacs-emacs"),lty=1,pch=c(4,2,1),bg="white")
+
+quartz(width=6,height=6)
+par(lwd=2)
+plot(1:6,dat.m["ED-ED-EMACS",],ylim=c(0,100),type="b",pch=2,xlab="Day",ylab="Seconds/correct operation",)
+abline(v=2.5,lty=3,lwd=1)
+abline(v=4.5,lty=3,lwd=1)
+lines(dat.m["EDT-ED-EMACS",],type="b",pch=2,lty=2)
+legend(3.5,90,legend=c("edt-ed-emacs","ed-ed-emacs"),pch=2,lty=c(3,1),bg="white")
+
+quartz(width=6,height=6)
+par(lwd=2)
+plot(1:6,dat.m["EDT-EDT-EMACS",],ylim=c(0,100),type="b",pch=4,xlab="Day",ylab="Seconds/correct operation",)
+abline(v=2.5,lty=3,lwd=1)
+abline(v=4.5,lty=3,lwd=1)
+lines(dat.m["ED-EDT-EMACS",],type="b",pch=4,lty=2)
+legend(3.5,90,legend=c("edt-edt-emacs","ed-edt-emacs"),pch=4,lty=c(1,3),bg="white")
+
+
+
 
 # Calculate transfer
 
