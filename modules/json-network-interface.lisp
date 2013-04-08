@@ -7,40 +7,6 @@
 ;; Copyright   : (c)2012-2013 Ryan M. Hope
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; Description : This module provides a way for any any remote environment to
-;;               interface with ACT-R over a TCP connection.
-;;
-;;               Each TCP call is comprised of a JSON encoded array terminated
-;;               with a carraige return and linefeed. The array has 3 required
-;;               elements:
-;;                   1) The name or id of current model 
-;;                   2) The method being invoked
-;;                   3) An array of optional parameters for the invoked method
-;;
-;;               Ex: "[\"model1\",\"device-move-cursor-to\",[[234,45]]]"
-;;
-;;               The remote environment should implement a server interface
-;;               which listens for connections from ACT-R on a given port. This
-;;               module implements a client which will connect to the remote
-;;               environment when the device is installed.
-;;
-;;               All requests for information made by the model are fulfilled
-;;               with data stored in the module. It is the responsibility of
-;;               the remote environment server to update module when things in
-;;               the environment change.
-;;
-;;               All actions performed by the model on the environment are sent
-;;               directly to the remote server.
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; TODOs       : - Support chunk names
-;;               - Handle 'cursor-to-vis-loc' properly
-;;               - Add support for 'onset' param for new-*-sound commands
-;;               - Support multiple simultaneous models
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((*compile-file-pathname* nil))
@@ -297,7 +263,7 @@
                    (list (define-parameter :jni-hostname)
                          (define-parameter :jni-port)
                          (define-parameter :jni-sync))
-                   :version "2.0"
+                   :version "1.0"
                    :documentation "Module based manager for remote TCP environments using JSON"
                    :params 'params-json-netstring-module
                    :creation 'create-json-netstring-module
