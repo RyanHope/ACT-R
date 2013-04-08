@@ -105,39 +105,37 @@
        (let ((line (read-line (jstream instance))))
          (if line
              (let* ((o (jsown:parse line))
-                    (model (first o))
-                    (method (second o))
-                    (params (third o)))
+                    (model (jsown:val o "model"))
+                    (method (jsown:val o "method"))
+                    (params (jsown:val o "params")))
                (cond 
                 ((string= method "disconnect")
                  (return))
                 ((string= method "trigger-event")
-                 (let ((callback (gethash (read-from-string (pop params)) (event-hooks instance))))
+                 (let ((callback (gethash (read-from-string (jsown:val params "event")) (event-hooks instance))))
                    (if callback
-                       (apply callback params))))
+                       (apply callback (jsown:val params "args")))))
                 ((string= method "setup")
-                 (setf (width instance) (pop params))
-                 (setf (height instance) (pop params)))
+                 (setf (width instance) (jsown:val params "width"))
+                 (setf (height instance) (jsown:val params "height")))
                 ((string= method "sync")
                  (bordeaux-threads:condition-notify (sync-cond instance)))
                 ((string= method "update-display")
                  (progn
-                   (lock-device (current-device-interface))
-                   (setf (display instance) (json->chunkpairs (pop params)))
-                   (proc-display :clear (pop params))
-                   (unlock-device (current-device-interface))))
+                   (setf (display instance) (json->chunkpairs (jsown:val params "chunks")))
+                   (proc-display :clear (jsown:val params "clear"))))
                 ((string= method "trigger-reward")
-                 (trigger-reward (pop params)))
+                 (trigger-reward (jsown:val params "reward")))
                 ((string= method "set-cursor-loc")
-                 (setf (cursor-loc instance) (pop params)))
+                 (setf (cursor-loc instance) (jsown:val params "loc")))
                 ((string= method "new-digit-sound")
-                 (new-digit-sound (pop params)))
+                 (new-digit-sound (jsown:val params "digit")))
                 ((string= method "new-tone-sound")
-                 (new-tone-sound (pop params) (pop params)))
+                 (new-tone-sound (jsown:val params "frequency") (jsown:val params "duration")))
                 ((string= method "new-word-sound")
-                 (new-word-sound (pop params)))
+                 (new-word-sound (jsown:val params "words")))
                 ((string= method "new-other-sound")
-                 (new-other-sound (pop params) (pop params) (pop params) (pop params)))))
+                 (new-other-sound (jsown:val params "content") (jsown:val params "onset") (jsown:val params "delay") (jsown:val params "recode")))))
            (return-from read-stream "Nothing to read"))))
     (usocket:connection-aborted-error () (return-from read-stream "Connection aborted"))
     (usocket:connection-reset-error () (return-from read-stream "Connection reset"))
@@ -145,24 +143,6 @@
     (usocket:socket-error () (return-from read-stream "Socket error"))
     (end-of-file () (return-from read-stream "End of file"))))
 
-(defmethod send-raw ((instance json-interface-module) string)
-  (write-string string (jstream instance))
-  (write-char #\return (jstream instance))
-  (write-char #\linefeed (jstream instance))
-  (force-output (jstream instance)))
-
-(defmethod send-command ((instance json-interface-module) mid method params &key sync)
-  (let ((mid (format nil "~a" (current-model))))
-    (send-raw instance (jsown:to-json (list mid method params)))
-    (if sync
-        (bordeaux-threads:with-recursive-lock-held 
-            ((sync-lock instance))
-          (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance))))))
-
-(defmethod send-mp-time ((instance json-interface-module))
-  (if (jstream instance)
-      (send-command instance (current-model) "set-mp-time" (list (mp-time)) :sync t)))
-      
 (defmethod cleanup ((instance json-interface-module))
   (if (jstream instance)
       (close (jstream instance)))
@@ -176,27 +156,60 @@
   (setf (thread instance) nil)
   (setf (sync-event instance) nil))
 
+(defmethod send-raw ((instance json-interface-module) string)
+  (write-string string (jstream instance))
+  (write-char #\return (jstream instance))
+  (write-char #\linefeed (jstream instance))
+  (force-output (jstream instance)))
+
+(defmethod send-command ((instance json-interface-module) method params &key sync)
+  (let ((mid (format nil "~a" (current-model))))
+    (send-raw instance (jsown:to-json (jsown:new-js ("model" mid) ("method" method) ("params" params))))
+    (if sync
+        (bordeaux-threads:with-recursive-lock-held 
+            ((sync-lock instance))
+          (bordeaux-threads:condition-wait (sync-cond instance) (sync-lock instance))))))
+
+(defmethod send-mp-time ((instance json-interface-module))
+  (if (jstream instance)
+      (send-command instance "set-mp-time" (jsown:new-js ("time" (mp-time))) :sync t)))
+
 (defmethod device-handle-keypress ((instance json-interface-module) key)
-  (send-command instance (current-model) "keypress" (list (char-code key))
+  (send-command instance "keypress" (jsown:new-js ("keycode" char-code) ("unicode" key))
                 :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-move-cursor-to ((instance json-interface-module) loc)
+  (send-command instance "mousemotion" (jsown:new-js ("loc" (list (aref loc 0) (aref loc 1))))
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-handle-click ((instance json-interface-module))
+  (send-command instance "mouseclick" (jsown:new-js ("button" 1))
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-speak-string ((instance json-interface-module) msg)
+  (send-command instance "speak" (jsown:new-js ("message" msg))
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-update-eye-loc ((instance json-interface-module) loc)
+  (when loc (setf loc (list (aref loc 0) (aref loc 1))))
+  (send-command instance "gaze-loc" (jsown:new-js ("loc" loc))
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-update-attended-loc ((instance json-interface-module) loc)
+  (when loc (setf loc (list (aref loc 0) (aref loc 1))))
+  (send-command instance "attention-loc" (jsown:new-js ("loc" loc))
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod disconnect ((instance json-interface-module))
+  (send-command instance "disconnect" nil)
+  (if (thread instance)
+      (bordeaux-threads:join-thread (thread instance))))
 
 (defmethod get-mouse-coordinates ((instance json-interface-module))
   (cursor-loc instance))
 
 (defmethod cursor-to-vis-loc ((instance json-interface-module))
   nil)
-
-(defmethod device-move-cursor-to ((instance json-interface-module) loc)
-  (send-command instance (current-model) "mousemotion" (list (list (aref loc 0) (aref loc 1)))
-                :sync (not (numberp (jni-sync instance)))))
-
-(defmethod device-handle-click ((instance json-interface-module))
-  (send-command instance (current-model) "mouseclick" 1
-                :sync (not (numberp (jni-sync instance)))))
-
-(defmethod device-speak-string ((instance json-interface-module) msg)
-  (send-command instance (current-model) "speak" (list msg)
-                :sync (not (numberp (jni-sync instance)))))
 
 (defmethod build-vis-locs-for ((instance json-interface-module) vis-mod)
   (declare (ignore vis-mod))
@@ -207,21 +220,6 @@
   (if (display instance)
     (cdr (assoc vis-loc (display instance)))))
 
-(defmethod device-update-eye-loc ((instance json-interface-module) loc)
-  (when loc (setf loc (list (aref loc 0) (aref loc 1))))
-  (send-command instance (current-model) "gaze-loc" (list loc)
-                :sync (not (numberp (jni-sync instance)))))
-
-(defmethod device-update-attended-loc ((instance json-interface-module) loc)
-  (when loc (setf loc (list (aref loc 0) (aref loc 1))))
-  (send-command instance (current-model) "attention-loc" (list loc)
-                :sync (not (numberp (jni-sync instance)))))
-
-(defmethod disconnect ((instance json-interface-module))
-  (send-command instance (current-model) "disconnect" nil)
-  (if (thread instance)
-      (bordeaux-threads:join-thread (thread instance))))
-
 (defun create-json-netstring-module (name)
   (declare (ignore name))
   (make-instance 'json-interface-module))
@@ -230,7 +228,7 @@
   (setf (running instance) nil)
   (if (and (socket instance) (jstream instance) (thread instance))
       (progn
-        (send-command instance (current-model) "reset" (list (numberp (jni-sync instance))) :sync t)
+        (send-command instance "reset" (jsown:new-js ("time-lock" (numberp (jni-sync instance)))) :sync t)
         (install-device instance))
     (if (and (current-model) (jni-hostname instance) (jni-port instance))
         (connect instance))))
@@ -263,7 +261,7 @@
         (if (numberp (jni-sync instance))
             (setf (sync-event instance)
                   (schedule-periodic-event (jni-sync instance) (lambda () (send-mp-time instance)) :maintenance t)))
-        (send-command instance (current-model) "model-run" (list (running instance)) :sync t)
+        (send-command instance "model-run" (jsown:new-js ("resume" (running instance))) :sync t)
         (setf (running instance) t))))
 
 (defun run-end-json-netstring-module (instance)
@@ -271,7 +269,7 @@
       (progn
         (if (sync-event instance)
             (delete-event (sync-event instance)))
-        (send-command instance (current-model) "model-stop" nil))))
+        (send-command instance "model-stop" nil))))
 
 (defun jni-register-event-hook (event hook)
   (setf (gethash event (event-hooks (get-module json-interface))) hook))
