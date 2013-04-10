@@ -260,7 +260,7 @@
           (let ((devin (current-device-interface)))
             (when (show-focus-p devin)
               (device-update-attended-loc2 (device devin) nil)
-              (device-update-gaze-loc (device devin) nil))
+              (device-update-eye-loc (device devin) nil))
             (setf (device devin) device)))))
 
 (defun reset-json-netstring-module (instance)
