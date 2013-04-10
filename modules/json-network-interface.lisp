@@ -8,6 +8,7 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+#-jni-bundle
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((*compile-file-pathname* nil))
     (asdf:load-system :usocket)
@@ -30,6 +31,15 @@
    (width :accessor width :initform 0)
    (height :accessor height :initform 0)
    (running :accessor running :initform nil)))
+
+(defun jni-install-device (device)
+  (verify-current-mp  
+      (verify-current-model
+          (let ((devin (current-device-interface)))
+            (when (show-focus-p devin)
+              (device-update-attended-loc (device devin) nil)
+              (device-update-gaze-loc (device devin) nil))
+            (setf (device devin) device)))))
 
 (defun json->chunk (lst-of-lsts)
   "generate one define-chunks call from a list of chunk specs"
@@ -161,7 +171,7 @@
   (send-command instance "gaze-loc" (jsown:new-js ("loc" loc))
                 :sync (not (numberp (jni-sync instance)))))
 
-(defmethod device-update-attended-loc ((instance json-interface-module) loc)
+(defmethod device-update-attended-loc2 ((instance json-interface-module) loc)
   (when loc (setf loc (list (aref loc 0) (aref loc 1))))
   (send-command instance "attention-loc" (jsown:new-js ("loc" loc))
                 :sync (not (numberp (jni-sync instance)))))
@@ -195,7 +205,7 @@
   (if (and (socket instance) (jstream instance) (thread instance))
       (progn
         (send-command instance "reset" (jsown:new-js ("time-lock" (numberp (jni-sync instance)))) :sync t)
-        (install-device instance))
+        (jni-install-device instance))
     (if (and (current-model) (jni-hostname instance) (jni-port instance))
         (connect instance))))
 
@@ -209,7 +219,7 @@
         (setf (socket instance) (usocket:socket-connect (jni-hostname instance) (jni-port instance)))
         (setf (jstream instance) (usocket:socket-stream (socket instance)))
         (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
-        (install-device instance))
+        (jni-install-device instance))
     (usocket:connection-refused-error () 
       (progn
         (print-warning "Connection refused. Is remote environment server running?")
@@ -259,6 +269,9 @@
       (:jni-port (jni-port instance))
       (:jni-sync (jni-sync instance)))))
 
+(defun update-json-netstring-module (instance old-time new-time)
+  (print-warning "UPDATE: ~A ~A" old-time new-time))
+
 (define-module-fct 'json-interface nil
                    (list (define-parameter :jni-hostname)
                          (define-parameter :jni-port)
@@ -270,4 +283,5 @@
                    :reset (list nil nil 'reset-json-netstring-module)
                    :delete 'delete-json-netstring-module
                    :run-start 'run-start-json-netstring-module
-                   :run-end 'run-end-json-netstring-module)
+                   :run-end 'run-end-json-netstring-module
+                   :update 'update-json-netstring-module)

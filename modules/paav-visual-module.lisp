@@ -1886,6 +1886,18 @@
 	)
 )
 
+;;;; [RMH] purge abstract locations
+(defmethod purge-abstract-locations ((paav-mod paav-vis-mod))
+  (let ((vis-memory (vis-memory paav-mod))
+        (vm-loc-reg (vm-loc-reg paav-mod)))
+    (maphash 
+     #'(lambda (abstr-loc-name abstr-loc-values)
+         (declare (ignore abstr-loc-values))
+         (remhash abstr-loc-name vis-memory)
+         (remhash abstr-loc-name vm-loc-reg))
+     vis-memory)))
+
+
 ;;;;;; ;;;;;; END: block of methods to remove invisible abstract location from hashtable
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -3303,7 +3315,7 @@
 			(progn
 
 				(when (show-focus-p (current-device-interface))
-					(device-update-attended-loc (device (current-device-interface)) new-gaze-loc))
+					(device-update-attended-loc2 (device (current-device-interface)) new-gaze-loc))
 
 				(when (tracked-obj-last-feat paav-mod) (remove-tracking paav-mod)) ; [SC] EMMA and default vision
 			
