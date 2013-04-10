@@ -37,7 +37,7 @@
       (verify-current-model
           (let ((devin (current-device-interface)))
             (when (show-focus-p devin)
-              (device-update-attended-loc (device devin) nil)
+              (device-update-attended-loc2 (device devin) nil)
               (device-update-gaze-loc (device devin) nil))
             (setf (device devin) device)))))
 
@@ -284,4 +284,5 @@
                    :delete 'delete-json-netstring-module
                    :run-start 'run-start-json-netstring-module
                    :run-end 'run-end-json-netstring-module
-                   :update 'update-json-netstring-module)
+                   ;:update 'update-json-netstring-module
+                   )
