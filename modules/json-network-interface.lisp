@@ -32,15 +32,6 @@
    (height :accessor height :initform 0)
    (running :accessor running :initform nil)))
 
-(defun jni-install-device (device)
-  (verify-current-mp  
-      (verify-current-model
-          (let ((devin (current-device-interface)))
-            (when (show-focus-p devin)
-              (device-update-attended-loc2 (device devin) nil)
-              (device-update-gaze-loc (device devin) nil))
-            (setf (device devin) device)))))
-
 (defun json->chunk (lst-of-lsts)
   "generate one define-chunks call from a list of chunk specs"
   (let ((expressions nil))
@@ -200,15 +191,6 @@
   (declare (ignore name))
   (make-instance 'json-interface-module))
 
-(defun reset-json-netstring-module (instance)
-  (setf (running instance) nil)
-  (if (and (socket instance) (jstream instance) (thread instance))
-      (progn
-        (send-command instance "reset" (jsown:new-js ("time-lock" (numberp (jni-sync instance)))) :sync t)
-        (jni-install-device instance))
-    (if (and (current-model) (jni-hostname instance) (jni-port instance))
-        (connect instance))))
-
 (defun delete-json-netstring-module (instance)
   (if (socket instance)
       (disconnect instance)))
@@ -271,6 +253,24 @@
 
 (defun update-json-netstring-module (instance old-time new-time)
   (print-warning "UPDATE: ~A ~A" old-time new-time))
+
+(defun jni-install-device (device)
+  (verify-current-mp  
+      (verify-current-model
+          (let ((devin (current-device-interface)))
+            (when (show-focus-p devin)
+              (device-update-attended-loc2 (device devin) nil)
+              (device-update-gaze-loc (device devin) nil))
+            (setf (device devin) device)))))
+
+(defun reset-json-netstring-module (instance)
+  (setf (running instance) nil)
+  (if (and (socket instance) (jstream instance) (thread instance))
+      (progn
+        (send-command instance "reset" (jsown:new-js ("time-lock" (numberp (jni-sync instance)))) :sync t)
+        (jni-install-device instance))
+    (if (and (current-model) (jni-hostname instance) (jni-port instance))
+        (connect instance))))
 
 (define-module-fct 'json-interface nil
                    (list (define-parameter :jni-hostname)
