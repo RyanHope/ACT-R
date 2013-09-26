@@ -2154,11 +2154,11 @@
 											(variable-char #\=))
 	(cond 
 		((find 
-			(act-r-chunk-type-name (act-r-chunk-spec-type chunk-spec))
+			(act-r-chunk-spec-type chunk-spec)
 			(chunk-type-supertypes-fct 'abstract-location))
              
 			(handler-case 
-				(test-chunk-slots (create-abstr-loc-temp-ht abstr-loc-name vis-memory)
+				(test-chunk-slots nil (create-abstr-loc-temp-ht abstr-loc-name vis-memory)
 										(act-r-chunk-spec-slots chunk-spec)
 										=test
 										-test
