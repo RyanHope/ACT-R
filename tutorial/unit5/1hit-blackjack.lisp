@@ -56,15 +56,15 @@
 
 (defun draw-graph (points)
   (open-exp-window "Data" :width 550 :height 430 :visible t)
-  (add-line-to-exp-window '(50 0) '(50 400) :color 'white)
+  (add-line-to-exp-window '(50 0) '(50 400) :color 'white :window "Data")
   (dotimes (i 5)
-    (add-text-to-exp-window :x 0 :y (- 380 (* i 80)) :width 40 :text (format nil "~2,1f" (* (+ i 2) .1)))
-    (add-line-to-exp-window (list 50 (- 390 (* i 80))) (list 550 (- 390 (* i 80))) :color 'white))
+    (add-text-to-exp-window :x 0 :y (- 380 (* i 80)) :width 40 :text (format nil "~2,1f" (* (+ i 2) .1)) :window "Data")
+    (add-line-to-exp-window (list 50 (- 390 (* i 80))) (list 550 (- 390 (* i 80))) :color 'white :window "Data"))
   
   (let ((x 50))
     (mapcar (lambda (a b) (add-line-to-exp-window (list x (floor (- 550 (* 800 a))))
                                                   (list (incf x 25) (floor (- 550 (* 800 b))))
-                                                  :color 'blue))
+                                                  :color 'blue :window "Data"))
       (butlast points) (cdr points))))
 
 (defun deal (deck)
@@ -193,7 +193,7 @@
   
   ;; create a device for the model to interact with
   
-  (install-device (make-rpm-window :visible nil))
+  (install-device (open-exp-window "" :visible nil))
   
   ;; This type holds all the game info 
   

@@ -32,7 +32,7 @@ proc make_procedural_viewer {} {
   # (Mac terminology) with the item to be scrolled, so I've got to do that
   # for everything I want to scroll...
 
-  set list_frame [frame $win.list_frame -borderwidth 0]  
+  set list_frame [frame $win.list_frame -borderwidth 2]  
   
   # create the listbox that uses a special variable <name>.var for its list
   # so that the list-box-handler can ensure that the selection remains the
@@ -45,7 +45,7 @@ proc make_procedural_viewer {} {
                         -listvar $list_frame.list_box.var \
                         -yscrollcommand "$list_frame.list_scrl set" \
                         -selectmode single -font list_font\
-                        -exportselection 0]
+                        -exportselection 0 -bd 0]
 
   # tell the Lisp system to create a handler for sending a list 
   # that will set the list variable to the results of eval on 
@@ -121,7 +121,7 @@ proc make_procedural_viewer {} {
   # options for those items that need to resize if the window gets resized 
   # could get this from the Visual Tcl/tk GUI builder, or just work it out
 
-  place $why_not -x 2 -y 5 -width 70 -height 20
+  place $why_not -x 2 -y 5 -width 75 -height 24
 
   place $list_frame -relx 0.0 -y 30 -relheight 1.0 -height -30 -relwidth .4
   place $text_frame -relx .4 -y 30 -relheight 1.0 -height -30 -relwidth .6

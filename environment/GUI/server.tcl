@@ -619,6 +619,9 @@ proc handle_socket_command {data} {
       }
       ka {
       }
+      sync {
+        send_environment_cmd "sync"
+      }
       default {
         report_status "Invalid command : $data"
       }

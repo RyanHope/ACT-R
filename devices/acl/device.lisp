@@ -130,6 +130,9 @@
 ;;;             :   fixation-marker slot to hold the item so each model has
 ;;;             :   its own and respond to a nil xyloc by removing the current
 ;;;             :   ring.
+;;; 2013.01.03 Dan
+;;;             : * Clipped the rpm-view-line function since it isn't needed
+;;;             :   and contains outdated code to avoid any confusion.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -626,15 +629,7 @@
     
 
 
-(defun rpm-view-line (wind start-pt end-pt &optional (color cg:black))
-  "Adds a dialog-item representing the line to the specified window 
-   which will draw a line from the start-pt to the end-pt on the window
-   using the optional color specified (defaulting to black). "
-  (let* ((dis (cg:dialog-items wind)))
-    (setf (cg:dialog-items wind) (cons (make-instance 'liner
-                                      :color color
-                                      :start-pt start-pt 
-                                      :end-pt end-pt) dis))))
+
 
 
 ;;;; ---------------------------------------------------------------------- ;;;;

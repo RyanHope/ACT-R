@@ -42,7 +42,7 @@
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(defvar *actr-version-string* "1.4 [r1261]")
+(defvar *actr-version-string* "1.5 [r1395]")
 
 #|
 This library is free software; you can redistribute it and/or

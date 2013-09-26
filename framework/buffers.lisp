@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : buffers.lisp
-;;; Version     : 1.1a
+;;; Version     : 1.2
 ;;; 
 ;;; Description : Functions that define the operation of buffers.
 ;;; 
@@ -208,6 +208,25 @@
 ;;;             :   undefined functions.
 ;;; 2011.04.28 Dan
 ;;;             : * Suppress warnings about extending chunks at initial load.
+;;; 2013.01.28 Dan
+;;;             : * Removed a call to valid-slot-name and replaced it with the
+;;;             :   command valid-chunk-type-slot.
+;;; 2013.04.10 Dan
+;;;             : * Added an additional keyword parameter to schedule-mod-buffer-chunk,
+;;;             :   :extend.  If specified as t (default is nil) then it will 
+;;;             :   first extend the chunk in the buffer if needed before making
+;;;             :   the modifications.  This replaces the extend-buffer-chunk
+;;;             :   command which was used separately in the production code to
+;;;             :   make things more general and easily provide the extension
+;;;             :   capability to modules through buffer modification requests.
+;;; 2013.05.20 Dan [1.2]
+;;;             : * Extend-buffer-chunk now passes the chunk name to extend-
+;;;             :   chunk-type-slots since with static chunks we want to change
+;;;             :   the chunk's type directly instead of "adding" a new slot.
+;;;             : * Valid-chunk-modification now tests for possible slots instead
+;;;             :   of valid-slots since a static chunk doesn't need to be 
+;;;             :   extended again just because it doesn't currently have such
+;;;             :   a slot.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -740,6 +759,7 @@
                  (setf (chunk-buffer-set-invalid chunk) t)
                  (when (act-r-buffer-multi buffer)
                    (remhash chunk (act-r-buffer-chunk-set buffer)))
+                 
                  (dolist (module (notified-modules))
                    (notify-module module buffer-name chunk)))
                chunk)))))))
@@ -1002,7 +1022,7 @@
              (fast-mod-chunk-fct (act-r-buffer-chunk buffer) modifications)))))))
             
 
-(defun schedule-mod-buffer-chunk (buffer-name modifications time-delta &key (module :none) (priority 0) (output 'low))
+(defun schedule-mod-buffer-chunk (buffer-name modifications time-delta &key (module :none) (priority 0) (output 'low) (extend nil))
   (verify-current-mp  
    "schedule-mod-buffer-chunk called with no current meta-process."
    (verify-current-model
@@ -1012,37 +1032,73 @@
              (print-warning "schedule-mod-buffer-chunk called with an invalid buffer name ~S" buffer-name))
             ((null (act-r-buffer-chunk buffer))
              (print-warning "schedule-mod-buffer-chunk called with no chunk in buffer ~s" buffer-name))
-            ((null (valid-chunk-modification (act-r-buffer-chunk buffer) modifications))
+            ((or (oddp (length modifications))
+                 (and (null extend) (null (valid-chunk-modification (act-r-buffer-chunk buffer) modifications))))
              (print-warning "schedule-mod-buffer-chunk called with an invalid modification ~S" modifications))
             ((not (numberp time-delta))
              (print-warning "schedule-mod-buffer-chunk called with non-number time-delta: ~S" time-delta))
             ((and (not (numberp priority)) (not (eq priority :max)) (not (eq priority :min)))
              (print-warning "schedule-mod-buffer-chunk called with an invalid priority ~S" priority))
             (t
+             (unless (valid-chunk-modification (act-r-buffer-chunk buffer) modifications)
+               (if (eq priority :max)
+                   (progn ;; have to do it directly since the scheduling 
+                     ;; won't guarantee the order, but still schedule an event
+                     ;; just to show it.
+                     (extend-buffer-chunk buffer-name modifications)
+                     (schedule-event-relative time-delta 'extend-buffer-chunk
+                                        :module module
+                                        :priority priority
+                                        :params (list buffer-name modifications)
+                                        :details (concatenate 'string (symbol-name 'extending-chunk-type) 
+                                                     " " (symbol-name (chunk-chunk-type-fct (act-r-buffer-chunk buffer))))
+                                        :output output))
+                 (schedule-event-relative time-delta 'extend-buffer-chunk
+                                        :module module
+                                        :priority (if (numberp priority) (1+ priority) 0)
+                                        :params (list buffer-name modifications)
+                                          :details (concatenate 'string (symbol-name 'extending-chunk-type) 
+                                                     " " (symbol-name (chunk-chunk-type-fct (act-r-buffer-chunk buffer))))
+                                          :output output)))
              (schedule-event-relative time-delta  'mod-buffer-chunk 
                                       :module module
                                       :priority priority 
                                       :params (list buffer-name modifications)
-                                      :details 
-                                      (concatenate 'string (symbol-name 'mod-buffer-chunk) " " (symbol-name buffer-name))
+                                      :details (concatenate 'string (symbol-name 'mod-buffer-chunk) " " (symbol-name buffer-name))
                                       :output output)))))))
  
-  
+(defun modification-slot-names (mods)
+  (do ((s mods (cddr s))
+       (r nil))
+      ((null s) r)
+    (push (car s) r)))
+
+(defun extend-buffer-chunk (buffer-name mod-list)
+  (let ((chunk (buffer-read buffer-name)))
+    (cond ((null chunk)
+           (print-warning "extend-buffer-chunk called with no chunk in buffer ~S" buffer-name))
+          (t
+           (let ((ct (chunk-chunk-type-fct chunk)))
+             (dolist (slot (remove-if (lambda (x) 
+                                        (valid-chunk-type-slot ct x))
+                                      (modification-slot-names mod-list)))
+               (extend-chunk-type-slots ct slot chunk)))))))
+
+
 (defun valid-chunk-modification (chunk-name modifications)
-  (let ((c (get-chunk chunk-name)))
-    (when c
-      (if (oddp (length modifications))
-          nil
-        (let ((slots nil)
-              (slots-and-values nil))
-          (do ((s modifications (cddr s)))
-              ((null s))
-            (push (car s) slots)
-            (push (list (car s) (second s)) slots-and-values))
-          (and (every #'(lambda (slot)
-                          (valid-slot-name slot (act-r-chunk-chunk-type c)))
-                      slots)
-               (= (length slots) (length (remove-duplicates slots)))))))))
+  (when (chunk-p-fct chunk-name)
+    (if (oddp (length modifications))
+        nil
+      (let ((slots nil)
+            (slots-and-values nil))
+        (do ((s modifications (cddr s)))
+            ((null s))
+          (push (car s) slots)
+          (push (list (car s) (second s)) slots-and-values))
+        (and (every #'(lambda (slot)
+                        (possible-chunk-type-slot (chunk-chunk-type-fct chunk-name) slot))
+                    slots)
+             (= (length slots) (length (remove-duplicates slots))))))))
 
    
 (defun buffer-spread (buffer-name)

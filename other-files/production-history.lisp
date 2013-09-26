@@ -89,6 +89,10 @@
 ;;;             :   no utility differences.
 ;;;             : * Added an option for hiding the unused productions in the graph
 ;;;             :   display.
+;;; 2013.01.10 Dan
+;;;             : * Changed the environment data cache to an equalp hashtable
+;;;             :   since the keys are now a cons of the handler name and the
+;;;             :   window to prevent issues with multi-environment settings.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -1109,7 +1113,7 @@
 (defun reset-p-history-module (module)
   (setf (p-history-module-history module) nil)
   (setf (p-history-module-why-not-list module) nil)
-  (setf (p-history-module-graph-table module) (make-hash-table)))
+  (setf (p-history-module-graph-table module) (make-hash-table :test 'equalp)))
   
 (defun params-p-history-module (instance param)
   (if (consp param)

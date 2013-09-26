@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : procedural.lisp
-;;; Version     : 2.0a1
+;;; Version     : 2.1
 ;;; 
 ;;; Description : Implements the procedural module (productions).
 ;;; 
@@ -523,6 +523,48 @@
 ;;;             :   undefined functions.
 ;;;             : * Using the warning suppression flag added to chunks in the
 ;;;             :   extension of productions as well.
+;;; 2013.01.25 Dan
+;;;             : * Changed slot-value-from-index and get-slot-index to use the
+;;;             :   new index accessors for chunk-types to fix a potential issue
+;;;             :   with matching extended types in a hierarchy.
+;;; 2013.03.13 Dan
+;;;             : * Fixed a bug with get-slot-index because it would allow a
+;;;             :   non-existent slot to match if it was possible for a child or
+;;;             :   other related type.
+;;; 2013.03.13 Dan [2.1]
+;;;             : * Because productions now allow for child slots to be specified
+;;;             :   under a parent type the testing of a slot constraint now must
+;;;             :   also test that the chunk in the buffer actually have such a 
+;;;             :   slot for constants just as it does for variablized slots in a
+;;;             :   p* (basically undoing the previous fix to make this work right
+;;;             :   and replacing it with something better).
+;;; 2013.05.16 Dan
+;;;             : * Very subtle change, but conceptually significant.  For a 
+;;;             :   slot condition to match the chunk must have a slot with the
+;;;             :   value specified even when that value is nil.  This is how
+;;;             :   I've always described it, but it turns out that "<slot> nil" 
+;;;             :   has slipped through as successful as long as the type has such
+;;;             :   a slot even if the chunk itself doesn't i.e. until now extending 
+;;;             :   the type could indirectly affect how a production matches without
+;;;             :   directly modifying any of the chunks in buffers that it tests.
+;;; 2013.05.21 Dan
+;;;             : * For static chunks the previous change is now not true --
+;;;             :   "<slot> nil" tests are true if the chunk could have the slot
+;;;             :   but doesn't or if it has the slot and it is empty.  It's a 
+;;;             :   middle ground between the current mechanism and what I would
+;;;             :   like to transition to where "slot nil" means the slot doesn't
+;;;             :   exist instead of treating nil as a value for a slot to have.
+;;;             :   Making that transition however would require redoing the 
+;;;             :   matching code since get-slot-index would then need to return
+;;;             :   something that allows for that to succeed since now a nil
+;;;             :   return from that terminates the matching.
+;;; 2013.06.05 Dan
+;;;             : * Changed how the "slot nil" tests work for the static chunk
+;;;             :   types to actually make it true when the chunk doesn't have
+;;;             :   the slot at all.  The quick fix for now is to just catch
+;;;             :   the nil get-slot-index situations where one might be testing
+;;;             :   for nil and flag them as true in the corresponding test 
+;;;             :   functions.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -975,20 +1017,31 @@
 (defun cr-buffer-slot-read (prod buffer bi si)
   (let ((val (aref (procedural-slot-lookup prod) bi si)))
     (if (eq val :untested)
-      (setf (aref (procedural-slot-lookup prod) bi si)
-        (slot-value-from-index (cr-buffer-read prod buffer bi) si))
-      val)))
+        (multiple-value-bind (value exists) (slot-value-from-index (cr-buffer-read prod buffer bi) si)
+          (if exists
+              (values (setf (aref (procedural-slot-lookup prod) bi si) value) t)
+            (values nil nil)))
+      (values val t))))
+
 
 (defun slot-value-from-index (chunk index)
   (if (chunk-p-fct chunk)
-      (let ((slot-name (nth index (chunk-type-slot-names-fct (chunk-chunk-type-fct chunk)))))
-        (if slot-name
+      (let* ((chunk-type (chunk-chunk-type-fct chunk))
+             (slot-name (chunk-type-slot-name-from-index-fct chunk-type index)))
+        (if (valid-chunk-type-slot chunk-type slot-name)
+            ; Don't want to return a second value of t for slots that don't exist
+            ; and fast-chunk-slot-value-fct does that already...
+            ;(values (fast-chunk-slot-value-fct chunk slot-name) t)
             (fast-chunk-slot-value-fct chunk slot-name)
-          :unbound))
-    :unbound))
+          (if (chunk-type-static-p-fct chunk-type)
+              ;; For a static chunk not having the slot
+              ;; matches to a slot nil test...
+              (values nil t)
+            (values nil nil))))
+    (values nil nil)))
 
 (defun get-slot-index (chunk-type slot)
-  (position slot (chunk-type-slot-names-fct chunk-type)))
+  (chunk-type-slot-index-fct chunk-type slot))
       
 
 (defstruct cr-condition
@@ -1030,20 +1083,23 @@
        nil))
     (slot 
      
-     (let ((real (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) (cr-condition-si test))))
-       (if (chunk-slot-equal (cr-condition-value test) real)
-         t
-         (when (procedural-ppm prod)
-           ;;; try a partial match and save the result if it's valid
-           (let ((sim (similarity-fct (cr-condition-value test) real)))
-             (when (and (numberp sim) (> sim (procedural-md prod)))
-               (push (list (cr-condition-buffer test) (cr-condition-slot test) (cr-condition-value test) real sim)
-                     (production-partial-matched-slots (procedural-current-p prod)))))))))
+     (multiple-value-bind (real exists) (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) (cr-condition-si test))
+       (when exists
+         (if (chunk-slot-equal (cr-condition-value test) real)
+             t
+           (when (procedural-ppm prod)
+             ;;; try a partial match and save the result if it's valid
+             (let ((sim (similarity-fct (cr-condition-value test) real)))
+               (when (and (numberp sim) (> sim (procedural-md prod)))
+                 (push (list (cr-condition-buffer test) (cr-condition-slot test) (cr-condition-value test) real sim)
+                       (production-partial-matched-slots (procedural-current-p prod))))))))))
     (query 
      (eq (cr-condition-result test) (query-buffer (cr-condition-buffer test) (list (cons (cr-condition-slot test) (cr-condition-value test))))))
     (test-slot 
-     (eq (cr-condition-result test) 
-         (funcall (cr-condition-test test) (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) (cr-condition-si test)) (cr-condition-value test))))))
+     (multiple-value-bind (real exists) (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) (cr-condition-si test))
+       (and exists
+            (eq (cr-condition-result test) 
+                (funcall (cr-condition-test test) real (cr-condition-value test))))))))
 
 
 (defun test-search-constants (prod test production)
@@ -1057,60 +1113,69 @@
          (chunk-type-subtype-p-fct (cr-buffer-type-read prod (cr-condition-buffer test) (cr-condition-bi test)) (cr-condition-value test))
        nil))
     
-    (slot 
-     (let ((real (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) (cr-condition-si test))))
-       (if (chunk-slot-equal (cr-condition-value test) real)
-         t
-         (when (procedural-ppm prod)
-           ;;; try a partial match and save the result if it's valid
-           (let ((sim (similarity-fct (cr-condition-value test) real)))
-             (when (and (numberp sim) (> sim (procedural-md prod)))
-               (push (list (cr-condition-buffer test) (cr-condition-slot test) (cr-condition-value test) real sim)
-                     (production-partial-matched-slots (procedural-current-p prod)))))))))
+    (slot                               ;; can't use cr-buffer-slot-read because the slots cache isn't updated for search buffers
+     (multiple-value-bind (real exists) (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) (cr-condition-si test))
+       (when exists
+         (if (chunk-slot-equal (cr-condition-value test) real)
+             t
+           (when (procedural-ppm prod)
+             ;;; try a partial match and save the result if it's valid
+             (let ((sim (similarity-fct (cr-condition-value test) real)))
+               (when (and (numberp sim) (> sim (procedural-md prod)))
+                 (push (list (cr-condition-buffer test) (cr-condition-slot test) (cr-condition-value test) real sim)
+                       (production-partial-matched-slots (procedural-current-p prod))))))))))
     
-    (test-slot 
-     (if (eq (cr-condition-result test) (funcall (cr-condition-test test) (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) (cr-condition-si test)) (replace-variables (cr-condition-value test) (production-bindings production))))
-         t
-       (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
-         ;;; try a partial match and save the result if it's valid
-         (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
-                (real (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) (cr-condition-si test)))
-                (sim (similarity-fct desired real)))
-           (when (and (numberp sim) (> sim (procedural-md prod)))
-             (push (list (cr-condition-buffer test) (cr-condition-slot test) desired real sim)
-                   (production-partial-matched-slots (procedural-current-p prod))))))))
+    (test-slot                          ;; can't use cr-buffer-slot-read because the slots cache isn't updated for search buffers
+     (multiple-value-bind (real exists) (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) (cr-condition-si test))
+       (when exists 
+         (if (eq (cr-condition-result test) (funcall (cr-condition-test test) real (replace-variables (cr-condition-value test) (production-bindings production))))
+             t
+           (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
+             ;;; try a partial match and save the result if it's valid
+             (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
+                    (sim (similarity-fct desired real)))
+               (when (and (numberp sim) (> sim (procedural-md prod)))
+                 (push (list (cr-condition-buffer test) (cr-condition-slot test) desired real sim)
+                       (production-partial-matched-slots (procedural-current-p prod))))))))))
     
     (test-var-slot
      (let* ((ct (cr-buffer-type-read prod (cr-condition-buffer test) (cr-condition-bi test)))
            (index (get-slot-index ct (replace-variables (cr-condition-slot test) (production-bindings production)))))
        
-       (if (numberp index)
-           (if (eq (cr-condition-result test) (funcall (cr-condition-test test) (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) index) (replace-variables (cr-condition-value test) (production-bindings production))))
-               t
-             (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
-               ;;; try a partial match and save the result if it's valid
-               (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
-                      (real (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) index))
-                      (sim (similarity-fct desired real)))
-                 (when (and (numberp sim) (> sim (procedural-md prod)))
-                   (push (list (cr-condition-buffer test) (replace-variables (cr-condition-slot test) (production-bindings production)) desired real sim)
-                         (production-partial-matched-slots (procedural-current-p prod)))))))
-         nil))))
-  )
+       (if (numberp index)                ;; can't use cr-buffer-slot-read because the slots cache isn't updated for search buffers
+         (multiple-value-bind (real exists) (slot-value-from-index (cr-buffer-read prod (cr-condition-buffer test) (cr-condition-bi test)) index)
+           (when exists 
+             (if (eq (cr-condition-result test) (funcall (cr-condition-test test) real (replace-variables (cr-condition-value test) (production-bindings production))))
+                 t
+               (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
+                 ;;; try a partial match and save the result if it's valid
+                 (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
+                        (sim (similarity-fct desired real)))
+                   (when (and (numberp sim) (> sim (procedural-md prod)))
+                     (push (list (cr-condition-buffer test) (replace-variables (cr-condition-slot test) (production-bindings production)) desired real sim)
+                           (production-partial-matched-slots (procedural-current-p prod)))))))))
+         (if (and (chunk-type-static-p-fct ct)
+                  (null (cr-condition-value test))
+                  (cr-condition-result test)
+                  (eq (cr-condition-test test) 'safe-chunk-slot-equal))
+             t nil))))))
   
 
 (defun test-and-perfrom-bindings (procedural bind production)
   (case (cr-condition-type bind)
     (bind-slot
-     (bind-variable (cr-condition-value bind) (cr-buffer-slot-read procedural (cr-condition-buffer bind) (cr-condition-bi bind) (cr-condition-si bind)) production))
+     (multiple-value-bind (real exists) (cr-buffer-slot-read procedural (cr-condition-buffer bind) (cr-condition-bi bind) (cr-condition-si bind))
+       (when exists ;; is this necessary since it should have passed a constant test to get here?
+         (bind-variable (cr-condition-value bind) real production))))
     (bind-buffer
      (bind-variable (cr-condition-value bind) (cr-buffer-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)) production))
     (bind-var-slot
      (let* ((ct (cr-buffer-type-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)))
             (index (get-slot-index ct (replace-variables (cr-condition-slot bind) (production-bindings production)))))
-       (if (numberp index)
-           (bind-variable (cr-condition-value bind) (cr-buffer-slot-read procedural (cr-condition-buffer bind) (cr-condition-bi bind) index) production)
-         nil)))
+       (when (numberp index)
+         (multiple-value-bind (real exists) (cr-buffer-slot-read procedural (cr-condition-buffer bind) (cr-condition-bi bind) index)
+           (and exists
+                (bind-variable (cr-condition-value bind) real production))))))
     (bind
      (let ((result (eval (replace-variables-for-eval (cr-condition-result bind) (production-bindings production)))))
        (if result
@@ -1133,26 +1198,23 @@
 
 (defun test-and-perfrom-bindings-search (procedural bind production)
   (case (cr-condition-type bind)
-    (bind-slot
-     (bind-variable (cr-condition-value bind) 
-                    ;; can't use the lookup because the slots may be invalid
-                    ;;(cr-buffer-slot-read procedural (cr-condition-buffer bind) (cr-condition-bi bind) (cr-condition-si bind)) 
-                    (slot-value-from-index 
-                           (cr-buffer-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)) (cr-condition-si bind))
-                    production))
+    (bind-slot    ;; Can't use the cached lookup for a search buffer since it may not be the "Right" chunk
+                  ;; since the cache isn't overwritten for each new chunk
+     (multiple-value-bind (real exists) (slot-value-from-index (cr-buffer-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)) (cr-condition-si bind))
+       (when exists 
+         (bind-variable (cr-condition-value bind) real production))))
+                       
     (bind-buffer
      (bind-variable (cr-condition-value bind) (cr-buffer-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)) production))
     (bind-var-slot
      (let* ((ct (cr-buffer-type-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)))
             (index (get-slot-index ct (replace-variables (cr-condition-slot bind) (production-bindings production)))))
-       (if (numberp index)
-           (bind-variable (cr-condition-value bind) 
-                           ;; Can't use the cached lookup for a search buffer since it may not be the "Right" chunk
-                           ;; (cr-buffer-slot-read procedural (cr-condition-buffer bind) (cr-condition-bi bind) index) 
-                          (slot-value-from-index 
-                           (cr-buffer-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)) index)
-                          production)
-         nil)))
+       (when (numberp index)
+         ;; Can't use the cached lookup for a search buffer since it may not be the "Right" chunk
+         ;; since the cache isn't overwritten for each new chunk
+         (multiple-value-bind (real exists) (slot-value-from-index (cr-buffer-read procedural (cr-condition-buffer bind) (cr-condition-bi bind)) index)
+           (when exists 
+             (bind-variable (cr-condition-value bind) real production))))))
     (bind
      (let ((result (eval (replace-variables-for-eval (cr-condition-result bind) (production-bindings production)))))
        (if result
@@ -1177,16 +1239,18 @@
     (query 
      (eq (cr-condition-result test) (query-buffer (cr-condition-buffer test) (list (cons (cr-condition-slot test) (replace-variables (cr-condition-value test) (production-bindings production)))))))
     (test-slot 
-     (if (eq (cr-condition-result test) (funcall (cr-condition-test test) (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) (cr-condition-si test)) (replace-variables (cr-condition-value test) (production-bindings production))))
-         t
-       (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
-         ;;; try a partial match and save the result if it's valid
-         (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
-                (real (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) (cr-condition-si test)))
-                (sim (similarity-fct desired real)))
-           (when (and (numberp sim) (> sim (procedural-md prod)))
-             (push (list (cr-condition-buffer test) (cr-condition-slot test) desired real sim)
-                   (production-partial-matched-slots (procedural-current-p prod))))))))
+     (multiple-value-bind (real exists) (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) (cr-condition-si test))
+       (when exists
+         
+         (if (eq (cr-condition-result test) (funcall (cr-condition-test test) real (replace-variables (cr-condition-value test) (production-bindings production))))
+             t
+           (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
+             ;;; try a partial match and save the result if it's valid
+             (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
+                    (sim (similarity-fct desired real)))
+               (when (and (numberp sim) (> sim (procedural-md prod)))
+                 (push (list (cr-condition-buffer test) (cr-condition-slot test) desired real sim)
+                       (production-partial-matched-slots (procedural-current-p prod))))))))))
     (eval
      (eval (replace-variables-for-eval (cr-condition-value test) (production-bindings production))))
     (test-var-slot
@@ -1194,18 +1258,22 @@
            (index (get-slot-index ct (replace-variables (cr-condition-slot test) (production-bindings production)))))
           
        (if (numberp index)
-           (if (eq (cr-condition-result test) (funcall (cr-condition-test test) (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) index) (replace-variables (cr-condition-value test) (production-bindings production))))
-               t
-             (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
-               ;;; try a partial match and save the result if it's valid
-               (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
-                      (real (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) index))
-                      (sim (similarity-fct desired real)))
-                 (when (and (numberp sim) (> sim (procedural-md prod)))
-                   (push (list (cr-condition-buffer test) (replace-variables (cr-condition-slot test) (production-bindings production)) desired real sim)
-                         (production-partial-matched-slots (procedural-current-p prod)))))))
-         nil)))
-    ))
+         (multiple-value-bind (real exists) (cr-buffer-slot-read prod (cr-condition-buffer test) (cr-condition-bi test) index)
+           (when exists
+             (if (eq (cr-condition-result test) (funcall (cr-condition-test test) real (replace-variables (cr-condition-value test) (production-bindings production))))
+                 t
+               (when (and (procedural-ppm prod) (eq (cr-condition-test test) 'safe-chunk-slot-equal) (cr-condition-result test))
+                 ;;; try a partial match and save the result if it's valid
+                 (let* ((desired (replace-variables (cr-condition-value test) (production-bindings production)))
+                        (sim (similarity-fct desired real)))
+                   (when (and (numberp sim) (> sim (procedural-md prod)))
+                     (push (list (cr-condition-buffer test) (replace-variables (cr-condition-slot test) (production-bindings production)) desired real sim)
+                           (production-partial-matched-slots (procedural-current-p prod)))))))))
+         (if (and (chunk-type-static-p-fct ct)
+                  (null (cr-condition-value test))
+                  (cr-condition-result test)
+                  (eq (cr-condition-test test) 'safe-chunk-slot-equal))
+             t nil))))))
 
 
 (defun test-search-buffers (prod test production)
@@ -1274,28 +1342,50 @@
                (format nil "The chunk in the ~S buffer is not of chunk-type ~S." (cr-condition-buffer condition) (cr-condition-value condition))
              (format nil "The ~s buffer is empty." (cr-condition-buffer condition))))
       (search (format nil "The searched multi-buffer ~s did not have a matching chunk." (cr-condition-buffer condition)))
-      (slot (format nil "The ~s slot of the chunk in the ~s buffer does not have the value ~s." (cr-condition-slot condition) (cr-condition-buffer condition) (cr-condition-value condition)))
+      (slot (multiple-value-bind (val exists) (cr-buffer-slot-read procedural (cr-condition-buffer condition) (cr-condition-bi condition) (cr-condition-si condition))
+              (declare (ignore val))
+              (if exists
+                  (format nil "The ~s slot of the chunk in the ~s buffer does not have the value ~s." (cr-condition-slot condition) (cr-condition-buffer condition) (cr-condition-value condition))
+                (format nil "The chunk in the ~s buffer does not have a slot named ~s." (cr-condition-buffer condition) (cr-condition-slot condition)))))
       (query (format nil "The ~s ~s query of the ~s buffer failed." (cr-condition-slot condition) (cr-condition-value condition) (cr-condition-buffer condition)))
-      (test-slot (if (and (eq (cr-condition-test condition) 'safe-chunk-slot-equal) (null (cr-condition-value condition)) (null (cr-condition-result condition)))
-                     (format nil "The ~s slot of the chunk in the ~s buffer is empty." (cr-condition-slot condition) (cr-condition-buffer condition))
-                   (format nil "The value in the ~s slot of the chunk in the ~s buffer does not satisfy the constraints." (cr-condition-slot condition) (cr-condition-buffer condition))))
+      (test-slot (multiple-value-bind (val exists) (cr-buffer-slot-read procedural (cr-condition-buffer condition) (cr-condition-bi condition) (cr-condition-si condition))
+                   (declare (ignore val))
+                   (if exists
+                       (if (and (eq (cr-condition-test condition) 'safe-chunk-slot-equal) (null (cr-condition-value condition)) (null (cr-condition-result condition)))
+                           (format nil "The ~s slot of the chunk in the ~s buffer is empty." (cr-condition-slot condition) (cr-condition-buffer condition))
+                         (format nil "The value in the ~s slot of the chunk in the ~s buffer does not satisfy the constraints." (cr-condition-slot condition) (cr-condition-buffer condition)))
+                     (format nil "The chunk in the ~s buffer does not have a slot named ~s." (cr-condition-buffer condition) (cr-condition-slot condition)))))
       (eval (format nil "The evaluation of the expression ~s returned nil." (cr-condition-value condition)))
       (test-var-slot (let* ((ct (cr-buffer-type-read procedural (cr-condition-buffer condition) (cr-condition-bi condition)))
                             (index (get-slot-index ct (replace-variables (cr-condition-slot condition) (production-bindings production)))))
                        (if (numberp index)
-                           (format nil "The value in the ~s slot (the value of the ~s variable) of the chunk of the ~s buffer does not satisfy the constraints."
-                             (replace-variables (cr-condition-slot condition) (production-bindings production)) (cr-condition-slot condition) (cr-condition-buffer condition))
+                           (multiple-value-bind (val exists) (cr-buffer-slot-read procedural (cr-condition-buffer condition) (cr-condition-bi condition) index)
+                             (declare (ignore val))
+                             (if exists
+                                 (format nil "The value in the ~s slot (the value of the ~s variable) of the chunk of the ~s buffer does not satisfy the constraints."
+                                   (replace-variables (cr-condition-slot condition) (production-bindings production)) (cr-condition-slot condition) (cr-condition-buffer condition))
+                               (format nil "The chunk in the ~s buffer does not have a slot named ~s (the value of the ~s variable)." 
+                                 (cr-condition-buffer condition) (replace-variables (cr-condition-slot condition) (production-bindings production)) (cr-condition-slot condition))))
                          (format nil "The value of the ~s variable does not name a valid slot in the chunk in the ~s buffer." (cr-condition-slot condition) (cr-condition-buffer condition)))))
       (bind (format nil "The evaluation of the expression ~s returned nil." (cr-condition-result condition)))
       (mv-bind (format nil "The evaluation of the expression ~s either returned a nil value or too few values to bind to all of the variables." (cr-condition-result condition)))
       
       (bind-buffer (format nil "The ~s buffer is empty." (cr-condition-buffer condition))) ;; This shouldn't happen anymore since the isa will fail first
-      (bind-slot (format nil "The variable ~s cannont be bound to nil in the ~s slot of the ~s buffer." (cr-condition-value condition) (cr-condition-slot condition) (cr-condition-buffer condition)))
+      (bind-slot (multiple-value-bind (val exists) (cr-buffer-slot-read procedural (cr-condition-buffer condition) (cr-condition-bi condition) (cr-condition-si condition))
+                   (declare (ignore val))
+                   (if exists
+                       (format nil "The variable ~s cannont be bound to nil in the ~s slot of the ~s buffer." (cr-condition-value condition) (cr-condition-slot condition) (cr-condition-buffer condition))
+                     (format nil "The chunk in the ~s buffer does not have a slot named ~s." (cr-condition-buffer condition) (cr-condition-slot condition)))))
       (bind-var-slot (let* ((ct (cr-buffer-type-read procedural (cr-condition-buffer condition) (cr-condition-bi condition)))
                             (index (get-slot-index ct (replace-variables (cr-condition-slot condition) (production-bindings production)))))
                        (if (numberp index)
-                           (format nil "The value in the ~s slot (the value of the ~s variable) of the chunk of the ~s buffer is nil and cannot be bound to ~s."
-                             (replace-variables (cr-condition-slot condition) (production-bindings production)) (cr-condition-slot condition) (cr-condition-buffer condition) (cr-condition-value condition))
+                           (multiple-value-bind (val exists) (cr-buffer-slot-read procedural (cr-condition-buffer condition) (cr-condition-bi condition) index)
+                             (declare (ignore val))
+                             (if exists
+                                 (format nil "The value in the ~s slot (the value of the ~s variable) of the chunk of the ~s buffer is nil and cannot be bound to ~s."
+                                   (replace-variables (cr-condition-slot condition) (production-bindings production)) (cr-condition-slot condition) (cr-condition-buffer condition) (cr-condition-value condition))
+                               (format nil "The chunk in the ~s buffer does not have a slot named ~s (the value of the ~s variable)." 
+                                 (cr-condition-buffer condition) (replace-variables (cr-condition-slot condition) (production-bindings production)) (cr-condition-slot condition))))
                          (format nil "The value of the ~s variable does not name a valid slot in the chunk in the ~s buffer." (cr-condition-slot condition) (cr-condition-buffer condition))))))))
 
 
@@ -2056,7 +2146,7 @@
           :documentation "Use a decision tree in production matching")
         )
   
-  :version "2.0a1" 
+  :version "2.1" 
   :documentation 
   "The procedural module handles production definition and execution"
     

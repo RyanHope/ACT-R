@@ -87,6 +87,27 @@
 ;;;             :   because in a multiple model situation the output should
 ;;;             :   be based on the owning model's settings instead of whichever
 ;;;             :   model (if any) happens to be current.
+;;; 2012.08.10 Dan
+;;;             : * Support more than one fixation ring per window since 
+;;;             :   multiple models may be sharing a device by using the
+;;;             :   model name in a tag.
+;;; 2012.08.31 Dan
+;;;             : * Added env-window-click so that I can catch all the user
+;;;             :   clicks on the environment side window and call the
+;;;             :   rpm-window-click-event-handler appropriately.
+;;; 2012.09.21 Dan
+;;;             : * Grabbing the environment lock before sending the updates
+;;;             :   with send-env-window-update.
+;;;             : * Bad idea - can deadlock things...
+;;; 2013.01.10 Dan
+;;;             : * Env. sends keys over as strings now and uses a function
+;;;             :   named convert-env-key-name-to-char to convert that to a
+;;;             :   character instead of throwing a warning on the read of an
+;;;             :   invalid character.  If it's an invalid character it still
+;;;             :   prints a warning, but now that should be more informative.
+;;;             : * Instead of redefining visible-virtuals-available? here the
+;;;             :   function in the virtual's uwi file now calls check-with-environment-for-visible-virtuals
+;;;             :   which is defined here instead.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -101,7 +122,7 @@
 ;;; Inherits much of the functionality from the rpm-virtual-window
 ;;; but needs to send the commands to Tcl/Tk as well
 
-(defun visible-virtuals-available? () 
+(defun check-with-environment-for-visible-virtuals () 
   "Return whether or not the visible-virtuals are available"
   (and (environment-control-connections *environment-control*)
        (environment-control-use-env-windows *environment-control*)))
@@ -159,13 +180,13 @@
 (defmethod device-update-attended-loc ((wind visible-virtual-window) xyloc)
   
   (when (and (visual-fixation-marker) (not (eq wind (visual-fixation-marker))))
-    (send-env-window-update (list 'clearattention (id wind))))
+    (send-env-window-update (list 'clearattention (id wind) (current-model))))
   
   (setf (visual-fixation-marker) wind)
   
   (if xyloc
-      (send-env-window-update (list 'attention (id wind) (px xyloc) (py xyloc)))
-    (send-env-window-update (list 'clearattention (id wind)))))
+      (send-env-window-update (list 'attention (id wind) (px xyloc) (py xyloc) (current-model)))
+    (send-env-window-update (list 'clearattention (id wind) (current-model)))))
 
 
 ;;; Redefine the vw-output command since in a multiple model situation
@@ -313,9 +334,17 @@
   (gethash (subseq name 1) *vv-table*))
 
 (defun env-window-key-pressed (win-name key)
-  (let ((win (map-env-window-name-to-window win-name)))
-    (when win
-      (device-handle-keypress win key))))
+  (let ((win (map-env-window-name-to-window win-name))
+        (char (convert-env-key-name-to-char key)))
+    (cond ((and win char)
+           (device-handle-keypress win char))
+          (win ;; key is invalid
+           (print-warning "Window titled ~s received invalid Lisp character ~s as a key press." (window-title win) key))
+          (t ;; somehow the window is invalid
+           (print-warning "Keypress received from unknown environment window ~s." win-name)))))
+
+(defun convert-env-key-name-to-char (key)
+  (ignore-errors  (coerce key 'character)))
 
 (defun env-button-pressed (win-name button-name)
   (let* ((win (map-env-window-name-to-window win-name))
@@ -323,6 +352,10 @@
     (when button
       (vv-click-event-handler button nil))))
 
+(defun env-window-click (win-name x y)
+  (let ((win (map-env-window-name-to-window win-name)))
+    (when win
+      (rpm-window-click-event-handler win (vector x y)))))
 
 #|
 This library is free software; you can redistribute it and/or

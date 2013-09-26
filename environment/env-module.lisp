@@ -93,6 +93,11 @@
 ;;;             :   to existing models.
 ;;; 2011.09.12 Dan
 ;;;             : * Declare env-mode ignored in delete-environment-module.
+;;; 2012.09.07 Dan
+;;;             : * Removed the feature switches for setting the version.
+;;; 2013.01.07 Dan
+;;;             : * Only print the warning about environment not working with
+;;;             :   multiple meta-processes if there is an environment connection.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -111,7 +116,7 @@
   last-dm-set)
 
 (defun create-environment-module (model-name) 
-  (when (> (length (meta-process-names)) 1)
+  (when (and (environment-control-connections *environment-control*) (> (length (meta-process-names)) 1))
     (print-warning "Environment will not work correctly when there are multiple meta-processes!"))
   (let ((module (make-environment-module :model-name model-name)))
     (when (environment-control-connections *environment-control*) 
@@ -191,8 +196,7 @@
   :params 'environment-params
   :creation 'create-environment-module
   :reset '(nil reset-environment-module)
-  :version #+:ACTR-ENV-ALONE "3.0-s"
-           #-:ACTR-ENV-ALONE "3.0"
+  :version "3.0"
   :run-start 'update-environment-run-start-hooks
   :run-end 'update-environment-run-end-hooks
   :documentation "A module to handle the environment connection if opened"

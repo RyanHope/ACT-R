@@ -90,6 +90,14 @@
 ;;;             : * Changed reset-mp and mp-configure-real-time since the latter
 ;;;             :   is now documented as a user function so it's got more safety
 ;;;             :   checks in it.
+;;; 2013.01.03 Dan
+;;;             : * Added the :delta-maintenance parameter to mp-real-time-management
+;;;             :   to allow setting meta-p-max-time-maintenance.
+;;; 2013.01.07 Dan
+;;;             : * Added the clearing of the cannot-define-model slot to reset-mp.
+;;;             : * Added a safety check to define-meta-process to prevent the
+;;;             :   creation of new meta-processes while there's some meta-process
+;;;             :   running (basically same issue as defining new models on the fly).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -210,7 +218,10 @@
   (setf (meta-p-time-function meta-process) 'get-internal-real-time)
   (setf (meta-p-units-per-second meta-process) internal-time-units-per-second)
   (setf (meta-p-slack-function meta-process) 'real-time-slack)
-  (setf (meta-p-max-time-delta meta-process) nil))
+  (setf (meta-p-max-time-delta meta-process) nil)
+  (setf (meta-p-max-time-maintenance meta-process) nil)
+  
+  (setf (meta-p-cannot-define-model meta-process) 0))
 
 
 (defun mp-time-accuracy-limit ()
@@ -245,7 +256,7 @@
 (defun mp-real-time-management (&key (time-function 'get-internal-real-time)
                                      (units-per-second internal-time-units-per-second)
                                      (slack-function 'real-time-slack)
-                                     (max-time-delta nil)
+                                     (max-time-delta nil) (delta-maintenance nil)
                                      (allow-dynamics nil))
   (verify-current-mp  
    "mp-real-time-management called with no current meta-process."
@@ -263,6 +274,7 @@
           (setf (meta-p-time-function (current-mp)) time-function)
           (setf (meta-p-units-per-second (current-mp)) units-per-second)
           (setf (meta-p-slack-function (current-mp)) slack-function)
+          (setf (meta-p-max-time-maintenance (current-mp)) delta-maintenance)          
           (setf (meta-p-max-time-delta (current-mp)) (if (numberp max-time-delta) (seconds->ms max-time-delta) max-time-delta))
           t))))
    
@@ -335,11 +347,19 @@
       (print-warning "~S is not a symbol and thus not valid as a meta-process name." mp-name)
     (if (gethash mp-name (mps-table *meta-processes*))
         (print-warning "There is already a meta-process named ~S." mp-name)
-      (let ((mp (make-meta-process :name mp-name)))
-        (setf (gethash mp-name (mps-table *meta-processes*)) mp)
-        (incf (mps-count *meta-processes*))
-        (setf (mps-current *meta-processes*) nil)
-        mp-name))))
+      (if (let ((res nil))
+            (maphash (lambda (key val)
+                       (declare (ignore key))
+                       (when (meta-p-running val) 
+                         (setf res t)))
+                     (mps-table *meta-processes*))
+            res)
+          (print-warning "Cannot create a new meta-process while there is a running meta-process.")
+        (let ((mp (make-meta-process :name mp-name)))
+          (setf (gethash mp-name (mps-table *meta-processes*)) mp)
+          (incf (mps-count *meta-processes*))
+          (setf (mps-current *meta-processes*) nil)
+          mp-name)))))
 
 
 

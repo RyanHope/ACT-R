@@ -72,7 +72,7 @@ magnitude to use for blending (see details below).
 
 If :mag->value is set to a function, then that function 
 will be used to convert magnitudes back into values when
-the :value-mag function has returned magnitude the values 
+the :value-mag function has returned magnitude values 
 (see details below).
 
 :blend-all-slots
@@ -105,7 +105,7 @@ be either the chunk saved in the buffer or nil if the request
 failed or was terminated by a new request.  The return value of 
 the function is ignored.  Note that since the chunk may not be 
 put into the buffer until some later time this function may not 
-be called at the same time as a request hook function.  Each 
+be called at the same time as the request hook function.  Each 
 setting adds a new function and the "current value" of the 
 parameter is a list of all functions that are set.  Setting a 
 value of nil clears all the functions from the hook.

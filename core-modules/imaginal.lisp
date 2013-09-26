@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : imaginal.lisp
-;;; Version     : 1.2
+;;; Version     : 1.3
 ;;; 
 ;;; Description : An actual imaginal module.
 ;;; 
@@ -69,6 +69,21 @@
 ;;;             :   at the current delay time and if nil is returned it sets
 ;;;             :   the imaginal module error state to t at that time instead.
 ;;;             :   In either case, the module is flagged as busy during that time.
+;;; 2013.04.10 Dan
+;;;             : * Allow the modification requests to now also extend the chunk-
+;;;             :   type when a dynamic request specifies new slots.
+;;; 2013.05.01 Dan [1.3]
+;;;             : * Added a slot called slots to both the generic-action and
+;;;             :   simple-action types.  That slot can be used when making a
+;;;             :   request to the imaginal-action buffer to provide a list of
+;;;             :   symbols.  If all of those symbols name slots of the chunk
+;;;             :   in the imaginal buffer at the time of the request then 
+;;;             :   they will be passed to the action function.  If they are not
+;;;             :   valid slot names then the request will fail.
+;;; 2013.05.07 Dan 
+;;;             : * Test whether the slots slot is specified in the imaginal-action
+;;;             :   requests to avoid a warning when getting its value when not
+;;;             :   provided.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -92,7 +107,8 @@
 ;;;
 ;;; The imaginal-action buffer accepts two requests:
 ;;; 
-;;; generic-action with the action slot is required.
+;;; generic-action with the action slot is required and the slots slot is
+;;; optional.
 ;;;
 ;;; The function named in the action slot is called at the time of the request.
 ;;; All timing and state maintenance must be handled by that function except
@@ -102,9 +118,16 @@
 ;;; buffer by default, but the generic-action chunk-type also has a slot
 ;;; called result which could be a meaningful thing to use - place a
 ;;; chunk of type generic-action with the action and result slots set
-;;; in the imaginal-action buffer in response to a request.
+;;; in the imaginal-action buffer in response to a request.  If the slots slot
+;;; is specified with a list of symbols which name slots of the chunk in the
+;;; imaginal buffer at the time of the request then those slot names will be
+;;; passed to the action function in the order provided i.e. this is what
+;;; will effectively happen: (apply <action> <slots list>).  If the slots
+;;; list is provided but not valid then no action is taken and a warning
+;;; is printed.
 ;;;
-;;; simple-action with the action slot is required.
+;;; simple-action with the action slot is required and the slots slot is
+;;; optional.
 ;;;
 ;;; The function named in the action slot is called at the time of the request,
 ;;; the imaginal buffer is cleared, and the imaginal module is marked as busy. 
@@ -113,7 +136,13 @@
 ;;; the current delay time for the imaginal module passes and the module will
 ;;; then be marked as free.  If the function returns nil then after the current
 ;;; imaginal delay time passes the module will be marked as free and the error
-;;; state will be set to t.
+;;; state will be set to t.  If the slots slot is specified with a list of 
+;;; symbols which name slots of the chunk in the imaginal buffer at the time of 
+;;; the request then those slot names will be passed to the action function in 
+;;; the order provided i.e. this is what will effectively happen: 
+;;; (apply <action> <slots list>).  If the slots list is provided but not valid 
+;;; then no action is taken and a warning is printed.
+
 ;;;
 ;;;
 ;;; Two new commands are provided for use in user defined actions:
@@ -209,7 +238,8 @@
       (imaginal-action
        (case (chunk-spec-chunk-type chunk-spec)
          (generic-action
-          (let ((action-spec (chunk-spec-slot-spec chunk-spec 'action)))
+          (let ((action-spec (chunk-spec-slot-spec chunk-spec 'action))
+                (slots-spec (when (slot-in-chunk-spec-p chunk-spec 'slots) (chunk-spec-slot-spec chunk-spec 'slots))))
             
             (cond ((null action-spec)
                    (print-warning "An imaginal-action generic-action request requires an action.")
@@ -224,9 +254,26 @@
                    (print-warning "An imaginal-action generic-action request requires the action to name a valid function.")
                    (set-imaginal-free))
                   (t
-                   (funcall (third (car action-spec)))))))
+                   (if slots-spec
+                       (cond ((> (length slots-spec) 1)
+                              (print-warning "An imaginal-action generic-action request can only specify one slots list."))
+                             ((not (eq '= (caar slots-spec)))
+                              (print-warning "An imaginal-action generic-action request requires the = specifier for the slots."))
+                             ((not (listp (third (car slots-spec))))
+                              (print-warning "An imaginal-action generic-action request slots value must be a list."))
+                             ((not (buffer-read 'imaginal))
+                              (print-warning "An imaginal-action generic-action request which specifies slots requires a chunk in the imaginal buffer."))
+                             ((let* ((chunk (buffer-read 'imaginal))
+                                     (type (chunk-chunk-type-fct chunk))
+                                     (slots (chunk-type-slot-names-fct type)))
+                                (not (every (lambda (x) (find x slots)) (third (car slots-spec)))))
+                              (print-warning "An imaginal-action generic-action request which specifies slots requires valid slot names for the current imaginal buffer chunk."))
+                             (t
+                              (apply (third (car action-spec)) (third (car slots-spec)))))
+                       (funcall (third (car action-spec))))))))
          (simple-action
-          (let ((action-spec (chunk-spec-slot-spec chunk-spec 'action)))
+          (let ((action-spec (chunk-spec-slot-spec chunk-spec 'action))
+                (slots-spec (when (slot-in-chunk-spec-p chunk-spec 'slots) (chunk-spec-slot-spec chunk-spec 'slots))))
             
             (cond ((null action-spec)
                    (print-warning "An imaginal-action simple-action request requires an action.")
@@ -241,7 +288,29 @@
                    (print-warning "An imaginal-action simple-action request requires the action to name a valid function.")
                    (set-imaginal-free))
                   (t
-                   (let ((c (funcall (third (car action-spec))))
+                   (when slots-spec
+                     (unless (cond ((> (length slots-spec) 1)
+                                    (print-warning "An imaginal-action generic-action request can only specify one slots list."))
+                                   ((not (eq '= (caar slots-spec)))
+                                    (print-warning "An imaginal-action generic-action request requires the = specifier for the slots."))
+                                   ((not (listp (third (car slots-spec))))
+                                    (print-warning "An imaginal-action generic-action request slots value must be a list."))
+                                   ((not (buffer-read 'imaginal))
+                                    (print-warning "An imaginal-action generic-action request which specifies slots requires a chunk in the imaginal buffer."))
+                                   ((let* ((chunk (buffer-read 'imaginal))
+                                           (type (chunk-chunk-type-fct chunk))
+                                           (slots (chunk-type-slot-names-fct type)))
+                                      (not (every (lambda (x) (find x slots)) (third (car slots-spec)))))
+                                    (print-warning "An imaginal-action generic-action request which specifies slots requires valid slot names for the current imaginal buffer chunk."))
+                                   (t
+                                    t))
+                       (set-imaginal-free)
+                       (return-from imaginal-request)))
+                   
+                   
+                   (let ((c (if slots-spec
+                                (apply (third (car action-spec)) (third (car slots-spec)))
+                              (funcall (third (car action-spec)))))
                          (delay (if (imaginal-module-randomize instance)
                                     (randomize-time (imaginal-module-delay instance))
                                   (imaginal-module-delay instance))))
@@ -279,7 +348,7 @@
                        (imaginal-module-delay instance))))
           (setf (imaginal-module-busy instance) t)
           
-          (schedule-mod-buffer-chunk buffer mods delay :module 'imaginal)
+          (schedule-mod-buffer-chunk buffer mods delay :module 'imaginal :extend t)
           (schedule-event-relative delay 'set-imaginal-free :module 'imaginal :priority -1 :output nil))
       (model-warning "Modification requests not available for the imaginal-action buffer"))))
 
@@ -296,8 +365,8 @@
 (defun imaginal-reset (instance)
   (setf (imaginal-module-busy instance) nil)
   (setf (imaginal-module-error instance) nil)
-  (chunk-type generic-action action result)
-  (chunk-type simple-action action))
+  (chunk-type generic-action action result slots)
+  (chunk-type simple-action action slots))
 
 (define-module-fct 'imaginal
     '(imaginal imaginal-action)
@@ -309,7 +378,7 @@
           :warning "T or nil" 
           :documentation "Variable Imaginal Delay Time"))
    
-  :version "1.2"
+  :version "1.3"
   :documentation "The imaginal module provides a goal style buffer with a delay and an action buffer for manipulating the imaginal chunk"
   :creation #'create-imaginal
   :query #'imaginal-query

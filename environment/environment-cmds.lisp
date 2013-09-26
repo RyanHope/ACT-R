@@ -61,6 +61,36 @@
 ;;; 2012.02.09 Dan
 ;;;             : * Explicitly close streams made with make-string-output-stream 
 ;;;             :   to be safe.
+;;; 2012.12.18 Dan
+;;;             : * Changed reload-model and safe-load so that they can signal
+;;;             :   an error without opening the interactive debugger because
+;;;             :   that's an issue in the environment particularly with the
+;;;             :   standalones since the error would have to be cleared before
+;;;             :   the environment notice can be displayed, but with CCL that's
+;;;             :   very difficult becuase the background process doesn't have
+;;;             :   access to the terminal...
+;;; 2013.02.19 Dan
+;;;             : * Haven't been able to reconstruct why the loaders "ignore"
+;;;             :   unbound-variable errors, but since it can lead to very bad
+;;;             :   situations for users I'm taking that out.  There are two
+;;;             :   guesses so far as to where it comes from.  Christian thinks 
+;;;             :   it may go all the way back to the old environment's split 
+;;;             :   edit files because code may have been loaded out of order.
+;;;             :   It might also have been a "fix" for a problem with the early 
+;;;             :   OpenMCL versions of the standalone environment based on an 
+;;;             :   error report I found in an email from 9/12/02:
+;;;             :   
+;;;             :   ... whenever I try to load a model (I get that far without 
+;;;             :   problem), OpenMCL complains:
+;;;             :   ? (start-environment)
+;;;             :   ((#<TCP-STREAM (SOCKET/4) #x54A8926> #<PROCESS Environment-Connection(2) [Enabled] #x54A8DEE> ("127.0.0.1" . 2621)))
+;;;             :   <try to load a model>
+;;;             :   ? Error in update of Handler: HANDLER5
+;;;             :   message: #<Anonymous Function #x54C3E9E>
+;;;             :   
+;;;             :   Error:Unbound variable: \?
+;;;             :   
+;;;             :   and then hangs.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -110,7 +140,8 @@
          (error-stream (make-broadcast-stream *error-output* save-stream))
          (*standard-output* display-stream)
          (*error-output* error-stream)
-         (*one-stream-hack* t))
+         (*one-stream-hack* t)
+         (internal-error nil))
     
     (if (or (stepper-open-p) (environment-busy-p))
         (list 0 "Cannot reload if ACT-R is running or if the stepper is open.")
@@ -119,13 +150,18 @@
             (set-environment-busy)   
             (multiple-value-bind (s err) 
                 (ignore-errors 
-                 (if smart-load?
+                 (let ((*debugger-hook* (lambda (c o) 
+                                          (declare (ignore o)) 
+                                          (print-warning "Error aborted automatically by environment.") 
+                                          (setf internal-error c)
+                                          (error c))))
+                   (if smart-load?
                      (reload t)
-                   (reload)))
+                   (reload))))
       
-              (cond ((and (subtypep (type-of err) 'condition)
-                          (not (equal (type-of err) 'unbound-variable)))
-                     (uni-report-error err "Error during reload")
+              (cond ((or internal-error
+                         (subtypep (type-of err) 'condition))
+                     (uni-report-error (if internal-error internal-error err) "Error during reload")
                      (list 0 (get-output-stream-string save-stream)))
                     ((eq s :none)
                      (print-warning "Cannot use reload")
@@ -149,19 +185,26 @@
          (error-stream (make-broadcast-stream *error-output* save-stream))
          (*standard-output* display-stream)
          (*error-output* error-stream)
-         (*one-stream-hack* t))
+         (*one-stream-hack* t)
+         (internal-error nil))
     
     (unwind-protect
         (multiple-value-bind (s err) 
             (ignore-errors 
-             (if compile-it
-                 (compile-and-load file)
-               (load file)))
+             (let ((*debugger-hook* (lambda (c o) 
+                                      (declare (ignore o)) 
+                                      (print-warning "Error aborted automatically by environment.") 
+                                      (setf internal-error c)
+                                      (error c))))
+               
+               (if compile-it
+                   (compile-and-load file)
+                 (load file))))
           (declare (ignore s))
           
-          (cond ((and (subtypep (type-of err) 'condition)
-                      (not (equal (type-of err) 'unbound-variable)))
-                 (uni-report-error err "Error during load model")
+          (cond ((or internal-error
+                     (subtypep (type-of err) 'condition))
+                 (uni-report-error (if internal-error internal-error err) "Error during load model")
                  (list 0 (get-output-stream-string save-stream)))
                 (t
                  (format t "~%#|##  load model complete ##|#~%")

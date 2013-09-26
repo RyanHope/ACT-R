@@ -157,6 +157,10 @@
 ;;; 2011.09.13 Dan
 ;;;             : * Added the require-compiled for environment-colors since 
 ;;;             :   this uses *gt-colors*.
+;;; 2013.01.09 Dan
+;;;             : * Changed the environment data cache to an equalp hashtable
+;;;             :   since the keys are now a cons of the handler name and the
+;;;             :   window to prevent issues with multi-environment settings.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -480,7 +484,7 @@
       (command-output (format nil "~~{~~{~~~d,3f~~}~~%~~}" max-len) (cdr transposed)))))
 
 (defun reset-bold-module (bm)
-  (setf (bold-module-env-cache bm) (make-hash-table)))
+  (setf (bold-module-env-cache bm) (make-hash-table :test 'equalp)))
 
 (defun create-bold-module (name) 
   (declare (ignore name))

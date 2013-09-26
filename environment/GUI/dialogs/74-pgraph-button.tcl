@@ -150,29 +150,29 @@ proc select_pgraph {} {
     pack $win.frame.scrly -side right -fill y
     pack $win.frame.canvas -side left -fill both
  
-    place $win.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0 -height -60
+    place $win.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0 -height -75
     
-    place $win.notes -x 500 -rely 1.0 -y -20 -relwidth 1.0 -width -500 -height 20
-    place $win.text -x 0 -rely 1.0 -y -20 -width 100 -height 20
+    place $win.notes -x 500 -rely 1.0 -y -25 -relwidth 1.0 -width -500 -height 24
+    place $win.text -x 0 -rely 1.0 -y -25 -width 100 -height 24
 
-    place $win.update -x 0 -rely 1.0 -y -40 -width 100 -height 20
-    place $win.grid -x 100 -rely 1.0 -y -40 -width 100 -height 20
-    place $win.grid1 -x 200 -rely 1.0 -y -40 -width 100 -height 20
-    place $win.grid2 -x 300 -rely 1.0 -y -40 -width 100 -height 20
-    place $win.grid3 -x 400 -rely 1.0 -y -40 -width 100 -height 20
-    place $win.grid4 -x 500 -rely 1.0 -y -40 -width 100 -height 20
-    place $win.grid5 -x 600 -rely 1.0 -y -40 -width 100 -height 20
+    place $win.update -x 0 -rely 1.0 -y -50 -width 100 -height 24
+    place $win.grid -x 100 -rely 1.0 -y -50 -width 100 -height 24
+    place $win.grid1 -x 200 -rely 1.0 -y -50 -width 100 -height 24
+    place $win.grid2 -x 300 -rely 1.0 -y -50 -width 100 -height 24
+    place $win.grid3 -x 400 -rely 1.0 -y -50 -width 100 -height 24
+    place $win.grid4 -x 500 -rely 1.0 -y -50 -width 100 -height 24
+    place $win.grid5 -x 600 -rely 1.0 -y -50 -width 100 -height 24
 
-    place $win.type_box -relx 0 -relwidth .5 -width -135 -rely 1.0 -y -60 -height 20
-    place $win.of -relx .5 -x -15 -width 30 -rely 1.0 -y -60 -height 20
-    place $win.cur_d -relx .5 -x -95 -width 80 -rely 1.0 -y -60 -height 20
-    place $win.max_d -relx .5 -x 15 -width 80 -rely 1.0 -y -60 -height 20
-    place $win.next -relx .5 -x 95 -width 40 -rely 1.0 -y -60 -height 20
-    place $win.previous -relx .5 -x -135 -width 40 -rely 1.0 -y -60 -height 20
+    place $win.type_box -relx 0 -relwidth .5 -width -135 -rely 1.0 -y -75 -height 24
+    place $win.of -relx .5 -x -15 -width 30 -rely 1.0 -y -75 -height 24
+    place $win.cur_d -relx .5 -x -95 -width 80 -rely 1.0 -y -75 -height 24
+    place $win.max_d -relx .5 -x 15 -width 80 -rely 1.0 -y -75 -height 24
+    place $win.next -relx .5 -x 95 -width 40 -rely 1.0 -y -75 -height 24
+    place $win.previous -relx .5 -x -135 -width 40 -rely 1.0 -y -75 -height 24
 
-    place $win.save -x 100 -rely 1.0 -y -20 -width 100 -height 20
-    place $win.save2 -x 200 -rely 1.0 -y -20 -width 100 -height 20
-    place $win.check -x 300 -rely 1.0 -y -20 -width 175 -height 20
+    place $win.save -x 100 -rely 1.0 -y -25 -width 100 -height 24
+    place $win.save2 -x 200 -rely 1.0 -y -25 -width 100 -height 24
+    place $win.check -x 300 -rely 1.0 -y -25 -width 175 -height 24
 
     wm deiconify $win
   }
@@ -180,7 +180,7 @@ proc select_pgraph {} {
 
 proc clear_p_history_data {win} {
  
-  send_environment_cmd "update [get_handler_name $win.frame.canvas] (lambda (x) (declare (ignore x)) (remove-p-history-entry '$win) (list t))"
+  send_environment_cmd "update [get_handler_name $win.frame.canvas] (lambda (x) (declare (ignore x)) (remove-p-history-entry (cons '[get_handler_name $win.frame.canvas] '$win)) (list t))"
 }
                                      
 
@@ -292,7 +292,7 @@ proc draw_p_graph {win model clear_all} {
              
   set $win.return ""
                   
-  send_environment_cmd "update [get_handler_name $win.frame.canvas] (lambda (x) (declare (ignore x)) (create-production-graph-coords '$win $kind $count $clear_all $show_unused))"
+  send_environment_cmd "update [get_handler_name $win.frame.canvas] (lambda (x) (declare (ignore x)) (create-production-graph-coords (cons '[get_handler_name $win.frame.canvas] '$win) $kind $count $clear_all $show_unused))"
 
   wait_for_non_null $win.return
 

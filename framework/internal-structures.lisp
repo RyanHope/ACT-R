@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : internal-structures.lisp
-;;; Version     : 1.1
+;;; Version     : 1.2
 ;;; 
 ;;; Description : All of the defstructs for the internal code.
 ;;; 
@@ -208,6 +208,35 @@
 ;;;             : * Adding another slot to the meta-process so that it can 
 ;;;             :   record the order in which models are defined so that they
 ;;;             :   can be reset in that same order for consistency.
+;;; 2013.01.03 Dan
+;;;             : * Adding a max-time-maintenance slot to the meta-process.
+;;; 2013.01.04 Dan
+;;;             : * Added the cannot-define-model slot to the meta-process to
+;;;             :   provide a way of avoiding a nasty situation that can occur
+;;;             :   if something tries to create a model while the "current" 
+;;;             :   model is being changed for other reasons.  Now, anytime there's
+;;;             :   a (setf (meta-p-current-model ...)) it should be wrapped in
+;;;             :   a (cannot-define-model ...) construct since that macro sets
+;;;             :   and clears this slot.
+;;; 2013.01.07 Dan
+;;;             : * Changed cannot-define-model to be a count since t/nil doesn't
+;;;             :   work since cannot-define-model macros could be nested.
+;;; 2013.01.24 Dan
+;;;             : * Adding a new slot to the chunk-type structure to keep track
+;;;             :   of an index for slots because the production matching code
+;;;             :   builds an array of bufferXslot values but chunk extension
+;;;             :   mixed with subtyping can cause issues with that.
+;;; 2013.01.28 Dan
+;;;             : * Adding another new slot to the chunk-type structure: possible-slots.
+;;;             :   That will hold the names of slots in subtypes of a type but
+;;;             :   not members of the type itself.  Needed to allow for the
+;;;             :   ability to specify subtype slots in conditions as constants
+;;;             :   which seems to follow as a logical conclusion, but which hasn't
+;;;             :   been implemented previously.
+;;; 2013.05.17 Dan [1.2]
+;;;             : * Added new slots to the chunk-type structure to indicate
+;;;             :   and manage the new static chunk-types which create 
+;;;             :   subtypes instead of growing the base type when extended.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -264,7 +293,7 @@
 
 (defstruct act-r-chunk-type ; (:print-function print-chunk-type))
   "The internal structure of a chunk-type"
-  name documentation supertypes subtypes slots extended-slots)
+  name documentation supertypes subtypes slots extended-slots indices possible-slots static subtree)
 
 (defstruct act-r-chunk ; (:print-function print-chunk))
   "The internal structure of a chunk"
@@ -274,7 +303,7 @@
   slot-value-lists 
   copied-from
   merged-chunks
-  parameter-values )
+  parameter-values)
 
 (defstruct act-r-chunk-parameter
   "The internal structure of a chunk parameter"
@@ -331,6 +360,7 @@
   (slack-function 'real-time-slack)
   
   max-time-delta
+  max-time-maintenance
   
   (next-hook-id 0)
   (hook-table (make-hash-table))
@@ -338,7 +368,9 @@
   (documentation "")
   (running nil)
   time-overflow-warning
-  model-order)
+  model-order
+  
+  (cannot-define-model 0))
 
 (defstruct act-r-model
   "The internal structure of a model"

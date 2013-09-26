@@ -22,7 +22,6 @@ proc save_model {} {
   global model_file_names
   global model_file_changed
   global current_open_model
-  global options_array
   global save_return
   global tutor_mode
   global tutor_windows

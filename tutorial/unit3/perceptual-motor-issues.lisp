@@ -29,7 +29,7 @@
     (setf *response-time* nil)
     
     (proc-display)
-    (run 10)
+    (run 10 :real-time t)
         
     (list task  (and (= (length *response*) 2)
                      (< time *response-time*)

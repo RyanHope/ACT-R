@@ -27,7 +27,7 @@ proc make_bold_multi_graphs {} {
                         $list_frame.list_box.var \
                         -yscrollcommand "$list_frame.list_scrl set" \
                         -selectmode multiple \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   send_environment_cmd "create list-box-handler $list_box $list_box \
                         (lambda (x) (declare (ignore x)) (no-output (buffers))) () [send_model_name]"
@@ -159,7 +159,7 @@ proc kill_bold_multi_window {win} {
 
   send_environment_cmd "update [get_handler_name $win.frame.canvas] \
     (lambda (x) (declare (ignore x)) \
-        (uncache-bold-data '$win.frame.canvas))" 
+        (uncache-bold-data (cons '[get_handler_name $win.frame.canvas] '$win.frame.canvas)))" 
    
    # Don't want to wait for the update since that's problematic
    # if the model is no longer defined, and it shouldn't matter
@@ -204,7 +204,7 @@ proc select_multi_buffer_graph {listwin target_win win} {
       
         send_environment_cmd "update [get_handler_name $target_win] \
              (lambda (x) (declare (ignore x))\
-                 (parse-bold-predictions-for-graph '$target_win '$chunk $local $st $et))"
+                 (parse-bold-predictions-for-graph (cons '[get_handler_name $target_win] '$target_win) '$chunk $local $st $et))"
        
         wait_for_non_null $win.return
 

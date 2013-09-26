@@ -92,6 +92,18 @@
 ;;;             : * Record the models as they are defined in meta-p-model-order
 ;;;             :   so things like reset can occur in the same order as when
 ;;;             :   initially created for consistency.
+;;; 2013.01.04 Dan
+;;;             : * Added unwind-protect to reset- and delete- model so that the
+;;;             :   current model always gets restored (define model doesn't need
+;;;             :   it since it has other protection and doesn't just restore the
+;;;             :   "last" model anyway).
+;;;             : * Added a check to define-model to prevent it from creating a
+;;;             :   new model when it's not valid to do so based on meta-p-cannot-define-model
+;;;             :   and added the cannot-define-model calls to places that need
+;;;             :   to be protected.
+;;; 2013.01.07 Dan
+;;;             : * Changed the test on cannot-define-model to be >0 instead of
+;;;             :   just true.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -226,125 +238,128 @@
           (print-warning "Nil is not a valid name for a model.  No model defined."))
          ((valid-model-name name)
           (print-warning "~S is already the name of a model in the current meta-process.  Cannot be redefined." name))
+         ((> (meta-p-cannot-define-model (current-mp)) 0)
+          (print-warning "Cannot define a model within the context of another model."))
          (t
-          (when (some (lambda (x) (find x (symbol-name name))) (list #\$ #\{ #\} #\[ #\]))
-            (print-warning "Model names that contain any of the characters $, {, }, [, or ] may not work correctly with the ACT-R Environment."))
-          
-          (let ((new-model (make-act-r-model :name name))
-                (mp (current-mp)))
+          (cannot-define-model
+           (when (some (lambda (x) (find x (symbol-name name))) (list #\$ #\{ #\} #\[ #\]))
+             (print-warning "Model names that contain any of the characters $, {, }, [, or ] may not work correctly with the ACT-R Environment."))
+           
+           (let ((new-model (make-act-r-model :name name))
+                 (mp (current-mp)))
+             
+             
+             (when (or *model-chunk-table-size* *model-chunk-table-rehash-threshold*)
+               (if *model-chunk-table-size*
+                   (if *model-chunk-table-rehash-threshold*
+                       (progn
+                         (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*))
+                         (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*)))
+                     (progn
+                       (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size*))
+                       (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size*))))
+                 (progn
+                   (setf (act-r-model-chunks-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*))
+                   (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*)))))
+             
+             
+             (setf (gethash name (meta-p-models mp)) new-model)
+             (push-last name (meta-p-model-order mp))
+             (setf (meta-p-current-model mp) new-model)
+             (incf (meta-p-model-count mp))
             
+             
+             ;(setf (act-r-model-device new-model) 
+             ;  (make-instance 'device-interface))
             
-            (when (or *model-chunk-table-size* *model-chunk-table-rehash-threshold*)
-              (if *model-chunk-table-size*
-                  (if *model-chunk-table-rehash-threshold*
-                      (progn
-                        (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*))
-                        (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*)))
-                    (progn
-                      (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size*))
-                      (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size*))))
-                (progn
-                  (setf (act-r-model-chunks-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*))
-                  (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*)))))
-                        
-            
-            (setf (gethash name (meta-p-models mp)) new-model)
-            (push-last name (meta-p-model-order mp))
-            (setf (meta-p-current-model mp) new-model)
-            (incf (meta-p-model-count mp))
-            
-            
-            ;(setf (act-r-model-device new-model) 
-            ;  (make-instance 'device-interface))
-            
-            (when (> (length (format nil "~S" name)) (meta-p-model-name-len mp))
-              (setf (meta-p-model-name-len mp) (length (format nil "~S" name))))
-            
-            (create-model-default-chunk-types-and-chunks)
-            
-            (maphash #'(lambda (module-name val)
-                         (declare (ignore val))
-                         (setf (gethash module-name (act-r-model-modules-table new-model))
-                           (instantiate-module module-name name)))
-                     (global-modules-table))
-            
+             (when (> (length (format nil "~S" name)) (meta-p-model-name-len mp))
+               (setf (meta-p-model-name-len mp) (length (format nil "~S" name))))
+             
+             (create-model-default-chunk-types-and-chunks)
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (setf (gethash module-name (act-r-model-modules-table new-model))
+                            (instantiate-module module-name name)))
+                      (global-modules-table))
+             
              ;; instantiate the buffers
-            
-            (maphash #'(lambda (buffer-name buffer-struct)
-                         (let ((buffer (copy-act-r-buffer buffer-struct)))
-                                       
+             
+             (maphash #'(lambda (buffer-name buffer-struct)
+                          (let ((buffer (copy-act-r-buffer buffer-struct)))
+                            
                             (when (act-r-buffer-multi buffer)
                               (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5)))
-                           
-                           (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
-                     *buffers-table*)
-            
-            
-            (maphash #'(lambda (module-name val)
-                         (declare (ignore val))
-                         (reset-module module-name))
-                     (global-modules-table))
-            
-            
-            (maphash #'(lambda (parameter-name parameter)
-                 (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
-             *act-r-parameters-table*)
-            
-            
-            (maphash #'(lambda (module-name val)
-                         (declare (ignore val))
-                         (secondary-reset-module module-name))
-                     (global-modules-table))
-            
-            (let ((errored nil))
-              (dolist (form model-code-list)
-                (unwind-protect 
-                    (handler-case (eval form)
-                      (error (condition) 
-                        (setf errored t)
-                        (print-warning "Error encountered in model form:~%~S~%Invoking the debugger." form)
-                        (print-warning "You must exit the error state to continue.")
-                        (invoke-debugger condition)))
-                  (when errored
-                    (remhash name (meta-p-models mp))
-                    (setf (meta-p-model-order mp) (remove name (meta-p-model-order mp)))
-                    (print-warning "Model ~s not defined." name)
-                    (decf (meta-p-model-count mp))
-                    
-                    ;; delete any events that may have been scheduled by modules
-                    ;; or code prior to the error
-                    
-                    (setf (meta-p-events mp)
-                      (remove name (meta-p-events mp) :key #'evt-model))
-                    
-                    (setf (meta-p-delayed mp)
-                      (remove name (meta-p-delayed mp) :key #'evt-model))
-                    
-                    (setf (meta-p-dynamics mp)
-                      (remove name (meta-p-dynamics mp) :key #'(lambda (x) (evt-model (car x)))))
-                    
-                    
-                    ;; remove the modules which were created
-                    
-                    (maphash #'(lambda (module-name instance)
-                            (declare (ignore instance))
-                            (delete-module module-name))
-                        (global-modules-table))
-                    
-                    (return-from define-model-fct nil)))))
-            
-            (setf (act-r-model-code new-model) model-code-list)
-            
-            (maphash #'(lambda (module-name val)
-                 (declare (ignore val))
-                 (tertiary-reset-module module-name))
-             (global-modules-table))
+                            
+                            (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
+                      *buffers-table*)
              
-            (unless (= 1 (meta-p-model-count mp))
-              (setf (meta-p-current-model mp) nil))
-              
-            name)))))
-
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (reset-module module-name))
+                      (global-modules-table))
+             
+             
+             (maphash #'(lambda (parameter-name parameter)
+                          (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
+                      *act-r-parameters-table*)
+             
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (secondary-reset-module module-name))
+                      (global-modules-table))
+             
+             (let ((errored nil))
+               (dolist (form model-code-list)
+                 (unwind-protect 
+                     (handler-case (eval form)
+                       (error (condition) 
+                         (setf errored t)
+                         (print-warning "Error encountered in model form:~%~S~%Invoking the debugger." form)
+                         (print-warning "You must exit the error state to continue.")
+                         (invoke-debugger condition)))
+                   (when errored
+                     (remhash name (meta-p-models mp))
+                     (setf (meta-p-model-order mp) (remove name (meta-p-model-order mp)))
+                     (print-warning "Model ~s not defined." name)
+                     (decf (meta-p-model-count mp))
+                     
+                     ;; delete any events that may have been scheduled by modules
+                     ;; or code prior to the error
+                     
+                     (setf (meta-p-events mp)
+                       (remove name (meta-p-events mp) :key #'evt-model))
+                     
+                     (setf (meta-p-delayed mp)
+                       (remove name (meta-p-delayed mp) :key #'evt-model))
+                     
+                     (setf (meta-p-dynamics mp)
+                       (remove name (meta-p-dynamics mp) :key #'(lambda (x) (evt-model (car x)))))
+                     
+                     
+                     ;; remove the modules which were created
+                     
+                     (maphash #'(lambda (module-name instance)
+                                  (declare (ignore instance))
+                                  (delete-module module-name))
+                              (global-modules-table))
+                     
+                     (return-from define-model-fct nil)))))
+             
+             (setf (act-r-model-code new-model) model-code-list)
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (tertiary-reset-module module-name))
+                      (global-modules-table))
+             
+             (unless (= 1 (meta-p-model-count mp))
+               (setf (meta-p-current-model mp) nil))
+             
+             name))))))
+  
 (defmacro unsafe-define-model (name &body model-code)
   `(unsafe-define-model-fct ',name ',model-code))
 
@@ -357,92 +372,95 @@
           (print-warning "Nil is not a valid name for a model.  No model defined."))
          ((valid-model-name name)
           (print-warning "~S is already the name of a model in the current meta-process.  Cannot be redefined." name))
+         ((> (meta-p-cannot-define-model (current-mp)) 0)
+          (print-warning "Cannot define a model within the context of another model."))
          (t
-          (when (some (lambda (x) (find x (symbol-name name))) (list #\$ #\{ #\} #\[ #\]))
-            (print-warning "Model names that contain any of the characters $, {, }, [, or ] may not work correctly with the ACT-R Environment."))
-          
-          (let ((new-model (make-act-r-model :name name))
-                (mp (current-mp)))
-            
-            
-            (when (or *model-chunk-table-size* *model-chunk-table-rehash-threshold*)
-              (if *model-chunk-table-size*
-                  (if *model-chunk-table-rehash-threshold*
-                      (progn
-                        (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*))
-                        (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*)))
-                    (progn
-                      (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size*))
-                      (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size*))))
-                (progn
-                  (setf (act-r-model-chunks-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*))
-                  (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*)))))
-                        
-            
-            (setf (gethash name (meta-p-models mp)) new-model)
-            (push-last name (meta-p-model-order mp))
-            (setf (meta-p-current-model mp) new-model)
-            (incf (meta-p-model-count mp))
-            
-            
-            ;(setf (act-r-model-device new-model) 
-            ;  (make-instance 'device-interface))
-            
-            (when (> (length (format nil "~S" name)) (meta-p-model-name-len mp))
-              (setf (meta-p-model-name-len mp) (length (format nil "~S" name))))
-            
-            (create-model-default-chunk-types-and-chunks)
-            
-            (maphash #'(lambda (module-name val)
-                         (declare (ignore val))
-                         (setf (gethash module-name (act-r-model-modules-table new-model))
-                           (instantiate-module module-name name)))
-                     (global-modules-table))
-            
+          (cannot-define-model
+           (when (some (lambda (x) (find x (symbol-name name))) (list #\$ #\{ #\} #\[ #\]))
+             (print-warning "Model names that contain any of the characters $, {, }, [, or ] may not work correctly with the ACT-R Environment."))
+           
+           (let ((new-model (make-act-r-model :name name))
+                 (mp (current-mp)))
+             
+             
+             (when (or *model-chunk-table-size* *model-chunk-table-rehash-threshold*)
+               (if *model-chunk-table-size*
+                   (if *model-chunk-table-rehash-threshold*
+                       (progn
+                         (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*))
+                         (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size* :rehash-threshold *model-chunk-table-rehash-threshold*)))
+                     (progn
+                       (setf (act-r-model-chunks-table new-model) (make-hash-table :size *model-chunk-table-size*))
+                       (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :size *model-chunk-table-size*))))
+                 (progn
+                   (setf (act-r-model-chunks-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*))
+                   (setf (act-r-model-chunk-ref-table new-model) (make-hash-table :rehash-threshold *model-chunk-table-rehash-threshold*)))))
+             
+             
+             (setf (gethash name (meta-p-models mp)) new-model)
+             (push-last name (meta-p-model-order mp))
+             (setf (meta-p-current-model mp) new-model)
+             (incf (meta-p-model-count mp))
+             
+             
+             ;(setf (act-r-model-device new-model) 
+             ;  (make-instance 'device-interface))
+             
+             (when (> (length (format nil "~S" name)) (meta-p-model-name-len mp))
+               (setf (meta-p-model-name-len mp) (length (format nil "~S" name))))
+             
+             (create-model-default-chunk-types-and-chunks)
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (setf (gethash module-name (act-r-model-modules-table new-model))
+                            (instantiate-module module-name name)))
+                      (global-modules-table))
+             
              ;; instantiate the buffers
-            
-            (maphash #'(lambda (buffer-name buffer-struct)
-                         (let ((buffer (copy-act-r-buffer buffer-struct)))
-                                       
+             
+             (maphash #'(lambda (buffer-name buffer-struct)
+                          (let ((buffer (copy-act-r-buffer buffer-struct)))
+                            
                             (when (act-r-buffer-multi buffer)
                               (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5)))
-                           
-                           (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
-                     *buffers-table*)
-            
-            
-            (maphash #'(lambda (module-name val)
-                         (declare (ignore val))
-                         (reset-module module-name))
-                     (global-modules-table))
-            
-            
-            (maphash #'(lambda (parameter-name parameter)
-                 (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
-             *act-r-parameters-table*)
-            
-            
-            (maphash #'(lambda (module-name val)
-                         (declare (ignore val))
-                         (secondary-reset-module module-name))
-                     (global-modules-table))
-            
-            (dolist (form model-code-list)
-              (eval form))
-            
-            (setf (act-r-model-code new-model) model-code-list)
-            
-            (maphash #'(lambda (module-name val)
-                 (declare (ignore val))
-                 (tertiary-reset-module module-name))
-             (global-modules-table))
+                            
+                            (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
+                      *buffers-table*)
              
-            (unless (= 1 (meta-p-model-count mp))
-              (setf (meta-p-current-model mp) nil))
-              
-            name)))))
-
-
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (reset-module module-name))
+                      (global-modules-table))
+             
+             
+             (maphash #'(lambda (parameter-name parameter)
+                          (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
+                      *act-r-parameters-table*)
+             
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (secondary-reset-module module-name))
+                      (global-modules-table))
+             
+             (dolist (form model-code-list)
+               (eval form))
+             
+             (setf (act-r-model-code new-model) model-code-list)
+             
+             (maphash #'(lambda (module-name val)
+                          (declare (ignore val))
+                          (tertiary-reset-module module-name))
+                      (global-modules-table))
+             
+             (unless (= 1 (meta-p-model-count mp))
+               (setf (meta-p-current-model mp) nil))
+             
+             name))))))
+  
+  
 (defun create-model-default-chunk-types-and-chunks ()
   (chunk-type-fct (list 'chunk))
   (define-chunks-fct (list '(free isa chunk)
@@ -466,35 +484,38 @@
    (let ((mp (current-mp)))
      (if model-name
          (if (gethash model-name (meta-p-models mp))
-             (let ((model (gethash model-name (meta-p-models mp)))
-                   (saved-current (meta-p-current-model mp)))
-               (setf (meta-p-current-model mp) model)
-               
-               (setf (meta-p-events mp)
-                 (remove model-name (meta-p-events mp) :key #'evt-model))
-               
-               (setf (meta-p-delayed mp)
-                 (remove model-name (meta-p-delayed mp) :key #'evt-model))
-               
-               (setf (meta-p-dynamics mp)
-                 (remove model-name (meta-p-dynamics mp) :key #'(lambda (x) (evt-model (car x)))))
-               
-               (maphash #'(lambda (module-name instance)
-                            (declare (ignore instance))
-                            (delete-module module-name))
-                        (global-modules-table))
-               
-               (decf (meta-p-model-count mp))
-               (remhash model-name (meta-p-models mp))
-               (setf (meta-p-model-order mp) (remove model-name (meta-p-model-order mp)))
-               (cond ((zerop (meta-p-model-count mp))
-                      (setf (meta-p-current-model mp) nil))
-                     ((= 1 (meta-p-model-count mp))
-                      (setf (meta-p-current-model mp)
-                        (gethash (car (hash-table-keys (meta-p-models mp))) (meta-p-models mp))))
-                      (t (setf (meta-p-current-model mp) saved-current)))
-               
-               t)
+             (cannot-define-model
+              (let ((model (gethash model-name (meta-p-models mp)))
+                    (saved-current (meta-p-current-model mp)))
+                (setf (meta-p-current-model mp) model)
+                
+                (setf (meta-p-events mp)
+                  (remove model-name (meta-p-events mp) :key #'evt-model))
+                
+                (setf (meta-p-delayed mp)
+                  (remove model-name (meta-p-delayed mp) :key #'evt-model))
+                
+                (setf (meta-p-dynamics mp)
+                  (remove model-name (meta-p-dynamics mp) :key #'(lambda (x) (evt-model (car x)))))
+                
+                (unwind-protect 
+                    (maphash #'(lambda (module-name instance)
+                                 (declare (ignore instance))
+                                 (delete-module module-name))
+                             (global-modules-table))
+                  
+                  (progn
+                    (decf (meta-p-model-count mp))
+                    (remhash model-name (meta-p-models mp))
+                    (setf (meta-p-model-order mp) (remove model-name (meta-p-model-order mp)))
+                    (cond ((zerop (meta-p-model-count mp))
+                           (setf (meta-p-current-model mp) nil))
+                          ((= 1 (meta-p-model-count mp))
+                           (setf (meta-p-current-model mp)
+                             (gethash (car (hash-table-keys (meta-p-models mp))) (meta-p-models mp))))
+                          (t (setf (meta-p-current-model mp) saved-current)))))
+                
+                t))
            (print-warning "No model named ~S in current meta-process." model-name))
        (print-warning "No current model to delete.")))))
 
@@ -507,8 +528,9 @@
              (let ((,previous-model (current-model-struct)))
                (setf (meta-p-current-model (current-mp)) 
                  (gethash ',model-name (meta-p-models ,mp)))
-               (unwind-protect (progn ,@body)
-                 (setf (meta-p-current-model (current-mp)) ,previous-model)))
+               (cannot-define-model
+                (unwind-protect (progn ,@body)
+                  (setf (meta-p-current-model (current-mp)) ,previous-model))))
            (print-warning "~S does not name a model in the current meta-process" ',model-name))
        (print-warning "No actions taken in with-model because there is no current meta-process")))))
 
@@ -523,8 +545,9 @@
                  (let ((,previous-model (current-model-struct)))
                    (setf (meta-p-current-model (current-mp)) 
                      (gethash ,model (meta-p-models ,mp)))
-                   (unwind-protect (progn ,@body)
-                     (setf (meta-p-current-model (current-mp)) ,previous-model)))
+                   (cannot-define-model
+                    (unwind-protect (progn ,@body)
+                      (setf (meta-p-current-model (current-mp)) ,previous-model))))
                (print-warning "~S does not name a model in the current meta-process" ,model)))
          (print-warning "No actions taken in with-model because there is no current meta-process")))))
 
@@ -536,10 +559,10 @@
                    (val nil))
                (setf (meta-p-current-model (current-mp)) 
                  (gethash model-name (meta-p-models mp)))
-               (unwind-protect (dolist (x forms-list val)
+               (cannot-define-model
+                (unwind-protect (dolist (x forms-list val)
                                  (setf val (eval x)))
-               (setf (meta-p-current-model (current-mp)) previous-model)
-               ))
+                  (setf (meta-p-current-model (current-mp)) previous-model))))
            (print-warning "~S does not name a model in the current meta-process" model-name))
        (print-warning "No actions taken in with-model because there is no current meta-process"))))
 
@@ -555,49 +578,52 @@
   (let ((previous-model (meta-p-current-model mp)))
     (setf (meta-p-current-model mp) model)
     
-    (clrhash (act-r-model-chunk-types-table model))
-    (clrhash (act-r-model-chunks-table model))
-    (clrhash (act-r-model-chunk-ref-table model))
-    
-    (setf (act-r-model-chunk-update model) t)
-    (setf (act-r-model-dynamic-update model) t)
-    (setf (act-r-model-delete-chunks model) nil)
-    
-    (setf (act-r-model-largest-chunk-type model) 0)
-    
-    (maphash #'(lambda (buffer-name buffer)
-                 (declare (ignore buffer-name))
-                 (setf (act-r-buffer-chunk buffer) nil)
-                 (when (act-r-buffer-multi buffer)
-                   (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5))))
-             (act-r-model-buffers model))
-    
-    (create-model-default-chunk-types-and-chunks)
-    
-    (maphash #'(lambda (module-name instance)
-                 (declare (ignore instance))
-                 (reset-module module-name))
-             (global-modules-table))
-    
-    (maphash #'(lambda (parameter-name parameter)
-                 (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
-             *act-r-parameters-table*)
-    
-    
-    (maphash #'(lambda (module-name val)
-                 (declare (ignore val))
-                 (secondary-reset-module module-name))
-             (global-modules-table))    
-    
-    (dolist (form (act-r-model-code model))
-      (eval form))
-    
-    (maphash #'(lambda (module-name val)
-                 (declare (ignore val))
-                 (tertiary-reset-module module-name))
-             (global-modules-table))
-    
-    (setf (meta-p-current-model mp) previous-model)))
+    (cannot-define-model
+     (unwind-protect
+         (progn
+           (clrhash (act-r-model-chunk-types-table model))
+           (clrhash (act-r-model-chunks-table model))
+           (clrhash (act-r-model-chunk-ref-table model))
+           
+           (setf (act-r-model-chunk-update model) t)
+           (setf (act-r-model-dynamic-update model) t)
+           (setf (act-r-model-delete-chunks model) nil)
+           
+           (setf (act-r-model-largest-chunk-type model) 0)
+           
+           (maphash #'(lambda (buffer-name buffer)
+                        (declare (ignore buffer-name))
+                        (setf (act-r-buffer-chunk buffer) nil)
+                        (when (act-r-buffer-multi buffer)
+                          (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5))))
+                    (act-r-model-buffers model))
+           
+           (create-model-default-chunk-types-and-chunks)
+           
+           (maphash #'(lambda (module-name instance)
+                        (declare (ignore instance))
+                        (reset-module module-name))
+                    (global-modules-table))
+           
+           (maphash #'(lambda (parameter-name parameter)
+                        (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
+                    *act-r-parameters-table*)
+           
+           
+           (maphash #'(lambda (module-name val)
+                        (declare (ignore val))
+                        (secondary-reset-module module-name))
+                    (global-modules-table))    
+           
+           (dolist (form (act-r-model-code model))
+             (eval form))
+           
+           (maphash #'(lambda (module-name val)
+                        (declare (ignore val))
+                        (tertiary-reset-module module-name))
+                    (global-modules-table)))
+       
+       (setf (meta-p-current-model mp) previous-model)))))
   
 
 #|

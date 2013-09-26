@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : p-star-cmd.lisp
-;;; Version     : 1.1
+;;; Version     : 1.2
 ;;; 
 ;;; Description : Functions that work with the procedural module to allow
 ;;;             : definition of productions with bound-variable slot names.
@@ -209,6 +209,22 @@
 ;;;             : * P and p* have been combined into a single system now, but
 ;;;             :   leaving this here to keep the p* particular stuff still
 ;;;             :   separate and for the history info.
+;;; 2013.01.28 Dan
+;;;             : * Replaced calls to internal chunk-type functions with the 
+;;;             :   appropriate command.
+;;; 2013.03.13 Dan [1.2]
+;;;             : * Changed process-variable-slots-specs so that it allows the
+;;;             :   slots of a child type to be provided in a parent type specification.
+;;; 2013.03.19 Dan
+;;;             : * Allow the modifications to also specify child slots as long
+;;;             :   as they are in the conditions as well with a change to 
+;;;             :   valid-variable-chunk-mod-spec.
+;;; 2013.04.10 Dan
+;;;             : * Removing the extend-buffer-chunk function since the schedule-
+;;;             :   mod-buffer-chunk command is now getting that option built in.
+;;; 2013.06.04 Dan
+;;;             : * Fixed valid-variable-chunk-mod-spec to allow static chunks
+;;;             :   to modify any of the possible slots for the type given.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -342,9 +358,8 @@ test queries, call evals and test remaining slot specs
             "Second element in define-chunk-spec isn't a chunk-type. ~S" 
             specifications-list))
           (t
-           (let* ((ct (get-chunk-type (second specifications-list)))
-                  (new-spec (make-act-r-chunk-spec :type ct))
-                  (slots (process-variable-slots-specs ct (cddr specifications-list))))
+           (let* ((new-spec (make-act-r-chunk-spec :type (second specifications-list)))
+                  (slots (process-variable-slots-specs (second specifications-list) (cddr specifications-list))))
              (unless (eq slots :error)
                (setf (act-r-chunk-spec-slots new-spec) slots)
                new-spec)))))))
@@ -363,7 +378,7 @@ test queries, call evals and test remaining slot specs
            "Invalid specs in call to define-chunk-spec - not enough arguments")
           (return :error))
         (unless (or (chunk-spec-variable-p (car specs)) ;; let this go through...
-                    (valid-slot-name (car specs) chunk-type) 
+                    (possible-chunk-type-slot chunk-type (car specs)) 
                     (keywordp (car specs)))
           (print-warning "Invalid slot-name ~S in call to define-chunk-spec." 
                          (car specs))
@@ -376,11 +391,7 @@ test queries, call evals and test remaining slot specs
         (setf (act-r-slot-spec-value spec) (pop specs))
         (push spec slots)))))
 
-
-
-
-
-(defun valid-variable-chunk-mod-spec (chunk-type modifications-list)
+(defun valid-variable-chunk-mod-spec (chunk-type-and-slots modifications-list)
   (if (oddp (length modifications-list))
       (print-warning "Odd length modifications list.")
     (if (procedural-check-p*-mods (get-module procedural))
@@ -389,43 +400,14 @@ test queries, call evals and test remaining slot specs
           ((null s) 
            (and (every #'(lambda (slot)
                            (or (chunk-spec-variable-p slot)
-                               (valid-slot-name slot (get-chunk-type chunk-type))))
+                               (and (not (chunk-type-static-p-fct  (car chunk-type-and-slots))) (valid-chunk-type-slot (car chunk-type-and-slots) slot))
+                               (and (chunk-type-static-p-fct (car chunk-type-and-slots)) (possible-chunk-type-slot (car chunk-type-and-slots) slot))
+                               (find slot (cdr chunk-type-and-slots))))
                        slots)
                 (= (length slots) (length (remove-duplicates slots))))))
       t)))
   
 
-
-
-(defun extend-buffer-chunk (buffer-name mod-list)
-  (let ((chunk (buffer-read buffer-name)))
-      (cond ((null chunk)
-             (print-warning 
-              "extend-buffer-chunk called with no chunk in buffer ~S"
-              buffer-name))
-            (t
-             (let ((m-list (copy-list mod-list))
-                   (new-slots nil)
-                   (ct (chunk-chunk-type-fct chunk))
-                   (procedural (get-module procedural)))
-               (while m-list
-                 (let ((new? (pop m-list)))
-                   (unless (valid-chunk-type-slot ct new?)
-                     (push new? new-slots))
-                   (pop m-list)))
-               (dolist (new-slot new-slots)
-                 (extend-chunk-type-slots ct new-slot)
-                 
-                 (schedule-event-relative 0 'extending-chunk-type 
-                                      :module 'procedural
-                                      :priority 51 ; just before the modification itself
-                                      :params (list ct new-slot)
-                                      :output (procedural-rhst procedural))))))))
-
-
-(defun extending-chunk-type (ct slot)
-  "Dummy function to show chunk extension in the schedule"
-  (declare (ignore ct slot)))
 
 
 #|

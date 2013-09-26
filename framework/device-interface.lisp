@@ -178,6 +178,15 @@
 ;;;             :   current model's device interface. It defaults to nil when
 ;;;             :   the model is initialized, but isn't changed at reset time
 ;;;             :   since the device itself could persist.
+;;; 2012.08.27 Dan
+;;;             : * Changed the indicate-model-generated macro to actually setf
+;;;             :   the variable instead of using a let so that it "works" when
+;;;             :   different processes may need to check the value since 
+;;;             :   the rpm-window-key-event-handler may be called from an event
+;;;             :   thread instead of in the "ACT-R" thread.
+;;; 2012.09.07 Dan
+;;;             : * Removed the test for :actr-env-alone in the pixels-per-inch
+;;;             :   setting for ACL.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -196,7 +205,7 @@
   (defvar *pixels-per-inch-y* 72))
 
 ;;; if it's ACL with the IDE (Windows) then find the true units-per-inch
-#+(and :ALLEGRO-IDE (not :ACTR-ENV-ALONE))
+#+:ALLEGRO-IDE
 (multiple-value-bind (x y) 
                      (cg:stream-units-per-inch  (cg:screen cg:*system*))
   (setf *pixels-per-inch-x* x)
@@ -258,7 +267,8 @@
 
 (defmacro indicate-model-generated (&body body)
   `(unwind-protect
-       (let ((*model-generated-action* (current-model)))
+       (progn 
+         (setf *model-generated-action* (current-model))
          ,@body)
      (setf *model-generated-action* nil)))
 

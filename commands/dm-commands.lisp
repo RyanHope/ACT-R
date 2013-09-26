@@ -171,6 +171,10 @@
 ;;;             : * Added the saved-activation-history command which returns the
 ;;;             :   list of times and chunks for which there is a history 
 ;;;             :   available.
+;;; 2013.04.17 Dan
+;;;             : * Added the whynot-dm command that can be used to output info
+;;;             :   about how a chunk (or chunks) compared to the last retrieval
+;;;             :   request which occurred.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -1053,6 +1057,79 @@
                 (sort result #'< :key 'car))
             (model-warning "No activation trace information available.")))
       (print-warning "No declarative module available for reporting activation trace."))))
+
+
+(defmacro whynot-dm (&rest chunks)
+  `(whynot-dm-fct ',chunks))
+
+(defun whynot-dm-fct (chunks)
+  (if (current-model) 
+      (let* ((dm (get-module declarative))
+             (last (dm-last-request dm)))
+        (cond ((null last)
+               (command-output "No retrieval request has been made."))
+              ((not (last-request-p last))
+               (command-output "Bad last-request stored -- contact Dan."))
+              ((last-request-invalid last)
+               (command-output "Last retrieval request was at time ~f but was invalid because: ~a" (last-request-time last)
+                               (case (last-request-invalid last)
+                                 (:too-many "too many :recently-retrieved specifications")
+                                 (:bad-modifier ":recently-retrieved had a modifier other than = or -.")
+                                 (:bad-value ":recently-retrieved had a value other than t, nil, or reset")
+                                 (:mp-not-allowed ":mp-value can only be used when partial matching is enabled.")
+                                 (:mp-multi ":mp-value specified more than once.")
+                                 (:mp-modifier ":mp-value had a modifier other than =.")
+                                 (:mp-not-num ":mp-value was not a number or nil.")))
+               (pprint-chunk-spec (last-request-spec last)))
+              (t
+               (command-output "Retrieval request made at time ~f:" (last-request-time last))
+               (pprint-chunk-spec (last-request-spec last))
+               
+               (dolist (chunk (if (null chunks) (all-dm-chunks dm) chunks))
+                 (command-output "")
+                 (if (chunk-p-fct chunk)
+                     (if (chunk-in-dm chunk)
+                         (progn
+                           (pprint-chunks-fct (list chunk))
+                           (when (dm-esc dm)
+                             (sdp-fct (list chunk))
+                             (command-output ""))
+                           (if (find chunk (last-request-matches last))
+                               (progn
+                                 (command-output "~s matched the request" chunk)
+                                 (if (dm-esc dm)
+                                     (cond ((eq chunk (car (last-request-best last)))
+                                            (if (>= (chunk-retrieval-activation chunk) (last-request-rt last))
+                                                (command-output "~s was the chunk chosen to be retrieved" chunk)
+                                              (command-output "~s was below the retrieval theshold ~f" chunk (last-request-rt last))))
+                                           ((find chunk (last-request-best last))
+                                            (if (>= (chunk-retrieval-activation chunk) (last-request-rt last))
+                                                (command-output "~s was not chosen among those with the highest activation" chunk)
+                                              (command-output "~s was below the retrieval theshold ~f" chunk (last-request-rt last))))
+                                           (t
+                                            (if (>= (chunk-retrieval-activation chunk) (last-request-rt last))
+                                                (command-output "~s did not have the highest activation" chunk)
+                                              (command-output "~s was below the retrieval theshold ~f" chunk (last-request-rt last)))))
+                                   (if (eq chunk (car (last-request-best last)))
+                                       (command-output "~s was the chunk chosen to be retrieved" chunk)
+                                     (command-output "~s was not chosen as the chunk to be retrieved" chunk))))
+                             
+                             
+                             (cond ((and (eq (last-request-finst last) :marked)
+                                         (not (find chunk (last-request-finst-chunks last))))
+                                    (command-output "~s was not considered because it was not :recently-retrieved" chunk))
+                                   ((and (eq (last-request-finst last) :unmarked)
+                                         (find chunk (last-request-finst-chunks last)))
+                                    (command-output "~s was not considered because it was :recently-retrieved" chunk))
+                                   ((> (chunk-creation-time chunk) (last-request-time last))
+                                    (command-output "~s was not considered because it was not in declarative memory at the time of the request" chunk))
+                                   (t
+                                    (command-output "~s did not match the request" chunk)))))
+                       (command-output "Chunk ~s is not in the model's declarative memory." chunk))
+                   (command-output "~s does not name a chunk in the current model." chunk)))
+               (last-request-matches last))))
+    (print-warning "Whynot-dm called with no current model.")))
+
 
 #|
 This library is free software; you can redistribute it and/or

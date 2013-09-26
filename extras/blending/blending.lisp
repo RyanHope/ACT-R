@@ -105,6 +105,8 @@
 ;;;             : * Fixed an issue with the warning for setting the :blending-set-hook
 ;;;             :   parameter because when it was bad previously the warning said
 ;;;             :   :blending-result-hook.
+;;; 2012.11.09 Dan 
+;;;             : * Fixed a typo in the blending traces.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -591,7 +593,7 @@
                      (setf (sblt-slot-condition sblt-slot) :chunks))
                    
                    (when (blending-module-trace instance)
-                     (model-output "When all magnitudes are chunks or nil blending based on common chunk-types and similiarities"))
+                     (model-output "When all magnitudes are chunks or nil blending based on common chunk-types and similarities"))
                    
                    (let* ((type (common-chunk-type mags))
                           (chunks (if type
@@ -657,7 +659,7 @@
                      (setf (sblt-slot-mags sblt-slot) (remove-duplicates mags)))
                    
                    (when (blending-module-trace instance)
-                     (model-output "When not all magnitudes are numbers or chunks blending based on similiarities using only those values"))
+                     (model-output "When not all magnitudes are numbers or chunks blending based on similarities using only those values"))
                    
                    (let ((best-val nil)
                          (best-mag nil))
@@ -934,7 +936,7 @@
                          (model-output "When all magnitudes are nil there's nothing to blend and the result is nil"))
                         
                         (:chunks 
-                         (model-output "When all magnitudes are chunks or nil blending based on common chunk-types and similiarities")
+                         (model-output "When all magnitudes are chunks or nil blending based on common chunk-types and similarities")
                          
                          (if (sblt-slot-ctype slot)
                              (model-output "Common chunk-type for values is: ~s" (sblt-slot-ctype slot))
@@ -965,7 +967,7 @@
                              (model-output " Final result: ~f" best-val))))
                         
                         (:other
-                         (model-output "When not all magnitudes are numbers or chunks blending based on similiarities using only those values")
+                         (model-output "When not all magnitudes are numbers or chunks blending based on similarities using only those values")
                          
                          (let ((best-val nil)
                                (best-mag nil))

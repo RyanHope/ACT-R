@@ -35,7 +35,7 @@
     
     (proc-display)
     (setf *responses* nil)
-    (run 30)
+    (run 30 :real-time t)
       
     (when *show-responses*
       (format t "~%~%answers: ~S~%responses: ~S~%" answers *responses*))

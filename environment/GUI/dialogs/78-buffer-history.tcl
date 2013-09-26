@@ -21,7 +21,7 @@ proc make_buffer_history_viewer {} {
                         $list_frame_1.list_box.var \
                         -yscrollcommand "$list_frame_1.list_scrl set" \
                         -selectmode single \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   
   send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 \
@@ -42,7 +42,7 @@ proc make_buffer_history_viewer {} {
                         $list_frame_2.list_box.var \
                         -yscrollcommand "$list_frame_2.list_scrl set" \
                         -selectmode single \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   
   send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 \

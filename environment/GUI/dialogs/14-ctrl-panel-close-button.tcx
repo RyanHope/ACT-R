@@ -8,7 +8,6 @@ pack [control_panel_name].close
 proc close_model {} {
   global current_open_model
   global current_open_model_name
-  global options_array 
   global model_file_names
 
   if {$current_open_model == ""} {

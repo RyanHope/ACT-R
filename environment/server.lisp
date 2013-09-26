@@ -184,6 +184,35 @@
 ;;;             : * Fixed a bug with stopping the environment while the stepper
 ;;;             :   was open that prevented one from using the stepper if a
 ;;;             :   new environment connection was made.
+;;; 2012.09.07 Dan
+;;;             : * Removed the in-package from message-process based on the
+;;;             :   :actr-env-alone feature.
+;;; 2012.09.21 Dan
+;;;             : * Trying to eliminate an intermittent environment error
+;;;             :   with multiple models in CCL (perhaps elsewhere too just
+;;;             :   unreported).  So adding additional lock-outs so that 
+;;;             :   updates can't occur while the model is running by locking
+;;;             :   during the pre-event-hook and unlocking during the post as
+;;;             :   well as during anything else which calls update handlers.
+;;;             : * The problem with that is if someone breaks the system
+;;;             :   between pre and post it leaves the lock set and basically
+;;;             :   kills the environment -- need a better alternative.
+;;; 2013.02.22 Dan
+;;;             : * Added the wait-for-environment command to provide a way
+;;;             :   to check that it has processed all outstanding actions.
+;;;             :   Primary intended use is with creating complex visible
+;;;             :   virtual displays, especially those that update faster than 
+;;;             :   real time, because if the "drawing" falls behind things
+;;;             :   can be difficult to use or display errors could result.
+;;; 2013.02.25 Dan
+;;;             : * Adding run-environment commands for CCL in Win, Mac, and
+;;;             :   linux.
+;;;             : * Changed how the delay parameter works for run-environment.
+;;;             :   It still waits that long before the first try to connect,
+;;;             :   but it will now continue to try to connect after every 
+;;;             :   delay seconds pass.
+;;; 2013.02.26 Dan
+;;;             : * Fixed a bug with the CCL Mac run-environment.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -215,11 +244,12 @@
 ;;; and maintains all of the information necessary for handling that connection.
 
 (defstruct environment-connection
-  stream local process (handlers (make-hash-table)) (hooks (make-hash-table)))
+  stream local process (handlers (make-hash-table)) (hooks (make-hash-table)) sync)
 
 
 (defun call-model-environment-hooks (hook &optional (value nil given))
   (setf (environment-control-which-hook *environment-control*) hook)
+  
   (dolist (connection (environment-control-connections *environment-control*))
     (dolist (handler (gethash hook (environment-connection-hooks connection)))
       (when (or (eq (handler-model handler) (current-model))
@@ -246,11 +276,13 @@
     val))
 
 (defun call-all-environment-hooks (hook &optional (value nil given))
+  
   (setf (environment-control-which-hook *environment-control*) hook)
   (dolist (connection (environment-control-connections *environment-control*))
     (dolist (handler (gethash hook (environment-connection-hooks connection)))
       (update-handler handler (if given value handler))))
-  (setf (environment-control-which-hook *environment-control*) nil))
+  (setf (environment-control-which-hook *environment-control*) nil)
+  )
   
 (defun add-pre-hook-if-needed ()
   (unless (environment-control-pre-hook *environment-control*)
@@ -405,8 +437,6 @@
 
 
 (defun message-process (connection)
-  #+(and :allegro :ACTR-ENV-ALONE) (in-package :cl-user)
-  
   (let ((old-string "") ;; be careful about new lines with Scott's read-line
         (input-stream (environment-connection-stream connection)))
     
@@ -534,6 +564,8 @@
              (t (format *error-output* "Invalid remove message: ~s" cmd-list))))
       (k-a ;; don't do anything - just to make sure the socket doesn't timeout
        (ignore-errors (uni-send-string (environment-connection-stream connection) (format nil "ka nil nil<end>~%"))))
+      (sync
+       (setf (environment-connection-sync connection) t))
       (goodbye ;; kill the connection
        (format t "Environment Closed~%")
        (close-connection connection :kill nil))
@@ -585,39 +617,76 @@
     (close-all-connections)))
 
 
+(defun wait-for-environment (&optional (max-delay 10))
+  "Send sync pulse to all current env connections and wait for all to respond or max-delay seconds to pass"
+  (let ((start-time (get-internal-real-time)))
+    
+    (dolist (connection (environment-control-connections *environment-control*))
+      (setf (environment-connection-sync connection) nil)
+      (ignore-errors (uni-send-string (environment-connection-stream connection) (format nil "sync nil nil<end>~%"))))
+    
+    (uni-wait-for 
+     (lambda ()
+       (or (every 'environment-connection-sync (environment-control-connections *environment-control*))
+           (> (/ (- (get-internal-real-time) start-time) internal-time-units-per-second) max-delay))))))
+
+
+#+(and :ccl :windows)
+(defun run-environment (&optional (delay 5))
+  (run-program (namestring (translate-logical-pathname "ACT-R6:environment;start environment.exe")) nil :wait nil)
+  (sleep delay)
+  (while (null (start-environment)) (sleep delay)))
+
+#+(and :ccl :linux)
+(defun run-environment (&optional (delay 5))
+  (let ((c (ccl::cd "."))) 
+    (ccl::cd "ACT-R6:environment;GUI")
+    (run-program "wish" (list "starter.tcl") :wait nil)
+    (sleep delay)
+    (while (null (start-environment)) (sleep delay))
+    (ccl::cd c)))
+
+#+(and :ccl :darwin)
+(defun run-environment (&optional (delay 5))
+  (let ((c (ccl::cd "."))) 
+    (ccl::cd "ACT-R6:environment")
+    (run-program (namestring (translate-logical-pathname "ACT-R6:environment;Start Environment OSX.app;Contents;MacOS;start-environment-osx")) nil :wait nil)
+    (sleep delay)
+    (while (null (start-environment)) (sleep delay))
+    (ccl::cd c)))
 
 #+(and :lispworks (or :win32 :win64) (or :lispworks5 :lispworks6.0))
-(defun run-environment (&optional (delay 12))
+(defun run-environment (&optional (delay 5))
   (sys:call-system "\"Start Environment.exe\"" :current-directory (translate-logical-pathname "ACT-R6:environment") :wait nil)
   (sleep delay)
-  (start-environment))
+  (while (null (start-environment)) (sleep delay)))
 
 #+(and :lispworks :macosx)
-(defun run-environment (&optional (delay 12))
+(defun run-environment (&optional (delay 5))
   (sys:call-system (format nil "'~a/Start Environment OSX.app/Contents/MacOS/start-environment-osx'"
                      (namestring (translate-logical-pathname "ACT-R6:environment")))
                    :wait nil)
   (sleep delay)
-  (start-environment))
+  (while (null (start-environment)) (sleep delay)))
 
 
 #+(and :allegro :mswindows)
-(defun run-environment (&optional (delay 12))
+(defun run-environment (&optional (delay 5))
   (let ((c (current-directory)))
     (chdir "ACT-R6:environment")
     (run-shell-command "\"Start Environment.exe\"" :wait nil)
     (chdir c))
   (sleep delay)
-  (start-environment))
+  (while (null (start-environment)) (sleep delay)))
 
 #+(and :allegro :macosx)
-(defun run-environment (&optional (delay 12))
+(defun run-environment (&optional (delay 5))
   (let ((c (current-directory)))
     (chdir "ACT-R6:environment")
     (run-shell-command "'Start Environment OSX.app/Contents/MacOS/start-environment-osx'" :wait nil)
     (chdir c))
   (sleep delay)
-  (start-environment))
+  (while (null (start-environment)) (sleep delay)))
 
 
 (unless (fboundp 'run-environment)

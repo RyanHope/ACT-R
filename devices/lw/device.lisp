@@ -65,6 +65,13 @@
 ;;; 2012.07.02 Dan
 ;;;             : * Removed the device-update-eye-loc method since it's defined
 ;;;             :   in the emma module code.
+;;; 2013.01.03 Dan
+;;;             : * Clipped the rpm-view-line function since it isn't needed
+;;;             :   and contains outdated code to avoid confusion.
+;;; 2013.02.18 Dan
+;;;             : * Eliminating some warnings by adding a declaim for 
+;;;             :   view-key-event-handler since it's in the uwi file and 
+;;;             :   removing the setf of title-bar in show/hide-menu-bar.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Check the ACT-R packaging switches
@@ -72,6 +79,9 @@
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
+
+
+(declaim (ftype (function (t t) t) view-key-event-handler))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Table of Contents
@@ -478,12 +488,14 @@
 (defun hide-menu-bar ()
   (fli:with-dynamic-foreign-objects ()
     (hidemenubar))
-  (setf (title-bar (current-device)) nil))
+  ;why was this here? (setf (title-bar (current-device)) nil)
+  )
 
 (defun show-menu-bar ()
   (fli:with-dynamic-foreign-objects ()
     (showmenubar))
-  (setf (title-bar (current-device)) t))
+  ;why was this here? (setf (title-bar (current-device)) t)
+  )
 
 ;;;;;;;;;;;;;;;;;;
 ;; Speech Stuff ;;
@@ -1270,40 +1282,6 @@
     (set-chunk-slot-value-fct v-o 'end2-y (point-v end-pt))
     v-o))
 
-;;; RPM-VIEW-LINE [Function]
-;;; Description : Add a view to the window that displays a line defined by
-;;;             : the start and end points in the color supplied (an MCL
-;;;             : system style color).
-
-(defun rpm-view-line (wind start-pt end-pt &optional (color :black))  ;;*black-color*
-  "Adds a view in the specified window which draws a line from the start-pt to the end-pt
-   using the optional color specified (defaulting to black).  This view will add features 
-   to the icon on PM-PROC-DISPLAY."
-  (let* ((gx (> (point-h end-pt) (point-h start-pt)))
-         (gy (> (point-v end-pt) (point-v start-pt)))
-         (vs (subtract-points start-pt end-pt)))
-    (setf vs (make-point (+ 1 (abs (point-h vs)))
-                         (+ 1 (abs (point-v vs)))))
-    (add-subviews wind (cond ((and gx gy)
-                              (make-instance 'td-liner
-                                :color color
-                                :view-position start-pt 
-                                :view-size vs))
-                             ((and (not gx) (not gy))
-                              (make-instance 'td-liner
-                                :color color
-                                :view-position end-pt 
-                                :view-size vs))
-                             ((and gx (not gy))
-                              (make-instance 'bu-liner
-                                :color color
-                                :view-position (make-point (point-h start-pt) (point-v end-pt))
-                                :view-size vs))
-                             (t
-                              (make-instance 'bu-liner
-                                :color color
-                                :view-position (make-point (point-h end-pt) (point-v start-pt))
-                                :view-size vs))))))
 ;;;End Line Stuff
 
 (defmethod cursor-to-vis-loc ((obj capi:interface))
@@ -1571,7 +1549,8 @@
     (mouse-left-click))
   
   (defmethod device-handle-keypress ((device capi:interface) key)
-    (key-press key)  )
+    (capi:activate-pane device) 
+    (capi:execute-with-interface device 'key-press key))
   
   (defmethod device-move-cursor-to ((device capi:interface) xyloc)
     (multiple-value-bind (x y) (capi:convert-relative-position device (capi:element-screen device) (svref xyloc 0) (svref xyloc 1))

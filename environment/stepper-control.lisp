@@ -101,6 +101,10 @@
 ;;; 2012.03.21 Dan
 ;;;             : * Instead of suppress-declarative-noise I can just use 
 ;;;             :   with-parameters to temporarily set :ans to nil.
+;;; 2012.10.25 Dan
+;;;             : * Fixed the stepper so it doesn't step when :v is nil, which
+;;;             :   is what it's documented as doing i.e. only stepping on
+;;;             :   events that show in the trace.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -182,10 +186,17 @@
              (t nil)))
       (t t))))
 
+
+(defun model-trace-enabled (event)
+  (with-model-eval (if (evt-model event) (evt-model event) (first (mp-models))) ;; just use the first if there isn't one (a break event)
+    (car (no-output (sgp :v)))))
+    
+    
 (defun stepper-step (event)
   (let ((stepper (environment-control-stepper *environment-control*)))
     (when (and event (act-r-event-p event) 
-               (or (event-displayed-p event) 
+               (or (and (event-displayed-p event) 
+                        (model-trace-enabled event))
                    (and (eq (stepper-control-mode stepper) :tutor)
                         (eq (evt-module event) 'procedural)
                         (eq (evt-action event) 'production-selected)))

@@ -64,6 +64,17 @@
 ;;;             : * Wrapped an abs around the initial seed setting since some
 ;;;             :   Lisps (ACL 6.2 in the standalone in particular) were returning
 ;;;             :   a negative from get-internal-real-time for some reason.
+;;; 2012.09.27 Dan
+;;;             : * Added a genrand_real2_L for internal use which specifies
+;;;             :   the float as long for the division to avoid the situation
+;;;             :   where the result is 1.0 due to the floating point size.
+;;;             :   That's only used when the request is for an integer however
+;;;             :   to avoid returning a different float type than asked for.
+;;;             :   Thus, this only avoids (act-r-random INT) = INT errors not
+;;;             :   (act-r-random FLOAT) = FLOAT if the default float size is
+;;;             :   too small to represent 1 - 4294967295/4294967296.0.  Of 
+;;;             :   course if the largest float size is too small to represent
+;;;             :   that then errors are also still possible for integers too.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -282,8 +293,10 @@
     
     y))
 
+(defun genrand_real2_L (&optional (state *default-random-module*))
+    (/  (genrand_int32 state) 4294967296.0L0))
 
-(defun genrand_real2(&optional (state *default-random-module*))
+(defun genrand_real2 (&optional (state *default-random-module*))
     (/  (genrand_int32 state) 4294967296.0))
 
 #|
@@ -409,7 +422,7 @@ in the test output file provided with mt19937ar.c -> mt19937ar.out.txt
                       *default-random-module*)))
         (cond ((integerp limit)
                (if (< limit #xffffffff)
-                   (values (floor (* limit (genrand_real2 state))))
+                   (values (floor (* limit (genrand_real2_L state))))
                  (let ((accum 0)
                        (nums (ceiling (/ (1+ (log limit 2)) 32))))
                    (dotimes (i nums)

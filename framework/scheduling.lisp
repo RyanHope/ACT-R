@@ -33,7 +33,7 @@
 ;;;             : [x] The break events and "stopping reason" trace don't go to
 ;;;             :     the output of all models but probably should so that if
 ;;;             :     the traces are split at the model level they all show it.
-;;;             : [ ] Run-full-time and run-until-time both still rely on the
+;;;             : [x] Run-full-time and run-until-time both still rely on the
 ;;;             :     time count in seconds to determine the "end" but that's
 ;;;             :     still got potential problems.
 
@@ -298,6 +298,16 @@
 ;;;             : * Send all the notifications (start, stop, update, terminate)
 ;;;             :   to the models in order using meta-p-model-order instead of
 ;;;             :   maphashing over the model table for consistency.
+;;; 2012.12.06 Dan
+;;;             : * Changed run-sched-queue so that it returns the time in ms
+;;;             :   and then convert that as needed in the "run" functions to
+;;;             :   try and avoid other float issues with math on times.
+;;; 2013.01.03 Dan
+;;;             : * Use the meta-p-max-time-maintenance value when scheduling a
+;;;             :   necessary time-delta event.
+;;; 2013.01.04 Dan
+;;;             : * Add cannot-define-model to run-sched-queue and send-run-terminated-events 
+;;;             :   to avoid problems.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -340,96 +350,98 @@
   "The internal function that steps through events sending them to be
     executed until a condtion is met"
   
-  (unwind-protect 
-      (let ((event-count 0)
-            (last-update-time -1)) 
-        
-        (setf (meta-p-running mp) t)
-  
-        ;; Notify any modules which care that a new run has begun
-        
-        (let ((current-model (meta-p-current-model mp)))
-          (unwind-protect 
-              (dolist (model-name (meta-p-model-order mp))
-                (let ((model (gethash model-name (meta-p-models mp))))
-                  (setf (meta-p-current-model mp) model) 
-                  (dolist (module (run-notify-modules))
-                    (run-notify-module module))))
-            
-            (setf (meta-p-current-model mp) current-model)))
-        
-        (setf (meta-p-start-time mp) (meta-p-time mp))
-        (setf (meta-p-start-real-time mp) 
-          (funcall (meta-p-time-function mp)))
-        
-        (setf (meta-p-break mp) nil)
-        
-        (while (and (not (meta-p-break mp))
-                    (meta-p-events mp)
-                    (not (funcall stop-condition 
-                                  mp 
-                                  (evt-mstime (first (meta-p-events mp)))
-                                  event-count)))           
-          
-          
-          
-          (if (and 
-                   (meta-p-max-time-delta mp)
-                   (numberp (meta-p-max-time-delta mp))
-                   (> (- (evt-mstime (first (meta-p-events mp))) (meta-p-time mp))
-                      (meta-p-max-time-delta mp)))
-              
-              (progn
-                
-                (dolist (model (mp-models))
-                  (with-model-eval model
-                    (schedule-event-relative (meta-p-max-time-delta mp) 'dummy-event-function 
-                                             :priority :max 
-                                             :details 
-                                             "A dummy event to prevent model skip ahead"
-                                             :output nil
-                                             :time-in-ms t))))
-            (progn
-              
-              (run-one-event mp real-time)
-              
-              (incf event-count)
-              
-              ;; Check to see if there needs to be an update 
-              
-              (unless (or (and (meta-p-events mp)
-                               (= (meta-p-time mp) (evt-mstime (first (meta-p-events mp)))))
-                          (= (meta-p-time mp) last-update-time))
-                
-                (let ((current-model (meta-p-current-model mp)))
-                  (unwind-protect 
-                      (dolist (model-name (meta-p-model-order mp))
-                        (let ((model (gethash model-name (meta-p-models mp))))
-                          (setf (meta-p-current-model mp) model) 
-                          (dolist (module (updating-modules))
-                            (update-the-module module (ms->seconds last-update-time) (ms->seconds (meta-p-time mp))))))
-                    
-                    (setf (meta-p-current-model mp) current-model)))
-                
-                (setf last-update-time (meta-p-time mp))))))
-        
-        (setf (meta-p-events mp) (remove 'dummy-event-function (meta-p-events mp) :key #'evt-action))
-        
-        (values (ms->seconds (- (meta-p-time mp) (meta-p-start-time mp))) event-count (meta-p-break mp)))
+  (cannot-define-model
+   (unwind-protect 
+       (let ((event-count 0)
+             (last-update-time -1)) 
+         
+         (setf (meta-p-running mp) t)
+         
+         ;; Notify any modules which care that a new run has begun
+         
+         (let ((current-model (meta-p-current-model mp)))
+           (unwind-protect 
+               (dolist (model-name (meta-p-model-order mp))
+                 (let ((model (gethash model-name (meta-p-models mp))))
+                   (setf (meta-p-current-model mp) model) 
+                   (dolist (module (run-notify-modules))
+                     (run-notify-module module))))
+             
+             (setf (meta-p-current-model mp) current-model)))
+         
+         (setf (meta-p-start-time mp) (meta-p-time mp))
+         (setf (meta-p-start-real-time mp) 
+           (funcall (meta-p-time-function mp)))
+         
+         (setf (meta-p-break mp) nil)
+         
+         (while (and (not (meta-p-break mp))
+                     (meta-p-events mp)
+                     (not (funcall stop-condition 
+                                   mp 
+                                   (evt-mstime (first (meta-p-events mp)))
+                                   event-count)))           
+           
+           
+           
+           (if (and 
+                (meta-p-max-time-delta mp)
+                (numberp (meta-p-max-time-delta mp))
+                (> (- (evt-mstime (first (meta-p-events mp))) (meta-p-time mp))
+                   (meta-p-max-time-delta mp)))
+               
+               (progn
+                 
+                 (dolist (model (mp-models))
+                   (with-model-eval model
+                     (schedule-event-relative (meta-p-max-time-delta mp) 'dummy-event-function 
+                                              :priority :max 
+                                              :details 
+                                              "A dummy event to prevent model skip ahead"
+                                              :output nil
+                                              :time-in-ms t
+                                              :maintenance (meta-p-max-time-maintenance mp)))))
+             (progn
+               
+               (run-one-event mp real-time)
+               
+               (incf event-count)
+               
+               ;; Check to see if there needs to be an update 
+               
+               (unless (or (and (meta-p-events mp)
+                                (= (meta-p-time mp) (evt-mstime (first (meta-p-events mp)))))
+                           (= (meta-p-time mp) last-update-time))
+                 
+                 (let ((current-model (meta-p-current-model mp)))
+                   (unwind-protect 
+                       (dolist (model-name (meta-p-model-order mp))
+                         (let ((model (gethash model-name (meta-p-models mp))))
+                           (setf (meta-p-current-model mp) model) 
+                           (dolist (module (updating-modules))
+                             (update-the-module module (ms->seconds last-update-time) (ms->seconds (meta-p-time mp))))))
+                     
+                     (setf (meta-p-current-model mp) current-model)))
+                 
+                 (setf last-update-time (meta-p-time mp))))))
+         
+         (setf (meta-p-events mp) (remove 'dummy-event-function (meta-p-events mp) :key #'evt-action))
+         
+         (values (- (meta-p-time mp) (meta-p-start-time mp)) event-count (meta-p-break mp)))
     
-    (progn
-      (setf (meta-p-running mp) nil)
-      ;; Notify any modules which care that a run has ended
-      
-      (let ((current-model (meta-p-current-model mp)))
-        (unwind-protect 
-            (dolist (model-name (meta-p-model-order mp))
-              (let ((model (gethash model-name (meta-p-models mp))))
-                (setf (meta-p-current-model mp) model) 
-                (dolist (module (run-over-notify-modules))
-                  (run-over-notify-module module))))
+     (progn
+       (setf (meta-p-running mp) nil)
+       ;; Notify any modules which care that a run has ended
+       
+       (let ((current-model (meta-p-current-model mp)))
+         (unwind-protect 
+             (dolist (model-name (meta-p-model-order mp))
+               (let ((model (gethash model-name (meta-p-models mp))))
+                 (setf (meta-p-current-model mp) model) 
+                 (dolist (module (run-over-notify-modules))
+                   (run-over-notify-module module))))
           
-          (setf (meta-p-current-model mp) current-model))))))
+           (setf (meta-p-current-model mp) current-model)))))))
 
     
 ;;; run-one-event 
@@ -529,20 +541,21 @@
 ;;; This function lets all the models know that a run has terminated.
 
 (defun send-run-terminated-events (mp)
-  (let ((current-model (meta-p-current-model mp)))
-    (unwind-protect 
-        (dolist (model-name (meta-p-model-order mp))
-          (push (make-act-r-maintenance-event :mstime (meta-p-time (current-mp))
-                                              :priority :max
-                                              :action 'run-terminated
-                                              :params nil
-                                              :model model-name
-                                              :mp (current-meta-process)
-                                              :output nil)
-                (meta-p-events mp))
-          (run-one-event mp))
-      
-        (setf (meta-p-current-model mp) current-model))))
+  (cannot-define-model
+   (let ((current-model (meta-p-current-model mp)))
+     (unwind-protect 
+         (dolist (model-name (meta-p-model-order mp))
+           (push (make-act-r-maintenance-event :mstime (meta-p-time (current-mp))
+                                               :priority :max
+                                               :action 'run-terminated
+                                               :params nil
+                                               :model model-name
+                                               :mp (current-meta-process)
+                                               :output nil)
+                 (meta-p-events mp))
+           (run-one-event mp))
+       
+       (setf (meta-p-current-model mp) current-model)))))
 
 (defun run-terminated ()
   (when (update-chunks-at-all)
@@ -566,7 +579,7 @@
              (run-sched-queue (current-mp) #'test :real-time real-time)
            (unless break
              (send-run-terminated-events (current-mp))
-             (if (< time run-time)
+             (if (< time ms-time)
                  (if (null (meta-p-events (current-mp)))
                      (meta-p-output (format-event (make-act-r-event 
                                                    :mstime (meta-p-time (current-mp))
@@ -577,8 +590,8 @@
                                                    :output t
                                                    :mp (current-meta-process))))
                    (progn
-                     (run-full-time (- run-time time) :real-time nil)
-                     (setf time run-time)))
+                     (run-full-time (- run-time (ms->seconds time)) :real-time nil)
+                     (setf time ms-time)))
                (meta-p-output (format-event (make-act-r-event 
                                              :mstime (meta-p-time (current-mp))
                                              :module "------"
@@ -586,7 +599,7 @@
                                              :details "Stopped because time limit reached"
                                              :output t
                                              :mp (current-meta-process))))))
-           (values time events break))))))))
+           (values (ms->seconds time) events break))))))))
 
 (defun run-until-condition (condition &key (real-time nil))
   (verify-current-mp  
@@ -618,7 +631,7 @@
                                            :details "Stopped because condition is true"
                                            :output t
                                            :mp (current-meta-process))))))
-         (values time events break))))))
+         (values (ms->seconds time) events break))))))
 
 (defun run-full-time (run-time &key (real-time nil))
   (verify-current-mp  
@@ -658,7 +671,7 @@
                                              :details "Stopped because time limit reached"
                                              :output t
                                              :mp (current-meta-process)))))
-             (values time events break))))))))
+             (values (ms->seconds time) events break))))))))
 
 (defun dummy-event-function ())
 
@@ -710,7 +723,7 @@
                                                :details "Stopped because time limit reached"
                                                :output t
                                                :mp (current-meta-process)))))
-               (values time events break)))))))))
+               (values (ms->seconds time) events break)))))))))
 
 
 (defun run-n-events (event-count &key (real-time nil))
@@ -743,7 +756,7 @@
                                              :details "Stopped because event limit reached"
                                              :output t
                                              :mp (current-meta-process))))))
-           (values time events break)))))))
+           (values (ms->seconds time) events break)))))))
 
 
 
@@ -793,7 +806,7 @@
                                          :details "Stepping stopped"
                                          :output t
                                          :mp (current-meta-process)))))
-         (values time events break))))))
+         (values (ms->seconds time) events break))))))
 
 (defun schedule-event (time action 
                             &key (maintenance nil)

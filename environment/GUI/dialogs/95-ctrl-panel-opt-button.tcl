@@ -83,6 +83,12 @@ proc select_options {} {
                 -variable current_options(multiple_models) \
                 -onvalue 1 -offvalue 0
 
+    checkbutton .options.multiple_models_close \
+                -text "Close inspector windows for deleted models when multiple models are defined" \
+                -font checkbox_font \
+                -variable current_options(kill_model_windows) \
+                -onvalue 1 -offvalue 0
+
 
     pack .options.use_env_window -anchor w -expand 1 -fill x
     pack .options.use_smart_load -anchor w -expand 1 -fill x
@@ -90,6 +96,7 @@ proc select_options {} {
     pack .options.show_copyrights -anchor w -expand 1 -fill x
     pack .options.save_backups -anchor w -expand 1 -fill x
     pack .options.multiple_models -anchor w -expand 1 -fill x
+    pack .options.multiple_models_close -anchor w -expand 1 -fill x
 
     pack .options.but_frame
 

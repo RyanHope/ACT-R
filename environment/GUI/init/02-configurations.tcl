@@ -16,11 +16,30 @@ global window_config
 set window_config(.copyright) \
     "400x466+[expr $screen_center_x - 200]+[expr $screen_center_y - 233]"
 
-set window_config(.control_panel) \
-    "175x700+[expr $screen_width - 190]+[expr $screen_center_y - 350]"
+if {$standalone_mode == 0} {
+  set window_config(.control_panel) \
+      "170x700+[expr $screen_width - 190]+[expr $screen_center_y - 350]"
+} else {
+  set window_config(.control_panel) \
+      "235x700+[expr $screen_width - 255]+[expr $screen_center_y - 350]"
+}
+
+
+set window_config(.reload_response) \
+    "500x230+[expr $screen_center_x - 250]+[expr $screen_center_y - 115]"
+
+set window_config(.stepper) \
+    "500x550+[expr $screen_center_x - 250]+[expr $screen_center_y - 275]"
+
+set window_config(.tutor_response) \
+    "480x130+[expr $screen_center_x - 240]+[expr $screen_center_y - 65]"
+
 
 set window_config(.declarative) \
     "420x300+[expr $screen_center_x - 210]+[expr $screen_center_y - 150]"
+
+set window_config(.whynotdm) \
+    "200x300+[expr $screen_center_x - 100]+[expr $screen_center_y - 150]"
 
 set window_config(.procedural) \
     "500x400+[expr $screen_center_x - 250]+[expr $screen_center_y - 200]"
@@ -31,37 +50,55 @@ set window_config(.whynot) \
 set window_config(.buffers) \
     "350x240+[expr $screen_center_x - 175]+[expr $screen_center_y - 120]"
 
-set window_config(.stepper) \
-    "500x550+[expr $screen_center_x - 250]+[expr $screen_center_y - 275]"
-
-set window_config(.options) \
+set window_config(.bufferstatus) \
     "350x240+[expr $screen_center_x - 175]+[expr $screen_center_y - 120]"
 
 set window_config(.visicon) \
     "660x150+[expr $screen_center_x - 330]+[expr $screen_center_y - 100]"
 
-set window_config(.reload_response) \
-    "500x230+[expr $screen_center_x - 250]+[expr $screen_center_y - 115]"
+set window_config(.audicon) \
+    "870x150+[expr $screen_center_x - 435]+[expr $screen_center_y - 100]"
+
+set window_config(.param_viewer) \
+    "400x330+[expr $screen_center_x - 200]+[expr $screen_center_y - 150]"
+
 
 set window_config(.graphic_trace) \
-    "550x500+[expr $screen_center_x - 275]+[expr $screen_center_y - 250]"
+    "870x500+[expr $screen_center_x - 435]+[expr $screen_center_y - 250]"
 
-set window_config(.tutor_response) \
-    "480x130+[expr $screen_center_x - 240]+[expr $screen_center_y - 65]"
+set window_config(.vert_graphic_trace) \
+    "870x500+[expr $screen_center_x - 435]+[expr $screen_center_y - 250]"
 
-set window_config(.listener) \
-    "400x300+0+[expr $screen_height - 350]"
+set window_config(.pgraph) \
+    "700x400+[expr $screen_center_x - 350]+[expr $screen_center_y - 200]"
 
-set window_config(.chunk_type) \
-    "340x160+0+20"
-set window_config(.chunk) \
-    "340x160+0+190"
-set window_config(.production) \
-    "340x210+0+360"
-set window_config(.misc) \
-    "360x330+360+20"
-set window_config(.command) \
-    "360x190+360+360"
+
+set window_config(.ptrace) \
+    "410x370+[expr $screen_center_x - 205]+[expr $screen_center_y - 150]"
+
+set window_config(.retrieval_history) \
+    "670x380+[expr $screen_center_x - 335]+[expr $screen_center_y - 150]"
+
+set window_config(.buffer_history) \
+    "530x290+[expr $screen_center_x - 265]+[expr $screen_center_y - 100]"
+
+
+set window_config(.bold_graphs) \
+    "660x250+[expr $screen_center_x - 330]+[expr $screen_center_y - 120]"
+
+set window_config(.bold_slices) \
+    "766x388+[expr $screen_center_x - 383]+[expr $screen_center_y - 150]"
+
+set window_config(.bold_brain_3d) \
+    "658x586+[expr $screen_center_x - 329]+[expr $screen_center_y - 260]"
+
+set window_config(.bold_brain_3d_real) \
+    "658x508+[expr $screen_center_x - 329]+[expr $screen_center_y - 250]"
+
+
+set window_config(.options) \
+    "450x274+[expr $screen_center_x - 225]+[expr $screen_center_y - 137]"
+
 
 set window_config(.model) \
     "400x500+0+20"

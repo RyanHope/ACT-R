@@ -1,5 +1,7 @@
 (defvar *response* nil)
 (defvar *response-time* nil)
+(defvar *who*)
+
 (defvar *subitizing-exp-data*  
     '(.6 .65 .7 .86 1.12 1.5 1.79 2.13 2.15 2.58))
 
@@ -24,18 +26,19 @@
     
     (if (not (eq who 'human)) 
         (progn
+          (setf who 'model)
           (reset)
           (install-device window)
           (proc-display )
-          (run 30))
+          (run 30 :real-time t))
       (progn
         (let ((start-time (get-time nil))) 
           (while (null *response*)
             (allow-event-manager window))
           (setf *response-time* (- *response-time* start-time)))))
         
-    (let ((response (if *response* (read-from-string *response*) -1)))
-      (list (if (null *response-time*) 30.0 (/ *response-time* 1000.0)) 
+    (let ((response (if (and (eq who *who*) *response*) (read-from-string *response*) -1)))
+      (list (if (or (not (eq who *who*)) (null *response-time*)) 30.0 (/ *response-time* 1000.0)) 
             (or (= response n) 
                 (and (= n 10) (= response 0)))))))
 
@@ -75,10 +78,12 @@
         points))                 
 
 (defmethod rpm-window-key-event-handler ((win rpm-window) key)
+  (setf *who* 'human)
   (setf *response-time* (get-time nil))
   (setf *response* (string key)))
 
 (defmethod device-speak-string ((win rpm-window) text)
+  (setf *who* 'model)
   (setf *response-time* (get-time))
   (setf *response* text))
 

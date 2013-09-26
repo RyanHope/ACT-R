@@ -97,29 +97,35 @@ proc set_current_model_value {action name} {
       
         if {$options_array(kill_model_windows) == 1} {
           kill_all_model_windows $name
-        } elseif {$options_array(kill_model_windows) == -1} {
-          switch [my_tk_dialog .multi_model_choice "Close deleted model windows?" "Should the Environment close inspector windows for a deleted model?" \
-                            warning 0 "Yes" "No" "Always" "Never"] {
-            0 { kill_all_model_windows $name}
-            1 { #nothing
-            }
-            2 { kill_all_model_windows $name
-                set options_array(kill_model_windows) 1
-                # write that out to the end of hte userconfig file
-                
-                set file [file join $tcl_env_dir init "99-userconfig.tcl"]
-
-                append_data "set options_array(kill_model_windows) 1\n" $file
-            }
-            3 { set options_array(kill_model_windows) 0
-                # write that out to the end of hte userconfig file
-                
-                set file [file join $tcl_env_dir init "99-userconfig.tcl"]
-
-                append_data "set options_array(kill_model_windows) 0\n" $file
-            }
-          }
-        }
+        } 
+        #   don't show the dialog anymore because it isn't really modal and runs into 
+        #   problems if there are multiple models being deleted which will always be
+        #   the case for a clear-all with multiple models defined...
+        #   Instead moving it to the options settings.
+        #   
+        #   elseif {$options_array(kill_model_windows) == -1} {
+        #  switch [my_tk_dialog .multi_model_choice "Close deleted model windows?" "Should the Environment close inspector windows for a deleted model?" \
+        #                    warning 0 "Yes" "No" "Always" "Never"] {
+        #    0 { kill_all_model_windows $name}
+        #    1 { #nothing
+        #    }
+        #    2 { kill_all_model_windows $name
+        #        set options_array(kill_model_windows) 1
+        #        # write that out to the end of hte userconfig file
+        #        
+        #        set file [file join $tcl_env_dir init "99-userconfig.tcl"]
+        #
+        #        append_data "set options_array(kill_model_windows) 1\n" $file
+        #    }
+        #    3 { set options_array(kill_model_windows) 0
+        #        # write that out to the end of hte userconfig file
+        #        
+        #        set file [file join $tcl_env_dir init "99-userconfig.tcl"]
+        #
+        #        append_data "set options_array(kill_model_windows) 0\n" $file
+        #    }
+        #  }
+        #}
       }
     }
     check {
@@ -127,7 +133,7 @@ proc set_current_model_value {action name} {
         $menu delete "No Current Model"
       }
       if {$options_array(multiple_models) == 0 && [llength $name] > 1} {
-        tk_messageBox -icon warning -message "You must enable multiple model support under Options before the ACT-R Environment\ntools will work correctly when more than one model is defined." \
+        tk_messageBox -icon warning -message "You must enable multiple model support under Options before the ACT-R Environment tools will work correctly when more than one model is defined." \
                   -type ok -title "Multiple models not enabled"
       }      
 
@@ -161,7 +167,9 @@ proc kill_all_model_windows {name} {
     set windows $model_to_windows($name) 
 
     foreach x $windows {
-      destroy $x
+      catch {
+        destroy $x
+      }
     }
 
     array unset model_to_windows $name

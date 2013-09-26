@@ -334,6 +334,14 @@
 ;;;             :   calculation.  Possible values are t (meaning let them) or
 ;;;             :   nil which will prevent them and also display a model warning
 ;;;             :   when such a situation occurs.
+;;; 2013.04.17 Dan
+;;;             : * Added the last-request slot to the module and use that to
+;;;             :   record the time and chunk-spec of the most recent request
+;;;             :   to support the new whynot-dm command.
+;;; 2013.05.21 Dan
+;;;             : * Allow the :mp-value parameter to enable partial matching
+;;;             :   when it is off and removed :mp from the parameters that warn
+;;;             :   about being changed on the fly.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -364,8 +372,9 @@
 ;;; :dm-finsts-decay parameter indicates for how many seconds each of those
 ;;; designations will persist.
 ;;; :mp-value can be used to temporarily change the setting of the :mp parameter
-;;; while the request is processed.  :mp-value can only be used if the :mp 
-;;; parameter has been enabled for the model.
+;;; while the request is processed.  :mp-value can be used whether the :mp 
+;;; parameter has been enabled for the model or not i.e. it can temporarily
+;;; enable partial matching even if it is off.
 ;;;
 ;;; The declarative memory module does not support buffer modification requests.
 ;;;
@@ -411,6 +420,11 @@
 ;;; Relies on :esc, :ol, and :er so make sure they exist first
 
 (require-compiled "CENTRAL-PARAMETERS" "ACT-R6:support;central-parameters")
+
+;;; structure to hold the details for the last request
+
+(defstruct last-request time spec finst finst-chunks best matches rt invalid)
+
 
 ;;; Start by defining a structure to hold the instance of the module
 
@@ -523,7 +537,11 @@
   stuff stuff-event
   
   nsji ;; whether the S-log(fan) is allowed to return negatives
+  
+  ;; save the last request and time for use with the whynot-dm command
+  last-request
   )
+
 
 
 ;;; 2 structures for saving the activation trace details
@@ -680,9 +698,10 @@
   
   (setf (dm-finsts dm) nil)
   
+  (setf (dm-last-request dm) nil)
+  
   ;; parameters will be handled on thier own
-  
-  
+    
   ;;;
   (setf (dm-chunk-hash-table dm) 
     (make-hash-table :test #'equal))
@@ -750,7 +769,8 @@
   
   ;; kill any pending stuffing action
   
-  
+  ;; Save the current request info
+  (setf (dm-last-request dm) (make-last-request :time (mp-time) :spec request :rt (dm-rt dm)))
   
   ;; If the module has not completed the last request
  
@@ -833,11 +853,13 @@
                (print-warning "Invalid retrieval request.")
                (print-warning ":recently-retrieved parameter used more than once.")
                (setf (dm-busy dm) nil)
+               (setf (last-request-invalid (dm-last-request dm)) :too-many)
                (return-from start-retrieval))
               ((not (or (eq '- (caar recent)) (eq '= (caar recent))))
                (print-warning "Invalid retrieval request.")
                (print-warning ":recently-retrieved parameter's modifier can only be = or -.")
                (setf (dm-busy dm) nil)
+               (setf (last-request-invalid (dm-last-request dm)) :bad-modifier)
                (return-from start-retrieval))
               ((not (or (eq t (third (car recent)))
                         (eq nil (third (car recent)))
@@ -846,6 +868,7 @@
                (print-warning "Invalid retrieval request.")
                (print-warning ":recently-retrieved parameter's value can only be t, nil or reset.")
                (setf (dm-busy dm) nil)
+               (setf (last-request-invalid (dm-last-request dm)) :bad-value)
                (return-from start-retrieval))
               
               (t ;; it's a valid request
@@ -865,6 +888,10 @@
                         ;; only those chunks marked are available
                         (setf chunk-list (mapcar #'car (dm-finsts dm)))
                         
+                        ;; save that info for whynot
+                        (setf (last-request-finst (dm-last-request dm)) :marked)
+                        (setf (last-request-finst-chunks (dm-last-request dm)) chunk-list)
+                        
                         (when (dm-sact dm)
                           (setf (sact-trace-only-recent (dm-current-trace dm)) t)
                           (setf (sact-trace-recents (dm-current-trace dm)) chunk-list))
@@ -883,6 +910,9 @@
                         (when (dm-act-level (dm-act dm) 'high)
                           (model-output "Removing recently retrieved chunks:"))
                         
+                        (setf (last-request-finst (dm-last-request dm)) :unmarked)
+                        
+                        
                         (setf chunk-list 
                           (remove-if #'(lambda (x)
                                          (when (member x (dm-finsts dm) 
@@ -894,6 +924,7 @@
                                            
                                            (when (dm-act-level (dm-act dm) 'high)
                                              (model-output "~s" x))
+                                           (push x (last-request-finst-chunks (dm-last-request dm)))
                                            t))
                                      chunk-list)))))))))
     
@@ -903,25 +934,23 @@
         (progn
           (when (member :mp-value (chunk-spec-slots request))
             (let ((mp-value (chunk-spec-slot-spec request :mp-value)))
-              (cond ((null (dm-mp dm))
-                     (print-warning "Invalid retrieval request.")
-                     (print-warning ":mp-value parameter can only be used when partial matching is globally enabled.")
-                     (setf (dm-busy dm) nil)
-                     (return-from start-retrieval))
-                    ((> (length mp-value) 1)
+              (cond ((> (length mp-value) 1)
                      (print-warning "Invalid retrieval request.")
                      (print-warning ":mp-value parameter used more than once.")
                      (setf (dm-busy dm) nil)
+                     (setf (last-request-invalid (dm-last-request dm)) :mp-multi)
                      (return-from start-retrieval))
                     ((not (eq '= (caar mp-value)))
                      (print-warning "Invalid retrieval request.")
                      (print-warning ":mp-value parameter's modifier can only be =.")
                      (setf (dm-busy dm) nil)
+                     (setf (last-request-invalid (dm-last-request dm)) :mp-modifier)
                      (return-from start-retrieval))
                     ((not (numornil (third (car mp-value))))
                      (print-warning "Invalid retrieval request.")
                      (print-warning ":mp-value parameter's value can only be nil or a number.")
                      (setf (dm-busy dm) nil)
+                     (setf (last-request-invalid (dm-last-request dm)) :mp-not-num)
                      (return-from start-retrieval))
                     
                     (t ;; it's a valid request
@@ -952,13 +981,11 @@
                                     (model-output "Chunk ~s matches" name)) 
                                   (push-last name found))
                               (progn
-                                
                                 (when (dm-sact dm)
                                   (push-last name (sact-trace-no-matches (dm-current-trace dm))))
                                 
                                 (when (dm-act-level (dm-act dm) 'high)
-                                  (model-output "Chunk ~s does not match" name))))))
-                        )
+                                  (model-output "Chunk ~s does not match" name)))))))
                        (t
                         ;; with esc and pm on then want to use
                         ;; everything that fits the general pattern:
@@ -994,6 +1021,7 @@
                           
                           matches)))))
             
+            (setf (last-request-matches (dm-last-request dm)) chunk-set)
             
             (if (dm-esc dm)
                 (dolist (x chunk-set)
@@ -1029,7 +1057,8 @@
                     (setf best (cons b (remove b best))))
                 (setf best (sort (copy-list best) #'string<))))
             
-            
+            (setf (last-request-best (dm-last-request dm)) best)
+                        
             (when (car (dm-retrieval-set-hook dm))
               (let ((chunk-set-with-best (when best (cons (car best) (remove (car best) chunk-set)))))
                 (dolist (x (dm-retrieval-set-hook dm))
@@ -1384,7 +1413,7 @@
   (cond ((consp param)
          
          (when (and (hash-table-keys (dm-chunks dm))
-                    (find (car param) '(:esc :ol :fast-merge :mp :pm :bll :mas)))
+                    (find (car param) '(:esc :ol :fast-merge :bll :mas)))
            (print-warning 
             "Changing declarative parameters with chunks in dm not supported.")
            (print-warning 

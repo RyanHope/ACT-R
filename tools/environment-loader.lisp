@@ -50,19 +50,17 @@
 ;;;             : * Added a hack to skip this for ABCL since it throws an
 ;;;             :   error and I haven't created the appropriate uni-file
 ;;;             :   additions for it yet anyway.
+;;; 2012.09.07 Dan
+;;;             : * Removed everything using the :ACTR-ENV-ALONE switches and
+;;;             :   some other code that was commented out long ago.
+;;;             : * Moved the allegro require :sock to uni-files.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; uncomment this when building a standalone in ACL
-;(pushnew :ACTR-ENV-ALONE *features*)
 
 
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-
-;(in-package :cl-user)
-;#+(and :allegro-ide (not :ACTR-ENV-ALONE)) (in-package :cg-user)
 
 ;;; First, add an environment indicator to the features list
 ;;; so that I can test for it in the "experiment library" files
@@ -72,57 +70,27 @@
   (pushnew :actr-environment *features*))
 
 
-#+(and :allegro :actr-env-alone) (setf EXCL::*SOURCE-FILE-AUTOLOAD-SRECORD* nil)
-
-
-;;; See if I can remove this now...
-;;; It doesn't like this if it's in uni-files where I'd prefer to have it...
-
-;#+:lispworks (require "comm")
-
-;;; This needs to be here for standalone purposes
-
-#+:allegro (eval-when (:compile-toplevel :load-toplevel :execute)
-             (require :sock))
-
-
 (require-compiled "UNI-FILES" "ACT-R6:support;uni-files")
 
 
 #+(and :mcl (not :openmcl))
 (defparameter *environment-file-list* '("handler-class.lisp"
                                         "server.lisp"
-                                        
                                         "env-module.lisp" 
                                         "mcl-fix.lisp"
                                         "handlers.lisp"
-                                        
                                         "environment-cmds.lisp"
                                         "stepper-control.lisp"
-                                        ;"smart-loader.lisp"
-                                        ;"parse-files.lisp"
-                                        "env-device.lisp"
-                                        
-                                        ;"graphic-trace.lisp"
-                                        ;"standalone.lisp"
-                                        ))
+                                        "env-device.lisp"))
 
 #-(and :mcl (not :openmcl))
 (defparameter *environment-file-list* '("handler-class.lisp"
                                         "server.lisp"
-                                        
                                         "env-module.lisp" 
                                         "handlers.lisp"
-                                        
                                         "environment-cmds.lisp"
                                         "stepper-control.lisp"
-                                        ;"smart-loader.lisp"
-                                        ;"parse-files.lisp"
-                                        "env-device.lisp"
-                                        
-                                        ;"graphic-trace.lisp"
-                                        #+:ACTR-ENV-ALONE "standalone.lisp"
-                                        ))
+                                        "env-device.lisp"))
 
 #+:abcl (setf *environment-file-list* nil)
 

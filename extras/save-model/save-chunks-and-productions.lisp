@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : save-chunks-and-productions.lisp
-;;; Version     : 1.0a1
+;;; Version     : 1.0a2
 ;;; 
 ;;; Description : Saves a model's declarative and procedural components to a file
 ;;;             : which can be loaded later as a model.
@@ -25,6 +25,14 @@
 ;;; ----- History -----
 ;;; 2010.06.11 Dan
 ;;;             : * First pass at a version of this for inclusion with the sources.
+;;; 2013.05.31 Dan [1.0a2]
+;;;             : * Adding support for static chunk-types.  For now it's just 
+;;;             :   going to write out the entire subtree for a static instead
+;;;             :   of trying to figure out which were user defined and which
+;;;             :   were automatic.
+;;;             : * Realized that the sort based on subtype status isn't right
+;;;             :   since it doesn't work for unrelated types because sort may
+;;;             :   not test every pair together.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -169,7 +177,18 @@ PROCEDURAL module
                                   (:BLC 0.0) (:LF 1.0) (:BLL NIL) (:ESC NIL) (:ER NIL) (:OL T) (:IU 0) (:UL NIL)
                                   (:ALPHA 0.2) (:UT NIL) (:NU 0) (:EGS 0.0) (:EPL NIL) (:TT 2.0) (:DAT 0.05) (:PPM NIL)))
   
-  
+
+(defun order-chunk-types (type-list)
+  (let* ((root-types (remove-if (lambda (x) (> (length (chunk-type-supertypes-fct x)) 1)) type-list))
+         (families (mapcar 'list root-types))
+         (others (set-difference type-list root-types)))
+    (dolist (x others)
+      (nconc (find-if (lambda (y) (chunk-type-subtype-p-fct x (car y))) families) (list x)))
+    (do ((res nil)
+         (fams families (cdr fams)))
+        ((null fams) (flatten res))
+      (push (sort (car fams) #'< :key (lambda (x) (length (chunk-type-supertypes-fct x)))) res))))
+
 (defun save-chunks-and-productions (file-name &optional (zero-ref t))
   
   (let ((chunks (no-output (dm)))
@@ -219,15 +238,20 @@ PROCEDURAL module
                             (with-model-eval dummy-name
                                 (no-output (chunk-type)))
                             (delete-model-fct dummy-name)))
-           (model-types (sort  (set-difference (no-output (chunk-type)) default-types)
-                              (lambda (x y) (chunk-type-subtype-p-fct y x)))))
+           ;; group them into subtype clusters
+           (model-types (order-chunk-types (set-difference (no-output (chunk-type)) default-types))))
       
       (dolist (ct model-types)
-        (if (> (length (chunk-type-supertypes-fct ct)) 1)
-            (command-output "(chunk-type (~a (:include ~a)) ~@[~s~]" ct (second (chunk-type-supertypes-fct ct))
-                            (chunk-type-documentation-fct ct))
-          (command-output "(chunk-type ~a ~@[~s~]" ct (chunk-type-documentation-fct ct)))
-        
+        (aif (chunk-type-static-p-fct ct)
+            (if (> (length (chunk-type-supertypes-fct ct)) 1)
+                (command-output "(chunk-type (~a (:include ~a)) ~@[~s~]" ct it (chunk-type-documentation-fct ct))
+              (command-output "(chunk-type (~a (:static t)) ~@[~s~]" ct (chunk-type-documentation-fct ct)))
+          
+          (if (> (length (chunk-type-supertypes-fct ct)) 1)
+              (command-output "(chunk-type (~a (:include ~a)) ~@[~s~]" ct (second (chunk-type-supertypes-fct ct))
+                              (chunk-type-documentation-fct ct))
+            (command-output "(chunk-type ~a ~@[~s~]" ct (chunk-type-documentation-fct ct))))
+          
         (dolist (slot (chunk-type-slot-names-fct ct))
           (aif (chunk-type-slot-default-fct ct slot)
                (command-output "  (~a ~s)" slot it)

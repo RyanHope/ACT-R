@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : chunks.lisp
-;;; Version     : 1.2
+;;; Version     : 1.3
 ;;; 
 ;;; Description : Definition of chunks and the function that manipulate them.
 ;;; 
@@ -257,6 +257,46 @@
 ;;;             :   add new chunk names that refer to existing chunks.
 ;;; 2012.05.30 Dan
 ;;;             : * Fixed a bug in the create-chunk-alias macro.
+;;; 2012.10.15 Dan
+;;;             : * Changed chunk-back-links to use a hash-table instead of a
+;;;             :   list of lists to improve performance.  Significant reduction
+;;;             :   in time and memory usage when :ncnar is t found in test 
+;;;             :   cases.
+;;; 2013.03.13 Dan [1.3]
+;;;             : * Changed chunk creation so that all slots which exist for
+;;;             :   the chunk get set in the table, even if they are empty, 
+;;;             :   because that's important for matching chunk-specs now since
+;;;             :   a non-existent slot needs to be diferentiated from an empty
+;;;             :   slot.
+;;; 2013.04.05 Dan
+;;;             : * Fixed a bug with creating chunks that have default values in
+;;;             :   slots which are themselves chunks.
+;;;             : * Re-fixed because I undid the previous change which is still
+;;;             :   important.
+;;; 2013.05.20 Dan 
+;;;             : * Added the resolve-a-static-chunks-type function to handle
+;;;             :   converting a chunk to the minimal type needed for holding
+;;;             :   its contents.
+;;; 2013.05.21 Dan
+;;;             : * Fast-mod-chunk and define-chunk now resolves static chunks so
+;;;             :   that they are always of the most appropriate type.
+;;; 2013.05.22 Dan
+;;;             : * Changed pprint-a-chunk so that static chunks show the root
+;;;             :   type or current type based on the setting of the :show-static-
+;;;             :   subtype-names parameter.
+;;; 2013.05.23 Dan
+;;;             : * Changed define-chunks to now allow one to specify any possible
+;;;             :   slots when creating static chunks even if only the parent type
+;;;             :   is provided, but won't allow creating as yet undefined type
+;;;             :   combinations e.g. if the root type is x and you've extended
+;;;             :   x with a slot1 and extended x with a slot2 but haven't extended
+;;;             :   either of those (x+slot1 or x+slot2) with the other to create
+;;;             :   x+slot1&slot2 a definition for a chunk like this:
+;;;             :   (isa x slot1 "a" slot2 "b") will fail, but either of these: 
+;;;             :   (isa x slot1 "a") (isa x slot2 "b") would be fine.
+;;;             : * Fixed resolve-chunks-type so that it doesn't remove the
+;;;             :   static slots of the root type from the chunks i.e. those are
+;;;             :   allowed to have a value of nil and still exist.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -342,7 +382,12 @@
              (eql chunk-name (act-r-chunk-name chunk))
              (act-r-chunk-name chunk)
              (act-r-chunk-documentation chunk)
-             (act-r-chunk-type-name (act-r-chunk-chunk-type chunk))  
+             
+             (let ((type (act-r-chunk-chunk-type chunk)))
+               (if (or (null (act-r-chunk-type-static type)) *show-static-names*)
+                   (act-r-chunk-type-name type)
+                 (act-r-chunk-type-static type)))
+               
              (mapcan #'(lambda (slot-name) 
                          (multiple-value-bind (value exists) (gethash slot-name (act-r-chunk-slot-value-lists chunk))
                              (when (or exists
@@ -509,7 +554,12 @@
           (dolist (slot-name (act-r-chunk-type-slots (act-r-chunk-chunk-type chunk)))
             (let ((old (gethash slot-name (act-r-chunk-slot-value-lists chunk))))
               (when (chunk-p-fct old)
-                (push (cons new-name slot-name) (chunk-back-links old))))))
+                (let ((bl (chunk-back-links old)))
+                  (if (hash-table-p bl)
+                      (push slot-name (gethash new-name bl))
+                    (let ((ht (make-hash-table)))
+                      (setf (gethash new-name ht) (list slot-name))
+                      (setf (chunk-back-links old) ht))))))))
         
         ;; update its parameters for only those that need it
         
@@ -571,32 +621,18 @@
               (let (name doc type slots slots-and-values
                          (pos (position 'isa chunk-def)))
                 (cond ((not (find 'isa chunk-def))
-                       (print-warning 
-                        "Invalid chunk definition: ~S has no ISA specified."
-                        chunk-def))
+                       (print-warning "Invalid chunk definition: ~S has no ISA specified." chunk-def))
                       ((> (count 'isa chunk-def) 1)
-                       (print-warning 
-                        "Invalid chunk definition: ~S has more than one ISA."
-                        chunk-def))
+                       (print-warning "Invalid chunk definition: ~S has more than one ISA." chunk-def))
                       ((= (1+ pos) (length chunk-def))
-                       (print-warning 
-                        "Invalid chunk definition: ~S no chunk-type specified after ISA." 
-                        chunk-def))
-                      ((not (get-chunk-type 
-                             (nth (1+ pos) chunk-def)))
-                       (print-warning 
-                        "Invalid chunk definition: ~S chunk-type specified does not exist."
-                        chunk-def))
+                       (print-warning "Invalid chunk definition: ~S no chunk-type specified after ISA." chunk-def))
+                      ((not (get-chunk-type (nth (1+ pos) chunk-def)))
+                       (print-warning "Invalid chunk definition: ~S chunk-type specified does not exist." chunk-def))
                       (t
-                       (setf type 
-                         (get-chunk-type 
-                          (nth (1+ pos) chunk-def)))
-                       (setf slots-and-values 
-                         (subseq chunk-def (+ 2 pos)))
+                       (setf type (get-chunk-type (nth (1+ pos) chunk-def)))
+                       (setf slots-and-values (subseq chunk-def (+ 2 pos)))
                        (cond ((> pos 2)
-                              (print-warning 
-                               "Invalid chunk definition: ~S too many specifiers before ISA." 
-                               chunk-def))
+                              (print-warning "Invalid chunk definition: ~S too many specifiers before ISA." chunk-def))
                              (t
                               (cond ((= pos 0)
                                      (setf name (new-name-fct (symbol-name (act-r-chunk-type-name type)))))
@@ -607,82 +643,67 @@
                                      (setf doc (second chunk-def))))
                               
                               (cond ((or (null name) (not (symbolp name)))
-                                     (print-warning 
-                                      "Invalid chunk definition: ~S chunk name is not a valid symbol." 
-                                      chunk-def))
+                                     (print-warning "Invalid chunk definition: ~S chunk name is not a valid symbol." chunk-def))
                                     ((and doc (not (stringp doc)))
-                                     (print-warning 
-                                      "Invalid chunk definition: ~S documentation is not a string."
-                                      chunk-def))
+                                     (print-warning "Invalid chunk definition: ~S documentation is not a string." chunk-def))
                                     ((oddp (length slots-and-values))
-                                     (print-warning 
-                                      "Invalid chunk definition: ~S slot and values list is an odd length."
-                                      chunk-def))
+                                     (print-warning "Invalid chunk definition: ~S slot and values list is an odd length." chunk-def))
                                     ((chunk-p-fct name)
-                                     (print-warning 
-                                      "Invalid chunk definition: ~S names a chunk which already exists."
-                                      chunk-def))
+                                     (print-warning "Invalid chunk definition: ~S names a chunk which already exists." chunk-def))
                                     (t
                                      (do ((s slots-and-values (cddr s)))
                                          ((null s))
-                                       (if (valid-slot-name (car s) type)
+                                       (if (or (and (act-r-chunk-type-static type) (possible-slot-name (car s) type))
+                                               (and (null (act-r-chunk-type-static type)) (valid-slot-name (car s) type)))
                                            (push (car s) slots)
                                          (progn
-                                           (print-warning 
-                                            "Invalid chunk definition: ~S invalid slot name ~s."
-                                            chunk-def (car s))
+                                           (print-warning "Invalid chunk definition: ~S invalid slot name ~s." chunk-def (car s))
                                            (setf s nil)
                                            (setf slots :error))))
-                                     (cond ((eq slots :error))
-                                           ; Don't worry about this...
-                                           ;((not 
-                                           ;  (= (length slots) 
-                                           ;     (length (remove-duplicates slots))))
-                                           ; (print-warning 
-                                           ;  "Invalid chunk definition: ~S slot name used more than once."
-                                           ;  chunk-def))
-                                           (t 
-                                            (let ((c (make-act-r-chunk 
-                                                      :name name
-                                                      :merged-chunks (list name)
-                                                      :documentation doc
-                                                      :chunk-type type
-                                                      :parameter-values (make-array *chunk-parameters-count*
-                                                                                    :initial-element *chunk-parameter-undefined*)
-                                                      :slot-value-lists slots-and-values)))
-                                              (push-last c chunk-list)
+                                     (when (and (act-r-chunk-type-static type)
+                                                (listp slots)
+                                                (not (static-chunk-sub-type-exists slots (get-chunk-type (act-r-chunk-type-static type)))))
+                                           (print-warning "Invalid chunk definition: ~S nonexistent slot combination for static type ~s." chunk-def (act-r-chunk-type-name type))
+                                           (setf slots :error))
+                                     (unless (eq slots :error)
+                                       (let ((c (make-act-r-chunk 
+                                                 :name name
+                                                 :merged-chunks (list name)
+                                                 :documentation doc
+                                                 :chunk-type type
+                                                 :parameter-values (make-array *chunk-parameters-count*
+                                                                               :initial-element *chunk-parameter-undefined*)
+                                                 :slot-value-lists slots-and-values)))
+                                         (push-last c chunk-list)
                                               
-                                              ;; enter it into the main chunk table
-                                              (setf (gethash name (act-r-model-chunks-table (current-model-struct)))
-                                                c)))))))))))
-            (model-warning "~S is not a list in call to define-chunks-fct" chunk-def)))
+                                         ;; enter it into the main chunk table
+                                         (setf (gethash name (act-r-model-chunks-table (current-model-struct))) c))))))))))
+            (print-warning "~S is not a list in call to define-chunks-fct" chunk-def)))
       
       ;; second pass create slot-value list and define parameters
       
       (dolist (chunk chunk-list)
         
-        (let ((slots-table 
-               (make-hash-table :size (length (ct-slot-names (act-r-chunk-chunk-type chunk)))))
-              (ct (act-r-chunk-chunk-type chunk)))
+        (let* ((ct (act-r-chunk-chunk-type chunk))
+               (slots-table (make-hash-table :size (length (ct-slot-names ct)))))
           
-          (do* ((all-slots (ct-slot-names ct))
-                (s (act-r-chunk-slot-value-lists chunk) (cddr s))
+          ;; add any unused slots to the list
+          (let ((used (do ((s (act-r-chunk-slot-value-lists chunk) (cddr s)) 
+                           (slots nil)) 
+                          ((null s) slots) 
+                        (push s slots))))
+            
+            (dolist (default (act-r-chunk-type-slots ct))
+              (if (atom default)
+                  (unless (find default used)
+                    (setf (act-r-chunk-slot-value-lists chunk) (append (list default nil) (act-r-chunk-slot-value-lists chunk))))
+                (unless (find (car default) used)
+                  (setf (act-r-chunk-slot-value-lists chunk) (append default (act-r-chunk-slot-value-lists chunk)))))))
+          
+          (do* ((s (act-r-chunk-slot-value-lists chunk) (cddr s))
                 (slot-name (car s) (car s))
                 (slot-value (cadr s) (cadr s)))
-               ((null s)
-                (dolist (sn all-slots)
-                  (awhen (ct-slot-default ct sn)
-                         (when (and (symbolp it)
-                                    (not (chunk-p-fct it))
-                                    (not (numberp it))
-                                    (not (eq t it)))
-                           (create-undefined-chunk it))
-                         
-                         (setf (gethash sn slots-table) it))))
-            
-            ;(push (list (car s) (second s)) slots))
-            
-            (setf all-slots (remove slot-name all-slots))
+               ((null s))
             
             (when (and slot-value (symbolp slot-value) 
                        (not (chunk-p-fct slot-value))
@@ -696,24 +717,20 @@
             (when (and (chunk-p-fct slot-value) (update-chunks-on-the-fly))
               (setf slot-value (true-chunk-name-fct slot-value))
               ;; make the back links
-              (push (cons (act-r-chunk-name chunk) slot-name) (chunk-back-links slot-value)))
+              
+              (let ((bl (chunk-back-links slot-value)))
+                  (if (hash-table-p bl)
+                      (push slot-name (gethash (act-r-chunk-name chunk) bl))
+                    (let ((ht (make-hash-table)))
+                      (setf (gethash (act-r-chunk-name chunk) ht) (list slot-name))
+                      (setf (chunk-back-links slot-value) ht)))))
             
             (setf (gethash slot-name slots-table) slot-value))
           
-          (setf (act-r-chunk-slot-value-lists chunk) slots-table))
-        
-        ;;; Don't do this because
-        ;;; - it doesn't work if a default function references a module 
-        ;;; which doesn't exist when creating chunks in other modules at 
-        ;;; model start up time.
-        ;;; - performance testing suggests that the extra if in the
-        ;;; accessor is cheap relative to cost of initializing the
-        ;;; parameters for chunks which don't need them set.
-        
-        #|(dolist (param *chunk-parameters-list*)
-          (setf (aref (act-r-chunk-parameter-values chunk) (act-r-chunk-parameter-index param))
-            (chunk-parameter-default param (act-r-chunk-name chunk))))|#
-        )
+          (setf (act-r-chunk-slot-value-lists chunk) slots-table)
+          
+          (when (act-r-chunk-type-static ct)
+            (resolve-chunks-type chunk))))
       
       (mapcar #'act-r-chunk-name chunk-list)))))
         
@@ -763,8 +780,11 @@
   (when (update-chunks-on-the-fly)
     (let ((old (gethash slot-name (act-r-chunk-slot-value-lists c))))
       (when (chunk-p-fct old)
-        (setf (chunk-back-links old) 
-          (remove (cons (act-r-chunk-name c) slot-name) (chunk-back-links old) :test #'equal)))))
+        (let* ((bl (chunk-back-links old))
+               (new-links (remove slot-name (gethash (act-r-chunk-name c) bl))))
+          (if new-links
+              (setf (gethash (act-r-chunk-name c) bl) new-links)
+            (remhash (act-r-chunk-name c) bl))))))
   
   ;; If the new value should be a chunk but isn't
   ;; create one for it
@@ -781,7 +801,12 @@
   (when (and (chunk-p-fct value) (update-chunks-on-the-fly))
     (setf value (true-chunk-name-fct value))
     ;; If it's a chunk save the back link to this chunk
-    (push (cons (act-r-chunk-name c) slot-name) (chunk-back-links value)))
+    (let ((bl (chunk-back-links value)))
+      (if (hash-table-p bl)
+          (push slot-name (gethash (act-r-chunk-name c) bl))
+        (let ((ht (make-hash-table)))
+          (setf (gethash (act-r-chunk-name c) ht) (list slot-name))
+          (setf (chunk-back-links value) ht)))))
   
   ;; Set the new slot value
   
@@ -848,6 +873,7 @@
            c
            (pop modifications-list)
            (pop modifications-list)))
+        (resolve-chunks-type c)
         chunk-name))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -868,10 +894,10 @@
         ;; that's likely a problem
         
         (when (update-chunks-on-the-fly) 
-          (when (chunk-back-links chunk-name)
+          (when (and (hash-table-p (chunk-back-links chunk-name)) (not (zerop (hash-table-count (chunk-back-links chunk-name)))))
             (model-warning "Chunk ~s is being deleted but it is still used as a slot value in other chunks." chunk-name))
           
-          (when (and (chunk-back-links tn) (not (eq tn chunk-name)))
+          (when (and (not (eq tn chunk-name)) (hash-table-p (chunk-back-links tn)) (not (zerop (hash-table-count (chunk-back-links tn)))))
             (model-warning "Chunk ~s is being deleted but its true name ~s is still used as a slot value in other chunks." chunk-name tn))
           
           ;; Delete all of the back-links to this chunk
@@ -879,8 +905,11 @@
           (dolist (slot-name (act-r-chunk-type-slots (act-r-chunk-chunk-type c)))
             (let ((old (gethash slot-name (act-r-chunk-slot-value-lists c))))
               (when (chunk-p-fct old)
-                (setf (chunk-back-links old) 
-                  (remove (cons tn slot-name) (chunk-back-links old) :test #'equal))))))
+                (let* ((bl (chunk-back-links old))
+                       (new-links (remove slot-name (gethash tn bl))))
+                  (if new-links
+                      (setf (gethash tn bl) new-links)
+                    (remhash tn bl)))))))
         
         ;; Take all the related chunks out of the main hash-table
         
@@ -940,17 +969,23 @@
           (dolist (slot-name (act-r-chunk-type-slots (act-r-chunk-chunk-type c2)))
             (let ((old (gethash slot-name (act-r-chunk-slot-value-lists c2))))
               (when (chunk-p-fct old)
-                (setf (chunk-back-links old) 
-                  (remove (cons chunk-name2 slot-name) (chunk-back-links old) :test #'equal)))))
+                (let* ((bl (chunk-back-links old))
+                       (new-links (remove slot-name (gethash chunk-name2 bl))))
+                  (if new-links
+                      (setf (gethash chunk-name2 bl) new-links)
+                    (remhash chunk-name2 bl))))))
           
           ;; replace all the slot values which hold chunk-name2 with chunk-name1
           
-          (dolist (x (chunk-back-links chunk-name2))
-            (fast-set-chunk-slot-value-fct (car x) (cdr x) chunk-name1)
-            (dolist (notify (notify-on-the-fly-hooks))
-              (funcall notify (car x))))
           
-          (setf (chunk-back-links chunk-name2) nil)))
+          (when (hash-table-p (chunk-back-links chunk-name2))
+            (maphash (lambda (chunk slots)
+                       (dolist (x slots)
+                         (fast-set-chunk-slot-value-fct chunk x chunk-name1)
+                         (dolist (notify (notify-on-the-fly-hooks))
+                           (funcall notify chunk))))
+                     (chunk-back-links chunk-name2))
+            (clrhash (chunk-back-links chunk-name2)))))
       
       chunk-name1)))
 
@@ -1121,13 +1156,16 @@
                        
                        ;; Square up all names for unused chunks
                        
-                       (awhen (chunk-back-links key)
-                              (let ((tn (true-chunk-name-fct key)))
-                                (dolist (x it)
-                                  (fast-set-chunk-slot-value-fct (car x) (cdr x) tn)
-                                  (dolist (notify (notify-on-the-fly-hooks))
-                                    (funcall notify (car x)))))
-                              (setf (chunk-back-links key) nil))
+                       (let ((bl (chunk-back-links key)))
+                         (when (hash-table-p bl)
+                           (let ((tn (true-chunk-name-fct key)))
+                             (maphash (lambda (c ss)
+                                        (dolist (s ss)
+                                          (fast-set-chunk-slot-value-fct c s tn)
+                                          (dolist (notify (notify-on-the-fly-hooks))
+                                            (funcall notify c))))
+                                      bl))
+                           (clrhash bl)))
                        
                        ;; release names of unused chunks
                        
@@ -1170,6 +1208,25 @@
                (release-name-fct x)))))
        
        (print-warning "No current model in which to normalize chunk names.")))
+
+
+(defun resolve-a-static-chunks-type (chunk-name)
+  (let ((chunk (get-chunk chunk-name)))
+    (when chunk 
+      (resolve-chunks-type chunk))))
+      
+(defun resolve-chunks-type (chunk)
+  (let ((type (act-r-chunk-chunk-type chunk)))
+    (awhen (act-r-chunk-type-static type)
+           (let* ((root-type (get-chunk-type it))
+                  (non-empty-slots (mapcan (lambda (x) (when (chk-slot-value chunk x) (list x))) (act-r-chunk-type-possible-slots type)))
+                  (empty-slots (set-difference (ct-slot-names type) non-empty-slots))
+                  (result-type (static-chunk-sub-type-exists non-empty-slots root-type)))
+             (dolist (slot empty-slots)
+               (unless (find slot (act-r-chunk-type-slots root-type))
+                 (remhash slot (act-r-chunk-slot-value-lists chunk))))
+             (setf (act-r-chunk-chunk-type chunk) (get-chunk-type result-type))
+             result-type))))
 
 
 #|

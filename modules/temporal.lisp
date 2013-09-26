@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : temporal.lisp
-;;; Version     : 1.0b5
+;;; Version     : 1.0
 ;;; 
 ;;; Description : Implementation of the temporal module.
 ;;; 
@@ -79,6 +79,9 @@
 ;;; 2011.07.04  Dan
 ;;;             : * Set a 1ms minimum time for temporal-module-time-start-increment
 ;;;             :   to avoid negative calls to act-r-noise.
+;;; 2013.01.17  Dan [1.0]
+;;;             : * Changed it so the timer ticks don't show in the low detail
+;;;             :   trace.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -105,8 +108,6 @@
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
-
-(require-compiled "GOAL-STYLE-MODULE" "ACT-R6:support;goal-style-module")
 
 (defstruct temporal-module 
   time-noise 
@@ -229,10 +230,8 @@
     ;; directly on the buffer chunk
     
     (if (temporal-module-record-ticks instance)
-        (schedule-module-mod-request 'temporal (list 'ticks (temporal-module-ticks instance)) 0
-                                     :module 'temporal)
-      (schedule-mod-buffer-chunk 'temporal (list 'ticks (temporal-module-ticks instance)) 0
-                                     :module 'temporal))
+        (schedule-module-mod-request 'temporal (list 'ticks (temporal-module-ticks instance)) 0 :module 'temporal)
+      (schedule-mod-buffer-chunk 'temporal (list 'ticks (temporal-module-ticks instance)) 0 :module 'temporal :output 'medium))
     
     (setf (temporal-module-next-increment instance)
       (schedule-event-relative (temporal-module-tick instance)
@@ -242,6 +241,10 @@
                                :destination 'temporal
                                :details (concatenate 'string "Incrementing time ticks to "
                                           (princ-to-string (1+ (temporal-module-ticks instance))))))))
+
+(defun temporal-mod-request (instance buffer mods)
+  (declare (ignore instance))
+  (schedule-mod-buffer-chunk buffer mods 0 :module buffer :output 'medium))
 
 (defun temporal-params (tmp param)
   (cond ((consp param)
@@ -256,7 +259,7 @@
            (:time-noise (temporal-module-time-noise tmp))
            (:time-mult (temporal-module-time-mult tmp))
            (:record-ticks (temporal-module-record-ticks tmp))
-           (:time-master-start-increment (temporal-module-time-master-start-increment tmp) )))))         
+           (:time-master-start-increment (temporal-module-time-master-start-increment tmp))))))         
 
 
 ;;; Actually define the module now
@@ -271,12 +274,12 @@
         (define-parameter :record-ticks :valid-test #'tornil :default-value t
           :warning "t or nil" :documentation "Record each time increment as a buffer event")
         )
-  :version "1.0b5"
+  :version "1.0"
   :documentation "The temporal module is used to estimate short time intervals"
   :creation #'create-temporal-module
   :query #'temporal-query
   :request #'temporal-request
-  :buffer-mod #'goal-style-mod-request
+  :buffer-mod #'temporal-mod-request
   :params #'temporal-params
   :reset (list #'temporal-reset-1 #'temporal-reset-2))
 

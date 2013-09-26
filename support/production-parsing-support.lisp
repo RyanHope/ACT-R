@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : production-parsing-support.lisp
-;;; Version     : 1.1
+;;; Version     : 1.3
 ;;; 
 ;;; Description : Functions and code that's used by both p and p* parsing.
 ;;; 
@@ -111,6 +111,36 @@
 ;;;             :   original *error-stream* since otherwise they are lost.
 ;;;             :   So, create-production has to do that when it is successful
 ;;;             :   as well as when it fails.
+;;; 2012.12.06 Dan
+;;;             : * Don't allow an unnecessary empty buffer modification now.
+;;; 2013.01.28 Dan
+;;;             : * Replaced calls to the internal chunk-type functions with
+;;;             :   the appropriate command.
+;;; 2013.03.13 Dan [1.2]
+;;;             : * Changed valid-buffer-request-slot to allow slots of a child
+;;;             :   type to be specified in a parent type for requests.  This could
+;;;             :   lead to run time errors/warnings for productions that previously
+;;;             :   would have been disallowed at definition time.
+;;; 2013.03.19 Dan
+;;;             : * Allow the modifications to also specify child slots as long
+;;;             :   as they are in the conditions as well.  That guarantees that
+;;;             :   it is safe to modify because otherwise it would either be a
+;;;             :   run time problem or constant slots would need to be allowed to 
+;;;             :   extend chunks.
+;;; 2013.04.10 Dan
+;;;             : * Instead of calling extend-buffer-chunk use the newly built
+;;;             :   in capability of schedule-mod-buffer-chunk.
+;;; 2013.05.16 Dan [1.3]
+;;;             : * Added the ability to pass request parameters to direct requests
+;;;             :   by including them in a list with the chunk:
+;;;             :   (p test ==> +retrieval> (chunk :recently-retrieved nil)).
+;;; 2013.05.23 Dan
+;;;             : * Valid-chunk-mod-spec now allows a static type to modify any
+;;;             :   of the possible slots in a static type since mod-buffer-chunk
+;;;             :   is able to resolve the type as needed and otherwise it can't
+;;;             :   do the "same" thing as the old mechanism during compilation 
+;;;             :   since the type specified in the production still won't "have"
+;;;             :   the slot.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -152,7 +182,7 @@
 
 (declaim (ftype (function (t) t) define-variable-chunk-spec-fct))
 (declaim (ftype (function (t t) t) valid-variable-chunk-mod-spec))
-(declaim (ftype (function (t t) t) extend-buffer-chunk))
+
 
 
 (defun safe-chunk-slot-equal (c1 c2)
@@ -815,14 +845,13 @@
                           (list #'(lambda () 
                                     (let ((expansion (replace-variables (second a) (production-bindings production)))
                                           (buffer (cdar a)))
-                                      (when dynamicp 
-                                        (extend-buffer-chunk buffer expansion))
                                       (schedule-mod-buffer-chunk buffer
                                                                  expansion
                                                                  0
                                                                  :module 'procedural
                                                                  :priority 100
-                                                                 :output (procedural-rhst prod))))
+                                                                 :output (procedural-rhst prod)
+                                                                 :extend dynamicp)))
                                 a)
                           (production-actions production)))))
                  
@@ -864,20 +893,36 @@
                          ;; a direct request
                          
                          (push-last 
-                          (list #'(lambda () 
-                                    
-                                    (schedule-event-relative 0 #'(lambda () (schedule-module-request (cdar a)
-                                                                                                     (chunk-name-to-chunk-spec 
-                                                                                                      (car (replace-variables (second a)
-                                                                                                                              (production-bindings production))))
-                                                                                                     0
-                                                                                                     :module 'procedural
-                                                                                                     :priority 50
-                                                                                                     :output (procedural-rhst prod)))
-                                                             :module 'procedural
-                                                             :priority 99
-                                                             :output nil))
-                                a)
+                          (if (atom (car (second a)))
+                              (list #'(lambda () 
+                                        (schedule-event-relative 0 #'(lambda () (schedule-module-request (cdar a)
+                                                                                                         (chunk-name-to-chunk-spec 
+                                                                                                          (car (replace-variables (second a)
+                                                                                                                                  (production-bindings production))))
+                                                                                                         0
+                                                                                                         :module 'procedural
+                                                                                                         :priority 50
+                                                                                                         :output (procedural-rhst prod)))
+                                                                 :module 'procedural
+                                                                 :priority 99
+                                                                 :output nil))
+                                    a)
+                            (list #'(lambda () 
+                                      (schedule-event-relative 0 #'(lambda () (schedule-module-request (cdar a)
+                                                                                                       (let ((no-vars (replace-variables (car (second a))
+                                                                                                                                         (production-bindings production))))
+                                                                                                         (define-chunk-spec-fct 
+                                                                                                             (append (chunk-spec-to-chunk-def 
+                                                                                                                      (chunk-name-to-chunk-spec (car no-vars)))
+                                                                                                                     (cdr no-vars))))
+                                                                                                       0
+                                                                                                       :module 'procedural
+                                                                                                       :priority 50
+                                                                                                       :output (procedural-rhst prod)))
+                                                               :module 'procedural
+                                                               :priority 99
+                                                               :output nil))
+                                  a))
                           (production-actions production)))
                         
                         (t
@@ -1100,14 +1145,15 @@
                           (create-undefined-chunk val)))))
                    ((eql #\+ (caar x))
                     (when (= (length (second x)) 1) ;; don't create chunks in full requests
-                      (cond ((or (chunk-spec-variable-p (car (second x)))
-                                 (chunk-p-fct (car (second x))))
-                             ;;; nothing because that's safe
-                             )
-                            ((symbolp (car (second x)))
-                             (create-undefined-chunk (car (second x))))
-                            (t
-                             (bad-production-exit (format nil "~s is not a variable or chunk name in a direct request action." (car (second x))))))))))
+                      (let ((check (if (listp (car (second x))) (caar (second x)) (car (second x)))))
+                        (cond ((or (chunk-spec-variable-p check)
+                                   (chunk-p-fct check))
+                               ;;; nothing because that's safe
+                               )
+                              ((symbolp check)
+                               (create-undefined-chunk check))
+                              (t
+                               (bad-production-exit (format nil "~s is not a variable or chunk name in a direct request action." check)))))))))
            
            ;; Replace the special case for vision and
            ;; use the warning mechanism that's available now
@@ -1297,129 +1343,141 @@
   (aif (gethash (cons definition conditions) (procedural-action-parse-table procedural))
        it
        (let ((segments (segment-production definition)))
-    (if (eq segments :error)
-        (progn
-          (print-warning "First item on RHS is not a valid command")
-          :error)
-      (do* ((segs segments (cdr segs))
-            (seg (car segs) (car segs))
-            (cmd (parse-command (car seg) :operators '(#\- #\+  #\=)) 
-                 (parse-command (car seg) :operators '(#\- #\+  #\=)))
-            (actions nil))
-           
-           ((null seg) (setf (gethash (cons definition conditions) (procedural-action-parse-table procedural)) actions))
-        (when (null cmd)
-          (print-warning "Invalid command on RHS: ~S" (car seg))
-          (return-from parse-actions :error))
-        
-        (case (car cmd)
-          (#\-
-           (if (= (length seg) 1)
-               (push-last (list cmd) actions)
+         (if (eq segments :error)
              (progn
-               (print-warning "Invalid - buffer command: ~s" seg)
-               (return-from parse-actions :error))))
+               (print-warning "First item on RHS is not a valid command")
+               :error)
+           (do* ((segs segments (cdr segs))
+                 (seg (car segs) (car segs))
+                 (cmd (parse-command (car seg) :operators '(#\- #\+  #\=)) 
+                      (parse-command (car seg) :operators '(#\- #\+  #\=)))
+                 (actions nil))
+                
+                ((null seg) (setf (gethash (cons definition conditions) (procedural-action-parse-table procedural)) actions))
+             (when (null cmd)
+               (print-warning "Invalid command on RHS: ~S" (car seg))
+               (return-from parse-actions :error))
+             
+             (case (car cmd)
+               (#\-
+                (if (= (length seg) 1)
+                    (push-last (list cmd) actions)
+                  (progn
+                    (print-warning "Invalid - buffer command: ~s" seg)
+                    (return-from parse-actions :error))))
           
-          (#\=
-           (cond ((= (length seg) 1)
-                  (push-last (list cmd) actions))
-                 ((= (length seg) 2)
-                  (push-last (list cmd (cdr seg)) actions))
-                 (t
-                  (let* ((lhs-binding (find (cons #\= (cdr cmd)) conditions
-                                           :test #'equal :key #'car))
-                         (chunk-type (if lhs-binding
-                                         (chunk-spec-chunk-type (third lhs-binding))
-                                       nil)))
-                    (if chunk-type
-                        (if (or (and (not dynamicp) (valid-chunk-mod-spec chunk-type (cdr seg)))
-                                (and dynamicp (valid-variable-chunk-mod-spec chunk-type (cdr seg))))
-                            (push-last (list cmd (cdr seg)) actions)
-                          (progn
-                            (print-warning "Invalid buffer modification ~s." seg)
-                            (return-from parse-actions :error)))
-                      (progn
-                        (print-warning "Cannot modify buffer ~s if not matched on LHS." (cdr cmd))
-                        (return-from parse-actions :error)))))))
-                    
-           (#\+
-           (cond ((= (length seg) 1)
-                  (print-warning "Buffer request ~s requires some parameters." (car seg))
-                  (return-from parse-actions :error))
-                 ((= (length seg) 2)
-                  (push-last (list cmd (cdr seg)) actions))
-                 (t
-                  (if (eq (second seg) 'isa)
-                      ;; This is a full request
-                      (progn
-                        (aif (define-variable-chunk-spec-fct (cdr seg))
+               (#\=
+                (cond ((= (length seg) 1)
+                       (push-last (list cmd) actions)
+                       (unless (find (cons #\= (cdr cmd)) conditions :test #'equal :key #'car)
+                         (print-warning "Empty buffer modification action for untested buffer ~s." seg)
+                         (return-from parse-actions :error)))
+                      ((= (length seg) 2)
+                       (push-last (list cmd (cdr seg)) actions))
+                      (t
+                       (let* ((lhs-bindings (remove-if-not (lambda (x) (equal x (cons #\= (cdr cmd)))) conditions :key 'car))
+                              (chunk-types-and-slots (if lhs-bindings
+                                                         (mapcar (lambda (x) (cons (chunk-spec-chunk-type (third x)) (mapcar 'second (fifth x)))) lhs-bindings)
+                                                       nil)))
+                         (if chunk-types-and-slots
+                             (if (or (and (not dynamicp) (every (lambda (x) (valid-chunk-mod-spec x (cdr seg))) chunk-types-and-slots))
+                                     (and dynamicp (every (lambda (x) (valid-variable-chunk-mod-spec x (cdr seg))) chunk-types-and-slots)))
+                                 (push-last (list cmd (cdr seg)) actions)
+                               (progn
+                                 (print-warning "Invalid buffer modification ~s." seg)
+                                 (return-from parse-actions :error)))
+                           (progn
+                             (print-warning "Cannot modify buffer ~s if not matched on LHS." (cdr cmd))
+                             (return-from parse-actions :error)))))))
+               
+               (#\+
+                (cond ((= (length seg) 1)
+                       (print-warning "Buffer request ~s requires some parameters." (car seg))
+                       (return-from parse-actions :error))
+                      ((= (length seg) 2)
+                       (if (atom (second seg))
+                           (push-last (list cmd (cdr seg)) actions)
+                         (if (and (listp (second seg)) (oddp (length (second seg))))
+                             (let ((params (do ((l (cdr (second seg)) (cddr l))
+                                                (r nil))
+                                               ((null l) r)
+                                             (push (car l) r))))
+                               (if (every (lambda (x) (valid-buffer-request-slot (cdr cmd) nil x)) params)
+                                   (push-last (list cmd (cdr seg)) actions)
+                                 (progn
+                                   (print-warning "Invalid direct request: ~s" seg)
+                                   (return-from parse-actions :error))))
+                           (progn
+                             (print-warning "Invalid direct request: ~s" seg)
+                             (return-from parse-actions :error)))))
+                      (t
+                       (if (eq (second seg) 'isa)
+                           ;; This is a full request
+                           (aif (define-variable-chunk-spec-fct (cdr seg))
+                                (progn
+                                  (unless (every (lambda (x)
+                                                   ; check for the variables
+                                                   (or (and dynamicp (chunk-spec-variable-p x))
+                                                       (valid-buffer-request-slot 
+                                                        (cdr cmd) 
+                                                        (chunk-spec-chunk-type it) x)))
+                                                 (chunk-spec-slots it))
+                                    
+                                    (print-warning  "Invalid slot value in request: ~s" seg)
+                                    (return-from parse-actions :error))
+                                  
+                                  (push-last (list cmd (cdr seg)) actions))
+                                (progn
+                                  (print-warning "Invalid syntax in action ~s." seg)
+                                  (return-from parse-actions :error)))
+                         ;; otherwise it's assumed to be a modification request
+                         (let* ((lhs-bindings (remove-if-not (lambda (x) (equal x (cons #\= (cdr cmd)))) conditions :key 'car))
+                                (chunk-types-and-slots (if lhs-bindings
+                                                           (mapcar (lambda (x) (cons (chunk-spec-chunk-type (third x)) (mapcar 'second (fifth x)))) lhs-bindings)
+                                                         nil)))
+                           (if chunk-types-and-slots
+                               (if (or (and (not dynamicp) (every (lambda (x) (valid-chunk-mod-spec x (cdr seg))) chunk-types-and-slots))
+                                       (and dynamicp (every (lambda (x) (valid-variable-chunk-mod-spec x (cdr seg))) chunk-types-and-slots)))
+                                   (push-last (list cmd (cdr seg)) actions)
+                                 (progn
+                                   (print-warning "Invalid buffer modification ~s." seg)
+                                   (return-from parse-actions :error)))
                              (progn
-                               (unless (every (lambda (x)
-                                                ; check for the variables
-                                                (or (and dynamicp (chunk-spec-variable-p x))
-                                                    (valid-buffer-request-slot 
-                                                     (cdr cmd) 
-                                                     (chunk-spec-chunk-type it) x)))
-                                                (chunk-spec-slots it))
-                                 
-                                 (print-warning  "Invalid slot value in request: ~s" seg)
-                                 (return-from parse-actions :error))
-                  
-                               (push-last (list cmd (cdr seg)) actions))
-                             (progn
-                               (print-warning "Invalid syntax in action ~s." seg)
-                               (return-from parse-actions :error))))
-                    ;; otherwise it's assumed to be a modification request
-                    (progn
-                      (let* ((lhs-binding (find (cons #\= (cdr cmd)) conditions
-                                                :test #'equal :key #'car))
-                             (chunk-type (if lhs-binding
-                                             (chunk-spec-chunk-type (third lhs-binding))
-                                           nil)))
-                        (if chunk-type
-                            (if (or (and (not dynamicp) (valid-chunk-mod-spec chunk-type (cdr seg)))
-                                    (and dynamicp (valid-variable-chunk-mod-spec chunk-type (cdr seg))))
-                                (push-last (list cmd (cdr seg)) actions)
-                              (progn
-                                (print-warning "Invalid buffer modification ~s." seg)
-                                (return-from parse-actions :error)))
-                          (progn
-                            (print-warning "Cannot modify buffer ~s if not matched on LHS." 
-                             (cdr cmd))
-                            (return-from parse-actions :error)))))))))
-          
-          (t
-           (case (cdr cmd)
-             ((bind safe-bind)
-              (if (and (= (length seg) 3)
-                       (chunk-spec-variable-p (second seg)))
-                  (push-last (list cmd (cdr seg)) actions)
-                (progn
-                  (print-warning "Invalid bind command: ~s" seg)
-                  (return-from parse-actions :error))))
-             ((mv-bind)
-              (if (and (= (length seg) 3)
-                       (listp (second seg))
-                       (every 'chunk-spec-variable-p (second seg)))
-                  (push-last (list cmd (cdr seg)) actions)
-                (progn
-                  (print-warning "Invalid mv-bind command: ~s" seg)
-                  (return-from parse-actions :error))))
-             ((eval safe-eval output)
-              (if (= (length seg) 2)
-                  (push-last (list cmd (cdr seg)) actions)
-                (progn
-                  (print-warning "Invalid ~s command: ~s" (cdr cmd) seg)
-                  (return-from parse-actions :error))))
-             (stop
-              (if (= (length seg) 1)
-                  (push-last (list cmd) actions)
-                (progn
-                  (print-warning "Invalid stop command: ~s" seg)
-                  (return-from parse-actions :error))))
-             (t
-              (print-warning "Invalid command: ~s" seg)
-              (return-from parse-actions :error))))))))))
+                               (print-warning "Cannot modify buffer ~s if not matched on LHS." (cdr cmd))
+                               (return-from parse-actions :error))))))))
+               
+               (t
+                (case (cdr cmd)
+                  ((bind safe-bind)
+                   (if (and (= (length seg) 3)
+                            (chunk-spec-variable-p (second seg)))
+                       (push-last (list cmd (cdr seg)) actions)
+                     (progn
+                       (print-warning "Invalid bind command: ~s" seg)
+                       (return-from parse-actions :error))))
+                  ((mv-bind)
+                   (if (and (= (length seg) 3)
+                            (listp (second seg))
+                            (every 'chunk-spec-variable-p (second seg)))
+                       (push-last (list cmd (cdr seg)) actions)
+                     (progn
+                       (print-warning "Invalid mv-bind command: ~s" seg)
+                       (return-from parse-actions :error))))
+                  ((eval safe-eval output)
+                   (if (= (length seg) 2)
+                       (push-last (list cmd (cdr seg)) actions)
+                     (progn
+                       (print-warning "Invalid ~s command: ~s" (cdr cmd) seg)
+                       (return-from parse-actions :error))))
+                  (stop
+                   (if (= (length seg) 1)
+                       (push-last (list cmd) actions)
+                     (progn
+                       (print-warning "Invalid stop command: ~s" seg)
+                       (return-from parse-actions :error))))
+                  (t
+                   (print-warning "Invalid command: ~s" seg)
+                   (return-from parse-actions :error))))))))))
 
 
 (defun sort-for-binding (condition-list)
@@ -1591,14 +1649,17 @@
        ((null s) tests)))
 
 
-(defun valid-chunk-mod-spec (chunk-type modifications-list)
+(defun valid-chunk-mod-spec (chunk-type-and-slots modifications-list)
   (if (oddp (length modifications-list))
       (print-warning "Odd length modifications list.")
     (do ((slots nil (cons (car s) slots))
          (s modifications-list (cddr s)))
         ((null s) 
          (and (every #'(lambda (slot)
-                         (valid-slot-name slot (get-chunk-type chunk-type)))
+                         (or (and (not (chunk-type-static-p-fct  (car chunk-type-and-slots))) (valid-chunk-type-slot (car chunk-type-and-slots) slot))
+                             (and (chunk-type-static-p-fct (car chunk-type-and-slots)) (possible-chunk-type-slot (car chunk-type-and-slots) slot))
+                             (find slot (cdr chunk-type-and-slots)))
+                         )
                      slots)
               (= (length slots) (length (remove-duplicates slots))))))))
     
@@ -1613,7 +1674,7 @@
 (defun valid-buffer-request-slot (buffer-name chunk-type slot)
   (if (keywordp slot)
       (valid-buffer-request-param buffer-name slot)
-    (valid-slot-name slot (get-chunk-type chunk-type))))
+    (possible-chunk-type-slot chunk-type slot)))
 
 (provide "PRODUCTION-PARSING")
 

@@ -55,6 +55,9 @@
 ;;;            :   optional parameter because the modification needs to take place
 ;;;            :   prior to the buffer being cleared (whether explicitly or implicitly).
 ;;;            :   The default priority is now 20 (since the clearing is 10).
+;;; 2013.04.10 Dan
+;;;            : * Changed the goal-style-mod-request action so that it can also
+;;;            :   extend the chunk-type if there are new slots in a dynamic request.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -237,7 +240,7 @@
 
 (defun goal-style-mod-request (instance buffer mods &optional (delay 0) (priority 20))
   (declare (ignore instance))
-  (schedule-mod-buffer-chunk buffer mods delay :module buffer :priority priority))
+  (schedule-mod-buffer-chunk buffer mods delay :module buffer :priority priority :extend t))
 
 (provide "GOAL-STYLE-MODULE")
 

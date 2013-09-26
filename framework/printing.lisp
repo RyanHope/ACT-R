@@ -95,6 +95,10 @@
 ;;; 2010.05.03 Dan
 ;;;             : * Changed filter-test so that it doesn't display ":output 'high"
 ;;;             :   events in the medium trace detail level.
+;;; 2012.09.21 Dan
+;;;             : * Set suppress-cmds back to nil upon a reset because apparently
+;;;             :   even with an unwind-protect it's possible for it to get stuck
+;;;             :   somehow.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -191,7 +195,8 @@
   (setf (act-r-output-stream (printing-module-c module)) t)
   
   (setf (printing-module-filter module) nil)
-  (setf (printing-module-detail module) 'high))
+  (setf (printing-module-detail module) 'high)
+  (setf (printing-module-suppress-cmds module) nil))
 
 
 (define-module-fct 'printing-module 

@@ -35,9 +35,15 @@ source files.  The applications are found in the environment directory.
 
  - On Windows you should run the "Start Environment.exe" application.
  - On Macs with OS X it's the "Start Environment OSX" application.  
+   Note: If you are using Mac OS 10.8 and get a warning that the file is "damaged 
+   and can't be opened" the issue is probably due to permissions.  Open your
+   System Preferences and under "Security & Privacy" set the "Allow applications 
+   downloaded from:" to Anywhere before running it.  Once you successfully
+   run it you can change your preferences back to a safer setting.
  - For Unix/Linux you need to have Tcl/Tk installed and then you must run 
    the starter.tcl script located in the GUI subdirectory of the environment
-   directory.
+   directory.  One way to do that is by running the wish interpreter directly
+   and passing it the file to execute:   wish starter.tcl
 
 5) Wait for the "Control Panel" window to appear.  It should be on the far 
 right side of your display and will say "Waiting for ACT-R" at the top.
@@ -56,23 +62,25 @@ settings.
 ---------------------------------------------------------------------------------
 
 Alternative instructions for starting the ACT-R Environment.  If you are using 
-LispWorks or Allegro Common Lisp under either Mac OS X or Windows then you may 
-be able to replace steps 4-6 above with a single step.
+LispWorks or Allegro Common Lisp under either Mac OS X or Windows or Clozure
+Common Lisp under Windows, Mac OS X, or Linux, then you may be able to replace 
+steps 4-6 above with a single step.
   
 4) Call the function run-environment.  That should automatically run the 
 appropriate Environment application and then initiate the connection between 
-ACT-R and the Environment.  
+ACT-R and the Environment, but run-environment may not work on all machines 
+for a variety of reasons.  
 
-Run-environment may not work right in all situations.  If the Environment 
-application does not start, then you should use the standard instructions 
-described above.  If the application starts, but the connection does not complete
-(no version information window or buttons show up in the control panel) or you 
-get an error, then you may need to increase the delay before ACT-R attempts to 
-connect to the Environment.  The delay can be provided as an optional parameter 
-to run-environment.  The default delay is 12 seconds which should be safe for 
-most machines, but a longer delay may be necessary in some cases.  Alternatively,
-on some machines a shorter delay will work just fine and may be used if you want
-to speed up the start time.
+If the Environment application does not start, then you should use the standard 
+instructions described above.  If the Environment application is slow to start 
+and there is an "Unable to connect" message displayed in the Lisp you can ignore 
+that and wait for it to try again.  If that happens regularly and you want to 
+avoid the "Unable to connect" warnings, then you can increase the delay before 
+ACT-R attempts to connect to the Environment.  The delay can be provided as an 
+optional parameter to run-environment specfying how many seconds to wait.  The 
+default delay is 5 seconds but a longer delay may be necessary to avoid the 
+warning, and on some machines a shorter delay will work just fine if you are in 
+a hurry.
 
 Just like with the full instructions above, when you are done with ACT-R you should
 call the stop-environment command before closing the Lisp application.
