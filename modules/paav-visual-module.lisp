@@ -332,6 +332,9 @@
 	;;;; [SC] value is (list region-id region-category)
 	(last-attended-region-info :accessor last-attended-region-info :initform nil)
 
+	;;;; [RMH] should gaze location be shown in GUI?
+	(show-gaze-p :accessor show-gaze-p :initarg :show-gaze-p :initform nil)
+
 	;(enc-factor :accessor enc-factor :initarg :enc-factor :initform 0.010)
 	;(enc-exponent :accessor enc-exponent :initarg :enc-exponent :initform 1.0)
 	;(eye-trace :accessor eye-trace :initform nil)
@@ -1883,6 +1886,17 @@
 	)
 )
 
+;;;; [RMH] purge abstract locations
+(defmethod purge-abstract-locations ((paav-mod paav-vis-mod))
+  (let ((vis-memory (vis-memory paav-mod))
+        (vm-loc-reg (vm-loc-reg paav-mod)))
+    (maphash 
+     #'(lambda (abstr-loc-name abstr-loc-values)
+         (declare (ignore abstr-loc-values))
+         (remhash abstr-loc-name vis-memory)
+         (remhash abstr-loc-name vm-loc-reg))
+     vis-memory)))
+
 ;;;;;; ;;;;;; END: block of methods to remove invisible abstract location from hashtable
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -3037,14 +3051,10 @@
 			(print-warning "Cannot set gaze-location at given position: ~a" newloc)
 		)
 	)
-  
-  ;;;; [SC] EMMA borrowed codes
-  ;;;; [SC] updates the visualization device with new location so it can be rendered correctly
-  ;;;; [SC] this code is commented because probably I will not need it
-  ;;;; [TODO] remove this code if not necessary; uncomment if EMMA is implemented
-  #|(device-update-gaze-loc (device (current-device-interface)) newloc)
-  (when (trace-eye-p eye-mod)
-    (push (cons (mp-time) newloc) (eye-trace eye-mod)))|#
+
+	;;;; [RMH] tell the current device where the current gaze is
+	(when (show-gaze-p paav-mod)
+		(device-update-eye-loc (device (current-device-interface)) newloc))
 )
 
 ;;;; [SC] EMMA borrowed concept: 
@@ -3302,6 +3312,9 @@
 			(model-warning "Attention shift requested at ~S while one was already in progress." (mp-time))
 			
 			(progn
+
+				(when (show-focus-p (current-device-interface))
+					(device-update-attended-loc (device (current-device-interface)) new-gaze-loc))
 
 				(when (tracked-obj-last-feat paav-mod) (remove-tracking paav-mod)) ; [SC] EMMA and default vision
 			
@@ -3972,6 +3985,12 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;; START: top level methods and functions
 
+;;;; [RMH] update the available visicon chunks when the display is updated
+(defmethod process-display :after ((devin device-interface) 
+                                   (vis-mod vision-module) &optional (clear nil))
+  (delete-decayed-features-from-vis-memory vis-mod)
+  (get-visible-visicon-chunks vis-mod))
+
 ;;;; [SC] sets the current gaze location at center of the device (window)
 ;;;; [TESTED]
 (defun set-gaze-loc-center ()
@@ -4271,6 +4290,8 @@
 			(case (car param)		;[SC] case is similar to C switch statement; car returns the content of the first pointer in cons cell
 				(:persistence-time ;[SC] switch case check: checks if the content of the first pointer is :persistence-time
 					(setf (persistence-time vis-mod) (cdr param))) ;[SC] body of the case statement; sets the def-persistence-time parameter of visual class with a content of the second pointer of param
+				(:show-gaze
+					(setf (show-gaze-p vis-mod) (cdr param)))
 
 				(:abstract-finst-span
 					(setf (finst-span-abstr vis-mod) (cdr param)))
@@ -4339,6 +4360,9 @@
 			(case param
 				(:persistence-time
 					(persistence-time vis-mod))
+
+				(:show-gaze
+					(show-gaze-p vis-mod))
 
 				(:abstract-finst-span
 					(finst-span-abstr vis-mod))
@@ -4459,6 +4483,12 @@
 	)
 
 	(list
+		;;;; [RMH] show gaze
+		(define-parameter :show-gaze
+			:valid-test #'tornil 
+			:default-value nil
+			:warning "T or NIL"
+			:documentation "Show the current gaze point on the GUI?")
 		;;;; [SC] this set of parameters are from default module and also were included in emma
 		(define-parameter :optimize-visual	;[SC] emma & default visual 
 			:valid-test #'tornil 
