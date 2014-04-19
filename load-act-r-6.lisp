@@ -177,6 +177,13 @@
 ;;; 2012.08.24 Dan
 ;;;             : * Added the switches to load the new ccl-cocoa device and
 ;;;             :   removed the mcl device.
+;;; 2013.08.09 Dan
+;;;             : * Fixed a problem with the shadowing of functions in SBCL and
+;;;             :   CLisp when the current package wasn't :cg-user.
+;;; 2013.10.07 Dan
+;;;             : * Added another feature switch to be tested :actr-fast.  When
+;;;             :   it's on the features list set the optimize settings for faster
+;;;             :   compiled code.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -252,14 +259,18 @@
 
 ;; Clisp has an implementation-specific function execute that conflicts with
 ;; the generic function execute in ACT-R, so shadow it
-#+:clisp (defpackage "COMMON-LISP-USER" (:shadow "EXECUTE"))
+#+:clisp (eval `(defpackage ,(package-name *package*) (:shadow "EXECUTE")))
 
 ;; SBCL has a function called reset we need to shadow and there's an issue
 ;; with their defconstat because it throws an error if you compile and then
 ;; load a file (it's fine with the compiled file later, but that first time
 ;; is a problem).
 
-#+:sbcl (defpackage "COMMON-LISP-USER" (:shadow "RESET" "DEFCONSTANT"))
+#+(and :sbcl (not :win32))
+  (eval `(defpackage ,(package-name *package*) (:shadow "RESET" "DEFCONSTANT")))
+#+(and :sbcl :win32) 
+  (eval `(defpackage ,(package-name *package*) (:shadow "RESET" "DEFCONSTANT" "DIRECTORY")))
+
 #+:sbcl (defmacro defconstant (name value &optional documentation)
           `(sb-c::%defconstant ',name ,value ',documentation (sb-c:source-location)))
 
@@ -267,8 +278,6 @@
 ;;; directory command so this hacks around that for now sufficiently to load
 ;;; the ACT-R files...
 
-#+(and :sbcl :win32) 
-  (defpackage "COMMON-LISP-USER" (:shadow "DIRECTORY"))
 #+(and :sbcl :win32) 
 (eval-when (:load-toplevel :execute)
   (defun directory (pathname &key)
@@ -353,6 +362,15 @@
         #+(and :lispworks :unix (not :macosx) :lispworks5) (make-pathname :type "ufasl")
         #+(and :lispworks :macosx (not :x86)) (make-pathname :type "nfasl")
         #+(and :lispworks :macosx :x86) (make-pathname :type "xfasl")))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; When :actr-fast is on the features list then set the switches for fastest
+;;; compiled code.
+
+#+:actr-fast (eval-when (:compile-toplevel :load-toplevel :execute)
+               (proclaim '(optimize (speed 3) (safety 1) (space 0) (debug 0))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

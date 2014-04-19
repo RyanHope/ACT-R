@@ -13,3 +13,5 @@ point for those new to ACT-R.  More detailed information about the software
 can be found in the reference manual and the Environment manual which are 
 located in the docs directory.
 
+For more information or to download the most recent version of the ACT-R 
+software please visit the ACT-R website at: <http://act-r.psy.cmu.edu>.
