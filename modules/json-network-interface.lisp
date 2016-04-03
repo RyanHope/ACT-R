@@ -44,7 +44,7 @@
     ((and (stringp slot-value) (equalp (char slot-value 0) #\:))
      (read-from-string (subseq slot-value 1)))
     ((numberp slot-value)
-     (cond 
+     (cond
        ((and visual (member slot-symbol '(screen-x screen-y width height) :test 'equal))
         (round slot-value))
        ((ratiop slot-value)
@@ -53,7 +53,7 @@
     (t slot-value)))
 
 (defun parse->json-chunk (jsown-obj &key (visual nil))
-  (let* ((name (if (find "name" (jsown:keywords jsown-obj) :test #'equal) 
+  (let* ((name (if (find "name" (jsown:keywords jsown-obj) :test #'equal)
                    (read-from-string (jsown:val jsown-obj "name"))
                    nil))
          (typ (read-from-string (jsown:val jsown-obj "isa")))
@@ -68,13 +68,13 @@
     type-expression))
 
 (defun json->chunkpairs (loc-chunks obj-chunks)
-  (pairlis (define-chunks-fct (mapcar (lambda (chunk) (parse->json-chunk chunk :visual t)) loc-chunks)) 
+  (pairlis (define-chunks-fct (mapcar (lambda (chunk) (parse->json-chunk chunk :visual t)) loc-chunks))
            (define-chunks-fct (mapcar (lambda (chunk) (parse->json-chunk chunk :visual t)) obj-chunks))))
 
 (defun json->chunkpair (loc-chunk obj-chunk)
   (cons (first (define-chunks-fct (list (parse->json-chunk loc-chunk :visual t))))
         (first (define-chunks-fct (list (parse->json-chunk obj-chunk :visual t))))))
-    
+
 (defun update-display-chunks (chunks)
   (loop for chunk in chunks do
         (let ((name (read-from-string (jsown:val chunk "name")))
@@ -85,7 +85,7 @@
                   (set-chunk-slot-value-fct name slot-symbol slot-value))))))
 
 (defmethod handle-event ((instance json-interface-module) model method params)
-  (cond 
+  (cond
     ((string= method "disconnect")
      (return-from handle-event t))
     ((string= method "trigger-event")
@@ -107,14 +107,14 @@
        (if (not (process-display-called (get-module :vision)))
            (proc-display :clear (jsown:val params "clear")))))
     ((string= method "display-new")
-     (progn                                    
+     (progn
        (setf (display instance) (json->chunkpairs (jsown:val params "loc-chunks")
                                                   (jsown:val params "obj-chunks")))
        (if (not (process-display-called (get-module :vision)))
            (proc-display :clear t))))
     ((string= method "display-add")
      (progn
-       (setf (display instance) (cons (json->chunkpair (jsown:val params "loc-chunk") 
+       (setf (display instance) (cons (json->chunkpair (jsown:val params "loc-chunk")
                                                        (jsown:val params "obj-chunk"))
                                       (display instance)))
        (if (not (process-display-called (get-module :vision)))
@@ -144,7 +144,7 @@
     ((string= method "new-other-sound")
      (new-other-sound (jsown:val params "content") (jsown:val params "onset") (jsown:val params "delay") (jsown:val params "recode"))))
   (return-from handle-event nil))
-  
+
 (defmethod read-stream ((instance json-interface-module))
   (handler-case
    (loop
@@ -181,7 +181,7 @@
 
 (defmethod send-command ((instance json-interface-module) method params &key sync)
   (let ((mid (format nil "~a" (current-model))))
-    (bordeaux-threads:with-recursive-lock-held 
+    (bordeaux-threads:with-recursive-lock-held
         ((sync-lock instance))
       (progn
         (setf (wait instance) t)
@@ -273,7 +273,7 @@
         (setf (read-from-stream instance) t)
         (setf (thread instance) (bordeaux-threads:make-thread #'(lambda () (read-stream instance))))
         (install-device instance))
-    (usocket:socket-error () 
+    (usocket:socket-error ()
       (progn
         (print-warning "Socket error")
         (cleanup instance)
@@ -297,7 +297,7 @@
 
 (defun jni-register-event-hook (event hook)
   (setf (gethash event (event-hooks (get-module json-network-interface))) hook))
-  
+
 (defun params-json-netstring-module (instance param)
   (if (consp param)
       (let ((hostname (jni-hostname instance))
@@ -318,8 +318,8 @@
       (:jni-sync (jni-sync instance)))))
 
 (undefine-module jni)
-(define-module-fct 
- 'json-network-interface 
+(define-module-fct
+ 'json-network-interface
  nil
  (list (define-parameter :jni-hostname
                          :documentation "The hostname/fqdn of the remote environment")
@@ -327,7 +327,7 @@
                          :documentation "The port number of the remote environment")
        (define-parameter :jni-sync
                          :documentation "The timing mode of the model. Use nil for asynchronous mode, t for synchronous mode and any positive number for time-locked mode."))
- :version "1.0"
+ :version "1.1"
  :documentation "Module based manager for remote TCP environments using JSON"
  :params 'params-json-netstring-module
  :creation 'create-json-netstring-module
