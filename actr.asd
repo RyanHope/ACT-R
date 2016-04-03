@@ -38,7 +38,6 @@
                :serial t
                :components ((:file "central-parameters")
                             (:file "productions")
-                            (:file "production-parsing-support")
                             (:file "goal-style-module")
                             (:file "general-pm")))
     
@@ -54,12 +53,24 @@
                              (:file "speech")
                              (:file "imaginal")))
 
-               (:module "commands"
-                :serial t
-                :components #.(mapcar #'(lambda (x)
-                                          `(:file ,(file-namestring
-                                                    (make-pathname :type nil :defaults (pathname x)))))
-                                      (directory "commands/*.lisp")))
+              (:module "support-late"
+               :pathname "support"
+               :serial t
+               :components ((:file "production-parsing-support")
+                            (:file "uni-files")
+                            (:file "environment-colors")))
+
+                (:module "devices"
+                 :components ((:module "virtual"
+                               :serial t
+                               :components ((:file "device") (:file "uwi")))))
+
+                (:module "commands"
+                 :serial t
+                 :components ((:file "conflict-tree")
+                              (:file "dm-commands")
+                              (:file "procedural-cmds")
+                              (:file "p-star-cmd"))) 
 
                (:module "modules"
                 :serial t
@@ -68,19 +79,35 @@
                                                     (make-pathname :type nil :defaults (pathname x)))))
                                       (directory "modules/*.lisp")))
 
+               (:module "environment"
+                :serial t
+                :components ((:file "handler-class")
+                             (:file "server")
+                             (:file "env-module")
+                             #+(and :mcl (not :openmcl))(:file "mcl-fix")
+                             (:file "handlers")
+                             (:file "environment-cmds")
+                             (:file "stepper-control")
+                             (:file "env-device")))
+               
                (:module "tools"
                 :serial t
-                :components #.(mapcar #'(lambda (x)
-                                          `(:file ,(file-namestring
-                                                    (make-pathname :type nil :defaults (pathname x)))))
-                                      (directory "tools/*.lisp")))
-
-               (:module "other-files"
+                :components ((:file "buffer-trace")
+                             (:file "goal-compilation")
+                             (:file "imaginal-compilation")
+                             (:file "motor-compilation")
+                             (:file "perceptual-compilation")
+                             (:file "retrieval-compilation")))
+               
+               (:module "other"
+                :pathname "other-files"
                 :serial t
-                :components #.(mapcar #'(lambda (x)
-                                          `(:file ,(file-namestring
-                                                    (make-pathname :type nil :defaults (pathname x)))))
-                                      (directory "other-files/*.lisp")))
+                :components ((:file "system-param-init")
+                             (:file "bold")
+                             (:file "buffer-history")
+                             (:file "production-history")
+                             (:file "retrieval-history")
+                             (:file "env-graphic-trace")))
 
                )
   )
