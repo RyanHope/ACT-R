@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -69,6 +69,37 @@
 ;;;             :   the environment notice can be displayed, but with CCL that's
 ;;;             :   very difficult becuase the background process doesn't have
 ;;;             :   access to the terminal...
+;;; 2013.02.19 Dan
+;;;             : * Haven't been able to reconstruct why the loaders "ignore"
+;;;             :   unbound-variable errors, but since it can lead to very bad
+;;;             :   situations for users I'm taking that out.  There are two
+;;;             :   guesses so far as to where it comes from.  Christian thinks 
+;;;             :   it may go all the way back to the old environment's split 
+;;;             :   edit files because code may have been loaded out of order.
+;;;             :   It might also have been a "fix" for a problem with the early 
+;;;             :   OpenMCL versions of the standalone environment based on an 
+;;;             :   error report I found in an email from 9/12/02:
+;;;             :   
+;;;             :   ... whenever I try to load a model (I get that far without 
+;;;             :   problem), OpenMCL complains:
+;;;             :   ? (start-environment)
+;;;             :   ((#<TCP-STREAM (SOCKET/4) #x54A8926> #<PROCESS Environment-Connection(2) [Enabled] #x54A8DEE> ("127.0.0.1" . 2621)))
+;;;             :   <try to load a model>
+;;;             :   ? Error in update of Handler: HANDLER5
+;;;             :   message: #<Anonymous Function #x54C3E9E>
+;;;             :   
+;;;             :   Error:Unbound variable: \?
+;;;             :   
+;;;             :   and then hangs.
+;;; 2014.07.30 Dan
+;;;             : * Added the all-dm-slot-lists and filter-dm-chunks functions
+;;;             :   to use for the filter in the declarative viewer since 
+;;;             :   chunk-type won't work now.
+;;; 2015.05.18 Dan
+;;;             : * Filter-dm-chunks now verifies that all the items are valid
+;;;             :   slot names first because there are potential issues across
+;;;             :   reset and loading where a slot name from a previous run
+;;;             :   doesn't exist anymore.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -138,8 +169,7 @@
                    (reload))))
       
               (cond ((or internal-error
-                         (and (subtypep (type-of err) 'condition)
-                              (not (equal (type-of err) 'unbound-variable))))
+                         (subtypep (type-of err) 'condition))
                      (uni-report-error (if internal-error internal-error err) "Error during reload")
                      (list 0 (get-output-stream-string save-stream)))
                     ((eq s :none)
@@ -182,8 +212,7 @@
           (declare (ignore s))
           
           (cond ((or internal-error
-                     (and (subtypep (type-of err) 'condition)
-                          (not (equal (type-of err) 'unbound-variable))))
+                     (subtypep (type-of err) 'condition))
                  (uni-report-error (if internal-error internal-error err) "Error during load model")
                  (list 0 (get-output-stream-string save-stream)))
                 (t
@@ -208,6 +237,19 @@
     (format *standard-output* "Buffer is Empty")))
 
 
+(defun all-dm-slot-lists ()
+  (cons 'none (mapcar (lambda (x) 
+                        (format nil "~a" (slot-mask->names (car x))))
+                (dm-chunks (get-module declarative)))))
+
+(defun filter-dm-chunks (slot-list)
+  (when (every 'valid-slot-name slot-list)
+    (let ((mask (reduce 'logior slot-list :key 'slot-name->mask)))
+      (mapcan (lambda (x) 
+                (if (slots-vector-match-signature (car x) mask)
+                    (copy-list (cdr x))
+                  nil))
+        (dm-chunks (get-module declarative))))))
 #|
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public

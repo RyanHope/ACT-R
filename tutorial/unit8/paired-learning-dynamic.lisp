@@ -1,9 +1,3 @@
-;; This is the same model as the paired-learning one except that instead
-;; of separate encode productions there is one encode production defined
-;; with p* and the slot to which the encoding is placed is variablized.
-;; The corresponding read productions set the step slot of the goal to
-;; indicate which slot should be filled.
-
 (defvar *response* nil)
 (defvar *response-time* nil)
 (defvar *model-doing-task* nil)
@@ -17,11 +11,6 @@
 (defvar *paired-probability* '(0.000 .526 .667 .798 .887 .924 .958 .954))
 
 (defun paired-task (size trials &optional who)
-  
-  (if (eq who 'human)
-      (setf *model-doing-task* nil)
-    (setf *model-doing-task* t))
-  
   (if (not (eq who 'human))
       (do-experiment-model size trials)
     (do-experiment-person size trials)))
@@ -30,6 +19,7 @@
   (let ((result nil)
         (window (open-exp-window "Paired-Associate Experiment" :visible nil)))
     
+    (setf *model-doing-task* t)
     (reset) 
     
     (install-device window)
@@ -68,6 +58,7 @@
   (let ((result nil)
         (window (open-exp-window "Paired-Associate Experiment" :visible t)))
     
+    (setf *model-doing-task* nil)
     (dotimes (i trials) 
       (let ((score 0.0)
             (time 0.0)
@@ -99,19 +90,19 @@
 (defun paired-experiment (n)
   (do ((count 1 (1+ count))
        (results (paired-task 20 8)
-                (mapcar #'(lambda (lis1 lis2)
-                            (list (+ (first lis1) (first lis2))
-                                  (+ (or (second lis1) 0) (or (second lis2) 0))))
+                (mapcar (lambda (lis1 lis2)
+                          (list (+ (first lis1) (first lis2))
+                                (+ (or (second lis1) 0) (or (second lis2) 0))))
                   results (paired-task 20 8))))
       ((equal count n) 
        (output-data results n))))
 
 (defun output-data (data n)
-   (let ((probability (mapcar #'(lambda (x) (/ (first x) n)) data))
-        (latency (mapcar #'(lambda (x) (/ (or (second x) 0) n)) data)))
+  (let ((probability (mapcar (lambda (x) (/ (first x) n)) data))
+        (latency (mapcar (lambda (x) (/ (or (second x) 0) n)) data)))
     (print-results latency *paired-latencies* "Latency")
-     (print-results probability *paired-probability* "Accuracy")))
-    
+    (print-results probability *paired-probability* "Accuracy")))
+
 (defun print-results (predicted data label)
  (format t "~%~%~A:~%" label)
   (correlation predicted data)
@@ -129,227 +120,221 @@
 
 (define-model paired-learning-dynamic
     
-(sgp :esc t :v nil :pct t :ul t :epl t :rt -1.7 :lf 0.4 :ans 0.5 :egs 0.1 :bll 0.5 :trace-detail low :iu 10 :alpha 0.2 :ncnar nil)
+(sgp :esc t :v nil :pct t :ul t :epl t :rt -1.7 :lf 0.2 :ans 0.4 :egs 0.1 :bll 0.5 :trace-detail low :iu 5 :alpha 0.2)
+(sgp :do-not-harvest imaginal)
 
-(chunk-type operator pre)
-(chunk-type (action (:include operator)) action required label post)
-(chunk-type (test (:include operator)) slot success failure)
+(chunk-type operator pre action arg1 arg2 post label required slot success failure)
 (chunk-type task state step context)
-(chunk-type result)
 
 (add-dm
-  (op1 isa action pre start         action read                           label   word    post stimulus-read)
-  (op2 isa action pre stimulus-read action retrieve      required word    label   number  post recalled)
-  (op3 isa test   pre recalled      slot   number        success  respond failure wait)
-  (op4 isa action pre respond       action type          required number                  post wait)
-  (op5 isa action pre wait          action read                           label   number  post new-trial)
-  (op6 isa action pre new-trial     action complete-task                                  post start))
+ (op1 isa operator pre start         action read                           label   word    post stimulus-read)
+ (op2 isa operator pre stimulus-read action retrieve      required word    label   number  post recalled)
+ (op3 isa operator pre recalled      slot   number        success  respond failure wait)
+ (op4 isa operator pre respond       action type          required number                  post wait)
+ (op5 isa operator pre wait          action read                           label   number  post new-trial)
+ (op6 isa operator pre new-trial     action complete-task                                  post start))
 
 (set-all-base-levels 1000)
 
 (goal-focus-fct (car (define-chunks (isa task state start step ready))))
 
 (p retrieve-operator
-    =goal>           
-      isa     task
-      state   =state
-      step    ready
+   =goal>           
+     isa     task
+     state   =state
+     step    ready
   ==>
-    +retrieval>
-      isa     operator
-      pre     =state
-    =goal>
-      step    retrieving-operator
-      context nil
-   )
+   +retrieval>
+     isa     operator
+     pre     =state
+   =goal>
+     step    retrieving-operator
+     context nil)
 
 (p read-and-create
-    =goal>
-      isa       task
-      step      retrieving-operator
-    =retrieval>
-      isa       action
-      action    read
-      label     =destination
-      post      =state
-    =visual-location>
-      isa       visual-location
-    ?visual>
-      state     free
-    ?imaginal>
-      buffer    empty
+   =goal>
+     isa       task
+     step      retrieving-operator
+   =retrieval>
+     isa       operator
+     action    read
+     label     =destination
+     post      =state
+   =visual-location>
+     isa       visual-location
+   ?visual>
+     state     free
+   ?imaginal>
+     buffer    empty
+     state     free
   ==>
-    +imaginal>
-      isa       result
-    +visual>
-      isa       move-attention
-      screen-pos =visual-location
-    =goal>
+   +imaginal>
+   +visual>
+     isa        move-attention
+     screen-pos =visual-location
+   =goal>
+    context    =destination
+    step       process
+    state      =state)
+
+(p read
+   =goal>
+     isa        task
+     step       retrieving-operator
+   =retrieval>
+     isa        operator
+     action     read
+     label      =destination
+     post       =state
+   =visual-location>
+     isa        visual-location
+   ?visual>
+     state      free
+   ?imaginal>
+     buffer     full
+  ==>
+   +visual>
+     isa        move-attention
+     screen-pos =visual-location
+   =goal>
      context    =destination
      step       process
      state      =state)
 
-
-(p read
-    =goal>
-      isa       task
-      step      retrieving-operator
-    =retrieval>
-      isa       action
-      action    read
-      label     =destination
-      post      =state
-    =visual-location>
-      isa       visual-location
-    ?visual>
-      state     free
-    ?imaginal>
-      buffer    full
+(p encode
+   =goal>
+     isa         task
+     step        process
+     context     =which-slot
+   =visual>
+     isa         text
+     value       =val
+   =imaginal>
+   ?imaginal>
+     state       free
   ==>
-    +visual>
-      isa       move-attention
-      screen-pos =visual-location
-    =goal>
-      context    =destination
-      step       process
-      state      =state)
+   *imaginal>
+     =which-slot =val
+   =goal>
+     step        ready)
 
-(p* encode
-    =goal>
-      isa         task
-      step        process
-      context     =which-slot
-    =visual>
-      isa         text
-      value       =val
-    =imaginal>
-      isa         result
+(p retireve-associate
+   =goal>
+     isa      task
+     step     retrieving-operator
+   =imaginal>
+     =target  =stimulus
+   =retrieval>
+     isa      operator
+     action   retrieve
+     required =target
+     label    =other
+     post     =state
   ==>
-    =imaginal>
-      =which-slot =val
-    =goal>
-      step        ready)
+   +retrieval>
+     =target  =stimulus
+   =goal>
+     step     retrieving-result
+     context  =other
+     state    =state)
 
-(p* retireve-associate
-    =goal>
-      isa      task
-      step     retrieving-operator
-        
-    =imaginal>
-      isa      result
-      =target  =stimulus
-    =retrieval>
-      isa      action
-      action   retrieve
-      required =target
-      label    =other
-      post     =state
+(p retrieval-unsuccessful
+   =goal>
+     isa      task
+     step     retrieving-result
+     context  =dest
+   =imaginal>
+   ?retrieval>
+     buffer   failure
+   ?imaginal>
+     state    free
   ==>
-    =imaginal>
-    +retrieval>
-      isa      result
-      =target  =stimulus
-    =goal>
-      step     retrieving-result
-      context  =other
-      state    =state)
+   *imaginal>
+     =dest    nil
+   =goal>
+     step     ready)
 
-(p* retrieval-unsuccessful
-    =goal>
-      isa      task
-      step     retrieving-result
-      context  =dest
-    =imaginal>
-      isa      result
-    ?retrieval>
-      state    error
-   ==>
-    =imaginal>
-      =dest    nil
-    =goal>
-      step     ready)
-
-(p* retrieval-successful
-    =goal>
-      isa       task
-      step      retrieving-result
-      context   =dest
-    =imaginal>
-      isa       result
-    =retrieval>
-      isa       result
-      =dest     =val
+(p retrieval-successful
+   =goal>
+     isa      task
+     step     retrieving-result
+     context  =dest
+   =imaginal>
+   =retrieval>
+     =dest    =val
+   ?imaginal>
+     state    free
   ==>
-    =imaginal>
-      =dest     =val
-    =goal>
-      step      ready)
+   *imaginal>
+     =dest    =val
+   =goal>
+     step     ready)
 
-(p* unsuccessful-test
-    =goal>
-      isa     task
-      step    retrieving-operator
-    =imaginal>
-      isa     result
-      =dest   nil
-    =retrieval>
-      isa     test
-      slot    =dest
-      failure =state
+(p unsuccessful-test
+   =goal>
+     isa     task
+     step    retrieving-operator
+   =imaginal>
+     =dest   nil
+   =retrieval>
+     isa     operator
+     slot    =dest
+     failure =state
+   ?imaginal>
+     state   free
   ==>
-    =imaginal>
-    =goal>
-      state   =state
-      step    ready)
+   =goal>
+     state   =state
+     step    ready)
 
-(p* successful-test
-    =goal>
-      isa     task
-      step    retrieving-operator
-    =imaginal>
-      isa     result
-      =dest   =val
-    =retrieval>
-      isa     test
-      slot    =dest
-      success =state
+(p successful-test
+   =goal>
+     isa     task
+     step    retrieving-operator
+   =imaginal>
+     =dest   =val
+   =retrieval>
+     isa     operator
+     slot    =dest
+     success =state
+   ?imaginal>
+     state   free
   ==>
-    =imaginal>
-    =goal>
-      state   =state
-      step    ready)
+   =goal>
+     state   =state
+     step    ready)
 
-(p* type
-    =goal>
-      isa      task
-      step     retrieving-operator
-    =imaginal>
-      isa      result
-      =slot    =val
-    =retrieval>
-      isa      action
-      action   type
-      required =slot
-      post     =state
-    ?manual>
-       state   free
+(p type
+   =goal>
+     isa      task
+     step     retrieving-operator
+   =imaginal>
+     =slot    =val
+   =retrieval>
+     isa      operator
+     action   type
+     required =slot
+     post     =state
+   ?manual>
+     state    free
   ==>
-    =imaginal>
-    +manual>
-      isa      press-key
-      key      =val
-    =goal>
-      state    =state
-      step     ready)
+   +manual>
+     cmd      press-key
+     key      =val
+   =goal>
+     state    =state
+     step     ready)
 
 (p complete-task
    =goal>
      isa    task
      step   retrieving-operator
    =retrieval>
-     isa    action
+     isa    operator
      action complete-task
      post   =state
+   ?imaginal>
+     state  free
   ==>
    -imaginal>
    +goal>
@@ -357,7 +342,5 @@
      state  =state
      step   ready)
 
-
 (spp complete-task :reward 20)
-
 )

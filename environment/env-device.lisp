@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -19,7 +19,8 @@
 ;;;             : This file contains the code that handles passing
 ;;;             : the virtual windows out through Tk - the visible
 ;;;             : virtuals, and the AGI support.
-;;; Bugs        : 
+;;; Bugs        : [ ] What should happen if a button goes away between when the
+;;;             :     model initiates an action and finishes it?
 ;;; 
 ;;; Todo        :   
 ;;; ----- History -----
@@ -99,13 +100,43 @@
 ;;;             : * Grabbing the environment lock before sending the updates
 ;;;             :   with send-env-window-update.
 ;;;             : * Bad idea - can deadlock things...
+;;; 2013.01.10 Dan
+;;;             : * Env. sends keys over as strings now and uses a function
+;;;             :   named convert-env-key-name-to-char to convert that to a
+;;;             :   character instead of throwing a warning on the read of an
+;;;             :   invalid character.  If it's an invalid character it still
+;;;             :   prints a warning, but now that should be more informative.
+;;;             : * Instead of redefining visible-virtuals-available? here the
+;;;             :   function in the virtual's uwi file now calls check-with-environment-for-visible-virtuals
+;;;             :   which is defined here instead.
+;;; 2013.07.18 Dan
+;;;             : * Fixed a potential bug in vv-click-event-handler because
+;;;             :   the button could be removed between the model's click 
+;;;             :   initiation and execution in which case it can't send
+;;;             :   the update to the environment.  Probably shouldn't eval
+;;;             :   the action either, but I'm not fixing that now.
+;;; 2014.08.29 Dan
+;;;             : * Changed vv-click-event-handler so that the action can be
+;;;             :   either a function or a symbol naming a function.
+;;; 2015.04.29 Dan
+;;;             : * Changed convert-env-key-name-to-char so that it can handle
+;;;             :   things like space and return.
+;;; 2015.05.26 Dan
+;;;             : * Added a font-size parameter to make-static-text-for-rpm-window.
+;;;             :   Should be a point size for the font, defaults to 12 and the
+;;;             :   height and width are based on the ratios for the previous
+;;;             :   defaults which were 10 high and 7 wide for 12 point.  Then
+;;;             :   pass that over to the environment to use when drawing it
+;;;             :   in add-visual-items-to-rpm-window.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(require-compiled "UNI-FILES" "ACT-R6:support;uni-files")
+(require-compiled "UNI-FILES" "ACT-R-support:uni-files")
 
 ;;; virtual windows for the environment that go out through
 ;;; Tcl/Tk to display i.e. a visible virtual
@@ -113,7 +144,7 @@
 ;;; Inherits much of the functionality from the rpm-virtual-window
 ;;; but needs to send the commands to Tcl/Tk as well
 
-(defun visible-virtuals-available? () 
+(defun check-with-environment-for-visible-virtuals () 
   "Return whether or not the visible-virtuals are available"
   (and (environment-control-connections *environment-control*)
        (environment-control-use-env-windows *environment-control*)))
@@ -156,9 +187,10 @@
 
 (defmethod vv-click-event-handler ((btn env-button-vdi) where)
   (declare (ignore where))
-  (when (functionp (action-function btn))
+  (when (or (functionp (action-function btn))
+            (and (symbolp (action-function btn)) (fboundp (action-function btn))))
     (funcall (action-function btn) btn))
-  (when (model-generated-action) 
+  (when (and (model-generated-action) (view-container btn))
     (send-env-window-update (list 'click (id (view-container btn)) (id btn)))))
 
 
@@ -222,7 +254,7 @@
           (width item) (height item) (dialog-item-text item) (color-symbol->env-color (color item))))
        (env-text-vdi
         (list 'text (id win) (id item) (x-pos item) (y-pos item) 
-          (color-symbol->env-color (color item))  (dialog-item-text item)))
+          (color-symbol->env-color (color item))  (dialog-item-text item) (round (text-height item) 10/12)))
        (env-line-vdi
         (list 'line (id win) (id item) (x-pos item) (y-pos item) 
               (color-symbol->env-color (color item)) (width item) (height item)))))))
@@ -277,7 +309,10 @@
   
 (defmethod make-static-text-for-rpm-window ((win visible-virtual-window) 
                                             &key (x 0) (y 0) (text "") 
-                                            (height 20) (width 80) (color 'black))
+                                            (height 20) (width 80) (color 'black)
+                                            font-size)
+  (unless (numberp font-size)
+    (setf font-size 12))
   (with-model-eval (vv-model win)
     (make-instance 'env-text-vdi
       :x-pos x 
@@ -286,7 +321,9 @@
       :height height
       :width width
       :color color
-      )))
+      :text-height (round font-size 12/10)
+      :str-width-fct (let ((w (round font-size 12/7))) (lambda (str) (* (length str) w))))))
+
 
 (defmethod rpm-window-visible-status ((win visible-virtual-window))
   t)
@@ -325,9 +362,19 @@
   (gethash (subseq name 1) *vv-table*))
 
 (defun env-window-key-pressed (win-name key)
-  (let ((win (map-env-window-name-to-window win-name)))
-    (when win
-      (device-handle-keypress win key))))
+  (let ((win (map-env-window-name-to-window win-name))
+        (char (convert-env-key-name-to-char key)))
+    (cond ((and win char)
+           (device-handle-keypress win char))
+          (win ;; key is invalid
+           (print-warning "Window titled ~s received invalid Lisp character ~s as a key press." (window-title win) key))
+          (t ;; somehow the window is invalid
+           (print-warning "Keypress received from unknown environment window ~s." win-name)))))
+
+(defun convert-env-key-name-to-char (key)
+  (or (ignore-errors (coerce key 'character)) 
+      (ignore-errors (let ((c (read-from-string (concatenate 'string "#\\" key))))
+                       (when (characterp c) c)))))
 
 (defun env-button-pressed (win-name button-name)
   (let* ((win (map-env-window-name-to-window win-name))

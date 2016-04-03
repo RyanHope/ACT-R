@@ -1,4 +1,4 @@
-image create photo brain -file ref-brain.gif
+image create photo brain -file [file join $tcl_env_dir dialogs ref-brain.gif]
 
 
 global brain_data 
@@ -141,7 +141,7 @@ $win.frame.canvas create rectangle 446 450 456 460   -width 0 -fill ""  -outline
 
   set brain_data ""
 
-  send_environment_cmd "update [get_handler_name $win.frame] (lambda (x) (declare (ignore x)) (bold-brain-data-results '$win.frame t))"
+  send_environment_cmd "update [get_handler_name $win.frame] (lambda (x) (declare (ignore x)) (bold-brain-data-results (cons '[get_handler_name $win.frame] '$win.frame) t))"
 
   wait_for_non_null brain_data
 
@@ -153,7 +153,7 @@ $win.frame.canvas create rectangle 446 450 456 460   -width 0 -fill ""  -outline
 
   set brain_data ""
 
-  send_environment_cmd "update [get_handler_name $win.frame] (lambda (x) (declare (ignore x)) (uncache-bold-data '$win.frame))"
+  send_environment_cmd "update [get_handler_name $win.frame] (lambda (x) (declare (ignore x)) (uncache-bold-data (cons '[get_handler_name $win.frame] '$win.frame)))"
 
   wait_for_non_null brain_data
 

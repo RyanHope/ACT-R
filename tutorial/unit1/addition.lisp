@@ -27,12 +27,13 @@
       arg1        =num1
       arg2        =num2
       sum         nil
-==>
+  ==>
    =goal>
+      ISA         add
       sum         =num1
       count       0
    +retrieval>
-      isa        count-order
+      ISA        count-order
       first      =num1
 )
 
@@ -42,9 +43,11 @@
       count       =num
       arg2        =num
       sum         =answer
-==>
+  ==>
    =goal>
+      ISA         add
       count       nil
+   !output!       =answer
 )
 
 (P increment-count
@@ -56,11 +59,12 @@
       ISA         count-order
       first       =count
       second      =newcount
-==>
+  ==>
    =goal>
+      ISA         add
       count       =newcount
    +retrieval>
-      isa        count-order
+      ISA        count-order
       first      =sum
 )
 
@@ -74,11 +78,12 @@
       ISA         count-order
       first       =sum
       second      =newsum
-==>
+  ==>
    =goal>
+      ISA         add
       sum         =newsum
    +retrieval>
-      isa        count-order
+      ISA        count-order
       first      =count
 )
 

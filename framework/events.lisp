@@ -47,6 +47,8 @@
 ;;;             :   it may still be moved (not quite the same as waiting).
 ;;;             : * One step farther in format-event to remove the evt-time call
 ;;;             :   entirely, and add the dynamic reporting to break events.
+;;; 2014.09.04 Dan
+;;;             : * Finally removed that trailing space from the event output!
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -125,7 +127,7 @@
   nil)
 
 (defconstant +format-event-event-string+ 
-    (formatter "~:[~*~*~;~6d.~3,'0d~] ~:[~*~;~a ~] ~:[~2*~;~va ~] ~va ~:[~*~a~{ ~a~}~;~a~*~*~] ~:[~@[Waiting for: ~A~]~;Dynamically adjusted for: ~A~]"))
+    (formatter "~:[~*~*~;~6d.~3,'0d~] ~:[~*~;~a ~] ~:[~2*~;~va ~] ~va ~:[~*~a~{ ~a~}~;~a~*~*~]~:[~@[ Waiting for: ~A~]~; Dynamically adjusted for: ~A~]"))
 
 
 (defmethod format-event ((event act-r-event))
@@ -155,7 +157,7 @@
         (evt-dynamic event)
         (evt-wait-condition event)))))
   
-(defconstant +format-event-break-event-string+ (formatter "~:[~*~*~;~6d.~3,'0d~] ~:[~*~;~a ~] ~:[~2*~;~va ~] ~va BREAK-EVENT ~@[~a ~]~:[~@[Waiting for: ~A~]~;Dynamically adjusted for: ~A~]"))
+(defconstant +format-event-break-event-string+ (formatter "~:[~*~*~;~6d.~3,'0d~] ~:[~*~;~a ~] ~:[~2*~;~va ~] ~va BREAK-EVENT ~@[~a~^ ~]~:[~@[Waiting for: ~A~]~;Dynamically adjusted for: ~A~]"))
 
 
 (defmethod format-event ((event act-r-break-event))

@@ -75,6 +75,18 @@
 ;;;             :   too small to represent 1 - 4294967295/4294967296.0.  Of 
 ;;;             :   course if the largest float size is too small to represent
 ;;;             :   that then errors are also still possible for integers too.
+;;; 2015.08.13 Dan
+;;;             : * Basically eliminate rand-time and have it just print a warning
+;;;             :   and return the time it was passed for now.
+;;; 2015.08.17 Dan
+;;;             : * Added the randomize-time-ms function for randomizing times
+;;;             :   that are in ms because they need to return integer results.
+;;;             :   It's not quite the same as converting to seconds, randomizing 
+;;;             :   that, and then rounding back to milliseconds because that 
+;;;             :   is inefficient, but it's pretty close (the probability of
+;;;             :   the extreme values in the range are uniform with this whereas
+;;;             :   with the other method they aren't since they would be rounded
+;;;             :   to milliseconds after the fact).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -469,6 +481,22 @@ in the test output file provided with mt19937ar.c -> mt19937ar.out.txt
       (print-warning "Invalid value passed to randomize-time: ~S" time)
       time)))
 
+(defun randomize-time-ms (time)
+  (if (integerp time)
+      (let ((rand-module (get-module random-module)))
+        (if rand-module
+            (let ((rand (act-r-random-module-randomize-time rand-module)))
+              (if (or (not rand) (zerop time))
+                  time
+                (let* ((tscale (if (numberp rand) rand 3))  ;; default w
+                       (step (round time tscale)))
+                  (+ time (- step) (act-r-random (+ 1 step step))))))
+          time))
+    (progn
+      (print-warning "Invalid value passed to randomize-time-ms: ~S. Value must be an integer." time)
+      time)))
+
+
 ;;; RAND-TIME      [Function]
 ;;;             : Last modified 2005.01.07
 ;;; Description : Return a random number from a uniform distribution based on
@@ -482,7 +510,8 @@ in the test output file provided with mt19937ar.c -> mt19937ar.out.txt
 
 (defun rand-time (time)
   "If time randomizing is on, do the EPIC time randomizing thing."
-  (randomize-time time))
+  (print-warning "Rand-time is no longer available. Randomize-time should be used instead")
+  time)
 
 
 ;;; PERMUTE-LIST  [Function]

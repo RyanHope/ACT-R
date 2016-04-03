@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Author      : Mike Byrne
@@ -12,7 +12,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Filename    : emma.lisp
-;;; Version     : 4.0a1
+;;; Version     : 7.0
 ;;;
 ;;; Description : Implementation of Dario Salvucci's EMMA system for eye
 ;;;             : movements based on subclassing the Vision Module and making
@@ -178,6 +178,52 @@
 ;;; 2012.09.07 Dan
 ;;;             : * Adding an eye spot for CCL since there's now a device for it.
 ;;;             : * Fixed a bug in the environment version of the eye-spot code.
+;;; 2013.01.09 Dan
+;;;             : * Replaced the #@ in the CCL code with make-point since that 
+;;;             :   causes problems in all other Lisps even inside the #+CCL...
+;;;             : * Removed the clearing of the eye-spot from the reset function
+;;;             :   since install-device handles that and it's important that an
+;;;             :   "old" spot persist to that it can be erased from the previous
+;;;             :   device.
+;;; 2013.09.26 Dan
+;;;             : * To keep the display code separate from the model actions
+;;;             :   using an after method on update-device to draw the eye-loc
+;;;             :   instead of calling it from set-eye-loc.
+;;; 2014.02.14 Dan [4.1]
+;;;             : * Updated with the changes to the vision module to make
+;;;             :   distance for visual locations be in pixels.
+;;; 2014.03.17 Dan [5.0]
+;;;             : * Changed the query-buffer call to be consistent with the new
+;;;             :   internal code.
+;;; 2014.07.07 Dan [6.0]
+;;;             : * Updated for ACT-R 6.1.
+;;; 2015.03.20 Dan
+;;;             : * Attend failure sets the buffer failure flag using set-buffer-failure.
+;;; 2015.03.23 Dan
+;;;             : * The visual buffer failures are now marked as to whether it
+;;;             :   was a requested encoding or an automatic one which failed.
+;;; 2015.05.20 Dan
+;;;             : * Updated the calls to xy-loc to include the module to allow
+;;;             :   for the use of device specific coordinate slots instead of just
+;;;             :   screen-x, screen-y, and distance.
+;;; 2015.06.05 Dan
+;;;             : * Schedule all events in ms now.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2015.07.30 Dan [6.1]
+;;;             : * Added the unstuffing/overwriting params and actions.
+;;; 2015.08.13 Dan
+;;;             : * Changed all rand-time calls to randomize-time.
+;;; 2015.09.23 Dan [7.0]
+;;;             : * Completing the requests to the visual buffer for the new utility
+;;;             :   learning credit assignment mechanism.  
+;;;             :   One issue is that complete-eye-move gets called at multiple
+;;;             :   points in the task so it can't be used to actually complete
+;;;             :   the request even though it's a movement style and would do so
+;;;             :   "automatically".  Instead, just use encoding-complete like 
+;;;             :   the standard vision module to mark the request done since the
+;;;             :   current module's request function is still called which sets
+;;;             :   the last request slot of the module.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -200,7 +246,6 @@
                    :initform nil)
    (shift-target :accessor shift-target :initarg :shift-target :initform nil)
    (trace-eye-p :accessor trace-eye-p :initarg :trace-eye-p :initform nil)
-;
    (prep-event :accessor prep-event :initform nil) ;;holds current preparation-complete event
    (next-loc :accessor next-loc :initform nil) ;;holds the next landing loc
    
@@ -211,10 +256,15 @@
 
 (defmethod set-eye-loc ((eye-mod emma-vis-mod) (newloc vector))
   (setf (eye-loc eye-mod) newloc)
-  (when (show-focus-p (current-device-interface))
-    (device-update-eye-loc (device (current-device-interface)) newloc))
   (when (trace-eye-p eye-mod)
     (push (cons (mp-time) newloc) (eye-trace eye-mod))))
+
+
+(defmethod update-device :after ((devin device-interface) time)
+  (when (show-focus-p devin)
+    (let ((vis-m (get-module :vision)))
+      (when vis-m
+        (device-update-eye-loc (device devin) (eye-loc vis-m))))))
 
 
 ;;; The replacement for *eye-spot* is a slot in the module accessed with
@@ -271,7 +321,7 @@
 ;;;             : the distance times the rate.
 
 (defmethod compute-exec-time ((eye-mod emma-vis-mod) (mvmt saccade))
-  (rand-time
+  (randomize-time
    (+ (init-time eye-mod) (* (r mvmt) (sacc-rate eye-mod)) 
       (base-exe eye-mod))))
 
@@ -327,7 +377,9 @@
 (defmethod move-attention ((eye-mod emma-vis-mod) &key location scale)
   (declare (symbol scale))
   (if (eq (exec-s eye-mod) 'BUSY)
-    (model-warning "Attention shift requested at ~S while one was already in progress." (mp-time))
+      (progn
+        (complete-request (last-visual-request eye-mod))
+        (model-warning "Attention shift requested at ~S while one was already in progress." (mp-time)))
     (progn
       (when (tracked-obj eye-mod) (remove-tracking eye-mod))
       (setf (moving-attention eye-mod) (new-name "TRGT")) 
@@ -337,8 +389,6 @@
       (setf (attend-failure eye-mod) nil)  ;;; clear the failure indicator     
       
       (setf (current-marker eye-mod) location)
-      
-      ;;(set-clof eye-mod (dmo-to-xy location))
 ;;;
 ;;;   mjs delete preparation-complete from event queue if one is outstanding
 ;;;
@@ -353,7 +403,7 @@
       (let ((return-obj (get-obj-at-location eye-mod location scale)))
         (if return-obj
           (let* ((start-loc (next-destination eye-mod))
-                 (end-loc (xy-loc location))
+                 (end-loc (xy-loc location eye-mod))
                  (r-theta (compute-saccade-r-theta start-loc end-loc)))
             (change-state eye-mod :proc 'BUSY)
             (setf (shift-duration eye-mod) (recog-time eye-mod return-obj r-theta))
@@ -364,14 +414,14 @@
           (if (shift-target eye-mod)
               (let* ((return-obj (shift-target eye-mod))
                      (start-loc (next-destination eye-mod))
-                     (end-loc (xy-loc location))
+                     (end-loc (xy-loc location eye-mod))
                      (r-theta (compute-saccade-r-theta start-loc end-loc)))
                 (change-state eye-mod :proc 'BUSY)
                 (setf (shift-duration eye-mod) (recog-time eye-mod return-obj r-theta))
                 (initiate-eye-move eye-mod (shift-duration eye-mod) r-theta))
             (let* ((return-obj (car (define-chunks-fct `((isa visual-object screen-pos ,location)))))
                    (start-loc (next-destination eye-mod))
-                   (end-loc (xy-loc location))
+                   (end-loc (xy-loc location eye-mod))
                    (r-theta (compute-saccade-r-theta start-loc end-loc)))
               (change-state eye-mod :proc 'BUSY)
               (setf (shift-duration eye-mod) (recog-time eye-mod return-obj r-theta))
@@ -389,6 +439,8 @@
   (setf (moving-attention eye-mod) NIL)
   (change-state eye-mod  :proc 'FREE)
   
+  (complete-request (last-visual-request eye-mod))
+  
   (let ((return-obj
          (if (and (shift-target eye-mod)
                   (object-present-p eye-mod (shift-target eye-mod)))
@@ -396,8 +448,9 @@
            (get-obj-at-location eye-mod loc scale))))
     (unless return-obj
       (clear-attended eye-mod)
+      (set-buffer-failure 'visual :ignore-if-full t :requested requested)
       (setf (attend-failure eye-mod) t)
-      (schedule-event-relative 0 'no-visual-object-found :maintenance t :module :vision :output 'medium :details "No visual-object found")
+      (schedule-event-now 'no-visual-object-found :maintenance t :module :vision :output 'medium :details "No visual-object found")
       (return-from encoding-complete nil))
     (set-attended eye-mod (chunk-visicon-entry return-obj))
     (attend-to-object eye-mod return-obj :requested requested)
@@ -422,9 +475,9 @@
                      (not (object-present-p eye-mod (currently-attended eye-mod)))))
             (and (current-marker eye-mod)
                  (null (currently-attended eye-mod))
-                 (within-move eye-mod (xy-loc (current-marker eye-mod)))))
+                 (within-move eye-mod (xy-loc (current-marker eye-mod) eye-mod))))
             
-        (schedule-event-relative 0 'move-attention  ;;;mjs   
+        (schedule-event-now 'move-attention  ;;;mjs   
                                  :params (list 
                                             eye-mod
                                             :location (current-marker eye-mod)
@@ -469,19 +522,21 @@
     (change-state eye-mod :prep 'BUSY)
     (setf (last-prep eye-mod) sacc-mvmt)
     (setf (prep-event eye-mod)  ;;mjs
-          (schedule-event-relative (max 0 (fprep-time sacc-mvmt))  'PREPARATION-COMPLETE
+          (schedule-event-relative (seconds->ms (max 0 (fprep-time sacc-mvmt)))  'PREPARATION-COMPLETE
+                                   :time-in-ms t
                                    :destination :vision
                                    :module :vision
                                    :output 'medium
                                    :details (concatenate 'string "Preparation-complete " (write-to-string (trgt sacc-mvmt)))))
     ;; only sometimes queue the FOCUS-ON
     (when (<= recog-time (total-time sacc-mvmt))
-     (schedule-event-relative (max 0 recog-time)  'ENCODING-COMPLETE   ;;mjs
-                             :destination :vision
-                             :module :vision
-                             :params`(,(current-marker eye-mod) ,(last-scale eye-mod))
-                             :output 'medium
-                             :details (concatenate 'string "Encoding-Complete " (symbol-name (current-marker eye-mod))))
+     (schedule-event-relative (seconds->ms (max 0 recog-time))  'ENCODING-COMPLETE   ;;mjs
+                              :time-in-ms t
+                              :destination :vision
+                              :module :vision
+                              :params`(,(current-marker eye-mod) ,(last-scale eye-mod))
+                              :output 'medium
+                              :details (concatenate 'string "Encoding-Complete " (symbol-name (current-marker eye-mod))))
 )))
 
 
@@ -518,7 +573,7 @@
   (when (and (moving-attention eye-mod)
              (eq trgt (moving-attention eye-mod)))
     (let* ((start-loc (eye-loc eye-mod))
-           (end-loc (xy-loc (current-marker eye-mod)))
+           (end-loc (xy-loc (current-marker eye-mod) eye-mod))
            (r-theta (compute-saccade-r-theta start-loc end-loc))
            (new-duration
             (* (recog-time eye-mod (shift-target eye-mod) r-theta)
@@ -527,7 +582,7 @@
       (setf (shift-start eye-mod) (mp-time-ms))
       (setf (shift-duration eye-mod) new-duration)
       (initiate-eye-move eye-mod new-duration r-theta)))
-  (finish-movement eye-mod)
+  (finish-movement eye-mod (last-prep eye-mod))
   )
 
 (defmethod complete-eye-move ((eye-mod emma-vis-mod) (trgt symbol) 
@@ -545,7 +600,8 @@
                                   (vector (pm-angle-to-pixels (r sacc))
                                           (theta sacc)))))
     (setf (next-loc eye-mod) new-loc)
-    (schedule-event-relative (max 0 (exec-time sacc))  'COMPLETE-EYE-MOVE ;;;mjs
+    (schedule-event-relative (seconds->ms (max 0 (exec-time sacc)))  'COMPLETE-EYE-MOVE ;;;mjs
+                             :time-in-ms t
                              :destination :vision
                              :module :vision
                              :params `(,(trgt sacc) ,new-loc)
@@ -573,7 +629,7 @@ time for an object given the displacement from the current POR."))
 (defmethod recog-time ((eye-mod emma-vis-mod) obj (r-theta vector))
   (let ((freq (object-frequency eye-mod obj (default-freq eye-mod)))
         (eccentricity (pm-pixels-to-angle (vr r-theta))))
-    (rand-time (* (enc-factor eye-mod)
+    (randomize-time (* (enc-factor eye-mod)
                   (- (log freq))
                   (exp (* eccentricity (enc-exponent eye-mod)))))))
 
@@ -616,7 +672,7 @@ object, which is used to compute the recognition time."))
                        :r (pm-pixels-to-angle (vr r-theta))          ; removed noise addition 01.05.28
                        :theta (vtheta r-theta))))
     (setf (fprep-time sacc-mvmt)
-          (rand-time (compute-prep-time eye-mod sacc-mvmt)))
+          (randomize-time (compute-prep-time eye-mod sacc-mvmt)))
     (setf (exec-time sacc-mvmt)
           (compute-exec-time eye-mod sacc-mvmt))
     (setf (trgt sacc-mvmt) (moving-attention eye-mod))
@@ -659,50 +715,19 @@ object, which is used to compute the recognition time."))
 ;;;; tracking stuff  !!MCL-specific!!
 ;;;#| mjs need to comment out because rpm-overlay not defined when loads
 
-#|MCL devices are no longer supported so just comment this out 
-   instead of updating it with the new changes
-
-
-#+(and :mcl (not :openmcl))
-
- 
-(progn
-  
-  (defclass eye-spot (rpm-overlay)
-    ((color :accessor color :initarg :color :initform *blue-color*))
-    (:default-initargs 
-      :view-size (make-point 9 9) 
-      :offset (make-point -5 -5)))
-
-  (setf *eye-spot* (make-instance 'eye-spot))
-
-;;;called by set-eye-loc  
-  (defmethod device-update-eye-loc ((device window) (xyloc vector))
-    (update-me *eye-spot* device xyloc))
-
-;;;update-me for rpm-overlay is in device.lisp -- calls view-draw-contents
-
-  (defmethod view-draw-contents ((self eye-spot))
-    (with-focused-view self
-      (with-fore-color (color self)
-        (fill-oval self *light-gray-pattern* (make-point 0 0) (view-size self)))))
-)
-|#
-
-
 
 ;;; The CCL code is very similar to the MCL code and basically just copied
 ;;; from the attended-loc code in the ccl device by Clayton Stanley and Mike Byrne.
 
 #+(and :clozure :darwin :apple-objc :ccl-1.8)
 (progn
-  (require-compiled "CCL-SIMPLE-VIEW" "ACT-R6:support;ccl-simple-view")
+  (require-compiled "CCL-SIMPLE-VIEW" "ACT-R-support:ccl-simple-view")
   
   (defclass eye-spot (focus-ring)
   ((easygui::foreground :reader color :initform *blue-color*))
   (:default-initargs 
-    :view-size #@(9 9)
-    :offset #@(-5 -5)))
+    :view-size (make-point 9 9)
+    :offset (make-point -5 -5)))
 
 (defmethod device-update-eye-loc ((wind window) xyloc)
   (unless (aand (eye-spot-marker) (eq (type-of it) 'eye-spot)
@@ -1011,15 +1036,12 @@ object, which is used to compute the recognition time."))
 (defmethod reset-emma-module ((eye-mod emma-vis-mod))
   (reset-vision-module eye-mod)
   (setf (eye-trace eye-mod) nil)
-  (set-eye-loc eye-mod #(0 0))
+ 
   (setf (shift-start eye-mod) 0)
   (setf (shift-target eye-mod) nil)
   (setf (prep-event eye-mod) nil)
   (setf (next-loc eye-mod) nil)
-  (clrhash (freq-ht eye-mod))
-  (setf (eye-spot eye-mod) nil))
-
-
+  (clrhash (freq-ht eye-mod)))
 
 (defun params-emma-module (vis-mod param)
  (aif (params-vision-module vis-mod param)
@@ -1035,19 +1057,18 @@ object, which is used to compute the recognition time."))
           (:SACCADE-BASE-TIME
            (setf (base-exe vis-mod) (cdr param)))
           (:vis-obj-freq
-           (setf (default-freq vis-mod) (cdr param)))
-          )
+           (setf (default-freq vis-mod) (cdr param))))
         (case param
           (:VISUAL-ENCODING-FACTOR
-           (enc-factor vis-mod) )
+           (enc-factor vis-mod))
           (:VISUAL-ENCODING-EXPONENT
-           (enc-exponent vis-mod) )
+           (enc-exponent vis-mod))
           (:EYE-SACCADE-RATE
-           (sacc-rate vis-mod) )
+           (sacc-rate vis-mod))
           (:SACCADE-BASE-TIME
-           (base-exe vis-mod) )
+           (base-exe vis-mod))
           (:vis-obj-freq
-           (default-freq vis-mod) )))))
+           (default-freq vis-mod))))))
 
 ;;; define the module itself  -- name :vision
 
@@ -1055,104 +1076,125 @@ object, which is used to compute the recognition time."))
 
 
 (define-module-fct :vision 
-    (list (list 'visual-location nil '(:attended :nearest) '(attended)
-                            #'(lambda ()
-                               (command-output "  attended new          : ~S"
-                                               (query-buffer 'visual-location 
-                                                             '((attended . new))))
-                               (command-output "  attended nil          : ~S"
-                                               (query-buffer 'visual-location
-                                                             '((attended . nil))))
-                               (command-output "  attended t            : ~S"
-                                               (query-buffer 'visual-location
-                                                             '((attended . t)))))) 
-        (list 'visual nil nil '(modality preparation execution processor last-command)
-                 #'(lambda () 
-                       (print-module-status (get-module :vision)))))
+    
+    (list (define-buffer-fct 'visual-location 
+              :request-params (list :attended :nearest :center) 
+              :queries '(attended)
+              :status-fn (lambda ()
+                           (command-output "  attended new          : ~S" (query-buffer 'visual-location '(attended  new)))
+                           (command-output "  attended nil          : ~S" (query-buffer 'visual-location '(attended  nil)))
+                           (command-output "  attended t            : ~S" (query-buffer 'visual-location '(attended  t))))) 
+          (define-buffer-fct 'visual 
+              :queries '(scene-change-value scene-change modality preparation execution processor last-command)
+            :status-fn (lambda () 
+                         (let ((v (get-module :vision)))
+                           (print-module-status v)
+                           (command-output "  scene-change          : ~S" (query-buffer 'visual '(scene-change t)))
+                           (command-output "  scene-change-value    : ~S" (car (scene-change v)))))
+            :trackable t))
+    
   (list 
    
-   (define-parameter :optimize-visual
-     :valid-test #'tornil 
-     :default-value T
-     :warning "T or NIL"
-     :documentation "")
-    (define-parameter :visual-attention-latency
-     :valid-test #'nonneg 
-     :default-value 0.085
-     :warning "a non-negative number"
-     :documentation "Time for a shift of visual attention")
-   (define-parameter :visual-finst-span
-     :valid-test #'nonneg 
-     :default-value 3.0
-     :warning "a non-negative number"
-     :documentation "Lifespan of a visual finst")
-   (define-parameter :visual-movement-tolerance
-     :valid-test #'nonneg 
-     :default-value 0.5
-     :warning "a non-negative number"
-     :documentation 
-     "How far something can move while still being seen as the same object.")
-   (define-parameter :visual-num-finsts
-     :valid-test #'posnum 
-     :default-value 4
-     :warning "a positive number"
-     :documentation "Number of visual finsts.")
-   (define-parameter :visual-onset-span
-     :valid-test #'nonneg 
-     :default-value 0.5
-     :warning "a non-negative number"
-     :documentation "Lifespan of new visual objects being marked as NEW")
-   (define-parameter :test-feats
-     :valid-test #'tornil 
-     :default-value T
-     :warning "T or NIL"
-     :documentation "Whether proc-display should use the features to compare items instead of just the chunk names")
-   
-   (define-parameter :viewing-distance :owner nil)
-   (define-parameter :delete-visicon-chunks
-     :valid-test #'tornil 
-     :default-value T
-     :warning "T or NIL"
-     :documentation "Whether proc-display should delete and unintern the name of old chunks that were in the visicon")
    (define-parameter :scene-change-threshold
      :valid-test (lambda (x) (and (numberp x) (<= 0.0 x 1.0))) 
      :default-value 0.25
      :warning "a number in the range [0.0,1.0]"
      :documentation "Proportion of visicon which must change to signal a scene change")
+   (define-parameter :optimize-visual
+     :valid-test 'tornil 
+     :default-value T
+     :warning "T or NIL"
+     :documentation "If set to nil the default devices process text into sub-letter features")
+   (define-parameter :visual-attention-latency
+     :valid-test 'nonneg 
+     :default-value 0.085
+     :warning "a non-negative number"
+     :documentation "Time for a shift of visual attention")
+   (define-parameter :visual-finst-span
+     :valid-test 'nonneg 
+     :default-value 3.0
+     :warning "a non-negative number"
+     :documentation "Lifespan of a visual finst")
+   (define-parameter :visual-movement-tolerance
+     :valid-test 'nonneg 
+     :default-value 0.5
+     :warning "a non-negative number"
+     :documentation 
+     "How far something can move while still being seen as the same object.")
+   (define-parameter :visual-num-finsts
+     :valid-test 'posnum 
+     :default-value 4
+     :warning "a positive number"
+     :documentation "Number of visual finsts.")
+   (define-parameter :visual-onset-span
+     :valid-test 'nonneg 
+     :default-value 0.5
+     :warning "a non-negative number"
+     :documentation "Lifespan of new visual objects being marked as NEW")
+   (define-parameter :auto-attend
+     :valid-test 'tornil 
+     :default-value nil
+     :warning "T or NIL"
+     :documentation "Whether visual-location requests automatically generate an attention shift")
+   (define-parameter :unstuff-visual-location
+     :valid-test (lambda (x) (or (tornil x) (numberp x)))
+     :default-value t
+     :warning "T, NIL, or a number"
+     :documentation "Whether chunks stuffed into the visual-location buffer should be automatically cleared by the module if unused")
+   (define-parameter :overstuff-visual-location
+     :valid-test 'tornil
+     :default-value nil
+     :warning "T or NIL"
+     :documentation "Whether a chunk previously stuffed into the visual-location buffer can be overwritten by a new chunk to be stuffed")
+
+   (define-parameter :test-feats
+     :valid-test 'tornil 
+     :default-value T
+     :warning "T or NIL"
+     :documentation "Whether proc-display should use the features to compare items instead of just the chunk names")
+   (define-parameter :delete-visicon-chunks
+     :valid-test 'tornil 
+     :default-value T
+     :warning "T or NIL"
+     :documentation "Whether proc-display should delete and unintern the name of old chunks that were in the visicon")
+   
+ 
+   (define-parameter :viewing-distance :owner nil)
+   (define-parameter :pixels-per-inch :owner nil)
    
    (define-parameter  :VISUAL-ENCODING-FACTOR
-                      :valid-test #'nonneg
+                      :valid-test 'nonneg
                       :warning "a non-negative number" 
                       :default-value  0.010
                       :documentation "Visual encoding factor-EMMA")
    (define-parameter  :VISUAL-ENCODING-EXPONENT
-                      :valid-test #'nonneg
+                      :valid-test 'nonneg
                       :warning "a non-negative number" 
                       :default-value 1.0
                       :documentation "Visual encoding exponent-EMMA")
    (define-parameter :EYE-SACCADE-RATE
-                      :valid-test #'nonneg
+                      :valid-test 'nonneg
                       :warning "a non-negative number" 
                       :default-value 0.002
                       :documentation "Saccade rate - EMMA")
    (define-parameter :SACCADE-BASE-TIME
-                      :valid-test #'nonneg
+                      :valid-test 'nonneg
                       :warning "a non-negative number" 
                       :default-value 0.020
      :documentation "Base saccade time - EMMA")
    (define-parameter :vis-obj-freq
-                      :valid-test #'nonneg
+                      :valid-test 'nonneg
                       :warning "a non-negative number" 
                       :default-value 0.01
                       :documentation "Default visual object frequecny for EMMA")
 
    )
   :warning 'warn-vision
-  :version "4.0a2-emma"
-  :documentation "Vision-module with EMMA and chunks for internal object representation"
-  :creation #'create-emma-module 
-  :reset #'reset-emma-module 
-  :query #'query-vision-module
+  :version "7.0-emma"
+  :documentation "Vision-module with EMMA addition"
+  :creation 'create-emma-module 
+  :reset 'reset-emma-module 
+  :query 'query-vision-module
   :request 'pm-module-request
-  :params #'params-emma-module
+  :params 'params-emma-module
 )                 

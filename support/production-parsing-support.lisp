@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : production-parsing-support.lisp
-;;; Version     : 1.1
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Functions and code that's used by both p and p* parsing.
 ;;; 
@@ -25,7 +25,7 @@
 ;;;             : [ ] Does sort-for-binding actually do anything useful now?
 ;;; 
 ;;; ----- History -----
-;;; 2009.09.10 Dan [1.0]
+;;; 2009.09.10 Dan [3.0]
 ;;;             : * Initial creation.
 ;;; 2009.09.18 Dan
 ;;;             : * Now all the real work of the production parsing is here and
@@ -113,12 +113,115 @@
 ;;;             :   as well as when it fails.
 ;;; 2012.12.06 Dan
 ;;;             : * Don't allow an unnecessary empty buffer modification now.
+;;; 2013.01.28 Dan
+;;;             : * Replaced calls to the internal chunk-type functions with
+;;;             :   the appropriate command.
+;;; 2013.03.13 Dan [1.2]
+;;;             : * Changed valid-buffer-request-slot to allow slots of a child
+;;;             :   type to be specified in a parent type for requests.  This could
+;;;             :   lead to run time errors/warnings for productions that previously
+;;;             :   would have been disallowed at definition time.
+;;; 2013.03.19 Dan
+;;;             : * Allow the modifications to also specify child slots as long
+;;;             :   as they are in the conditions as well.  That guarantees that
+;;;             :   it is safe to modify because otherwise it would either be a
+;;;             :   run time problem or constant slots would need to be allowed to 
+;;;             :   extend chunks.
+;;; 2013.04.10 Dan
+;;;             : * Instead of calling extend-buffer-chunk use the newly built
+;;;             :   in capability of schedule-mod-buffer-chunk.
+;;; 2013.05.16 Dan [1.3]
+;;;             : * Added the ability to pass request parameters to direct requests
+;;;             :   by including them in a list with the chunk:
+;;;             :   (p test ==> +retrieval> (chunk :recently-retrieved nil)).
+;;; 2013.05.23 Dan
+;;;             : * Valid-chunk-mod-spec now allows a static type to modify any
+;;;             :   of the possible slots in a static type since mod-buffer-chunk
+;;;             :   is able to resolve the type as needed and otherwise it can't
+;;;             :   do the "same" thing as the old mechanism during compilation 
+;;;             :   since the type specified in the production still won't "have"
+;;;             :   the slot.
+;;; 2013.07.25 Dan
+;;;             : * Added the check for production style warnings to create-
+;;;             :   production so that subsequent productions test them if 
+;;;             :   needed.
+;;; 2013.08.09 Dan
+;;;             : * Save the production !output! string in the buffer trace too.
+;;; 2014.03.17 Dan [2.0]
+;;;             : * Start of conversion to chunks and chunk-specs without types.
+;;; 2014.04.03 Dan
+;;;             : * Fixed a problem with must-be in creating implicit condtions.
+;;; 2014.04.08 Dan
+;;;             : * The parse tables need to keep track of any new slots created
+;;;             :   because on reset they have to create them again for things
+;;;             :   pulled out of the table.
+;;; 2014.04.23 Dan
+;;;             : * Added the parsing for search buffers as well.
+;;; 2014.05.07 Dan
+;;;             : * Changed a warning from "direct request" to "indirect request"
+;;;             :   because I want to change that nomenclature everywhere.
+;;; 2014.05.13 Dan
+;;;             : * Allow an "empty" buffer condition which translates to isa chunk,
+;;;             :   and basically just means there's some chunk there.
+;;; 2014.05.27 Dan
+;;;             : * Also allow an "empty" buffer request which also translates
+;;;             :   to "isa chunk".  The reason for this (and the previous change)
+;;;             :   is because production compilation may result in conditions or
+;;;             :   actions with no constraints when the only thing in one of the 
+;;;             :   productions was an isa in the definition.
+;;; 2014.05.29 Dan
+;;;             : * Add in the backward hack test to make sure that the old syntax
+;;;             :   for modification requests (+ without an isa) is handled correctly.
+;;; 2014.05.30 Dan
+;;;             : * Same hack for the old syntax of overwrite requests.
+;;;             : * Only apply the backward hacks if (procedural-in-model-definition prod)
+;;;             :   is true.
+;;; 2014.06.06 Dan
+;;;             : * Fixed a bug with some bad calls to bad-condition-exit.
+;;; 2014.06.09 Dan
+;;;             : * Fixed a bug with the buffer overwrite hack for backwards 
+;;;             :   because it was being rejected before the swap to the new
+;;;             :   action occurred.
+;;; 2014.06.24 Dan
+;;;             : * Allow a production to use mismatched slots relative to a
+;;;             :   specified type (the <:mismatch x y> lists from define-
+;;;             :   chunk-spec) and just warn about it.
+;;; 2014.08.12 Dan
+;;;             : * Pass the production name to parse-conditions and parse-actions
+;;;             :   so that warnings can indicate which production caused the
+;;;             :   issue.
+;;; 2014.09.30 Dan
+;;;             : * Fixed a bug with parse-action with respect to providing a
+;;;             :   request parameter to a modification request.
+;;; 2015.03.13 Dan
+;;;             : * Don't try to create a chunk for a keyword used in a slot
+;;;             :   value.  Treat it like a number or string and leave it alone.
+;;; 2015.03.20 Dan
+;;;             : * Add strict harvesting for a ?buffer> buffer failure query
+;;;             :   in the conditions.
+;;;             : * Allow an empty modification when there's an = buffer failure
+;;;             :   query to avoid the strict harvesting.
+;;; 2015.05.06 Dan
+;;;             : * Schedule events in ms.
+;;; 2015.07.28 Dan
+;;;             : * Removed the *act-r-6.0-compatibility* hack.
+;;; 2015.08.28 Dan
+;;;             : * Have a copied search buffer rebind the buffer variable 
+;;;             :   once the new chunk is created for the buffer.
+;;; 2015.09.10 Dan [3.0]
+;;;             : * The production requests (and mod requests) need to be tracked
+;;;             :   now and saved on the production-requested-actions list.
+;;; 2015.12.16 Dan
+;;;             : * Those tracking tags are now a second return value from the
+;;;             :   function that schedules them.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
 ;;; Moved common code for production parsing to support to avoid some warnings
 ;;; at load time and as a first step to a better integration of p and p*.
+;;;
+;;; This code cheats and uses the internal rep of a chunk-spec...
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Public API:
@@ -152,21 +255,19 @@
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(declaim (ftype (function (t) t) define-variable-chunk-spec-fct))
-(declaim (ftype (function (t t) t) valid-variable-chunk-mod-spec))
-(declaim (ftype (function (t t) t) extend-buffer-chunk))
+(declaim (ftype (function (t t) t) add-buffer-trace-notes))
 
+(defun buffer-name->variable (name)
+  (intern (concatenate 'string "=" (symbol-name name))))
 
 (defun safe-chunk-slot-equal (c1 c2)
   (when (chunk-slot-equal c1 c2) t))
 
-
-
-(defun create-production (prod definition dynamicp)
+(defun create-production (prod definition)
   (let* ((original-error-stream *error-output*)
          (error-string-stream (make-string-output-stream))
          (*error-output* error-string-stream)
-         (production (make-production :text (copy-tree definition) :dynamic dynamicp)))
+         (production (make-production :text (copy-tree definition))))
     
     (flet ((bad-production-exit (&rest strings)
                                 (let ((*error-output* original-error-stream)
@@ -195,10 +296,10 @@
                                         (dolist (x (pairlis starts ends))
                                           (format *error-output* "~a~%" (subseq warn-text (car x) (+ 2 (cdr x)))))
                                       (progn 
-                                        
                                         (print-warning "Production has #| or |# sequences within it which affects how the warnings are displayed")
                                         (format *error-output* warn-text)))))
-                                  (print-warning "--- end of warnings for undefined production ~s ---" (aif (production-name production) it (car (production-text production)))))
+                                  (print-warning "--- end of warnings for undefined production ~s ---" 
+                                                 (aif (production-name production) it (car (production-text production)))))
                                 (close error-string-stream)
                                 (return-from create-production nil)))
     
@@ -211,11 +312,13 @@
       (setf (production-documentation production) (pop definition)))
     
     (aif (position '==> definition)
-         (let* ((pre-lhs (parse-conditions prod (subseq definition 0 it)))
+         (let* ((buffers (buffers))
+                (pre-lhs (parse-conditions prod (production-name production) (subseq definition 0 it) buffers))
                 (lhs (if (eq :error pre-lhs) :error (sort-for-binding pre-lhs)))
                 (rhs (unless (eq lhs :error)
-                       (parse-actions prod (subseq definition (1+ it)) lhs dynamicp)))
+                       (parse-actions prod (production-name production) (subseq definition (1+ it)) lhs buffers)))
                 (searched-buffers nil))
+           
            (when (or (eq lhs :error)
                      (eq rhs :error))
              (bad-production-exit))
@@ -224,15 +327,17 @@
            (setf (production-rhs production) rhs)
            
            (setf (production-lhs-buffers production)
-             (remove-duplicates (mapcan #'(lambda (x)
-                                            (when (eq (caar x) #\=)
-                                              (list (cdar x))))
-                                  lhs)))
+             (mapcan (lambda (x)  
+                       (when (eq (production-statement-op x) #\=) 
+                         (list (production-statement-target x))))
+               lhs))
+           
            (setf (production-rhs-buffers production)
-             (remove-duplicates (mapcan #'(lambda (x)
-                                            (unless (eq (caar x) #\!)
-                                              (list (cdar x))))
-                                  rhs)))
+             (remove-duplicates 
+              (mapcan (lambda (x)
+                        (unless (eq (production-statement-op x) #\!)
+                          (list (production-statement-target x))))
+                rhs)))
            
            
            (dolist (x (production-lhs-buffers production))
@@ -246,20 +351,31 @@
                (incf (procedural-buffer-lookup-size prod))))
            
            
-           (let ((variables (mapcan 'find-variables
-                              (mapcar 'second (append lhs rhs))))
-                 (lhs-variables (mapcan 'find-variables (mapcar 'second lhs)))
-                 (safe-bindings nil)
-                 (slot-variables nil))
+           (let* ((lhs-variables (remove-duplicates (mapcan (lambda (x)
+                                                              (aif (production-statement-spec x)
+                                                                   (copy-list (act-r-chunk-spec-variables it))
+                                                                   (find-variables (production-statement-definition x))))
+                                                      lhs)))
+                  (rhs-variables (remove-if (lambda (x)
+                                              (find x lhs-variables))
+                                            (remove-duplicates (mapcan (lambda (x)
+                                                                         (aif (production-statement-spec x)
+                                                                              (copy-list (act-r-chunk-spec-variables it))
+                                                                              (find-variables (production-statement-definition x))))
+                                                                 rhs))))
+                  (buffer-variables (mapcan (lambda (x)
+                                              (when (eql (production-statement-op x) #\=)
+                                                (list (buffer-name->variable (production-statement-target x)))))
+                                      lhs))
+                  (slot-variables nil)
+                  (dependencies nil)
+                  (rhs-dependencies nil)
+                  (unbound-vars nil))
              
              (setf (production-variables production)
-               (remove-duplicates 
-                (append variables
-                        (mapcar #'(lambda (x)
-                                    (intern (concatenate 'string "=" (symbol-name x))))
-                          (production-lhs-buffers production)))))
+               (remove-duplicates (append lhs-variables rhs-variables buffer-variables)))
              
-             (setf (production-bindings production) variables)
+             (setf unbound-vars lhs-variables)
              
              (let ((constants nil)
                    (vars nil)
@@ -271,475 +387,511 @@
                    (search nil)
                    (search-bind nil)
                    (search-other nil)
-                   ;(var-class nil)
-                   (var-table (make-hash-table))
-                   )
-               
+                   (var-table (make-hash-table)))
+        
                (dolist (buffer-name (production-lhs-buffers production))
                  (let ((bn buffer-name)  ;; closure voodoo
                        (bi (cdr (assoc buffer-name (procedural-buffer-indices prod))))
-                       (bv (intern (concatenate 'string "=" (symbol-name buffer-name)))))
+                       (bv (buffer-name->variable buffer-name)))
                    
-                   (setf (production-bindings production)
-                     (remove bv (production-bindings production)))
-                   
-                   (if (searchable-buffer buffer-name)
-                       (setf (gethash bv var-table) 'search)
-                     (setf (gethash bv var-table) 'buffer))
+                   (setf unbound-vars (remove bv unbound-vars))
                    
                    (if (searchable-buffer buffer-name)
                        (progn
+                         (setf (gethash bv var-table) 'search)
                          
                          (push (make-cr-condition :type 'bind-buffer :buffer bn :bi bi :value bv) search-bind)
-                         (push #'(lambda ()
-                                   (overwrite-buffer-chunk bn (cdr (assoc bv (production-bindings production)))))
+                         (push (lambda ()
+                                 (let* ((buffer-set-chunk (cdr (assoc bv (production-bindings production))))
+                                        (buffer-chunk (overwrite-buffer-chunk bn buffer-set-chunk)))
+                                   (unless (eq buffer-chunk buffer-set-chunk)
+                                     ;; for a copy buffer rebind the buffer variable to the actual chunk
+                                     (setf (cdr (assoc bv (production-bindings production))) buffer-chunk))))
                                (production-conflict-code production)))
                      
-                     (push (make-cr-condition :type 'bind-buffer :buffer bn :bi bi :value bv) vars))))
+                     (progn
+                       (setf (gethash bv var-table) 'buffer)
+                       (push (make-cr-condition :type 'bind-buffer :buffer bn :bi bi :value bv) vars)))))
                
                ;; new first step 
                ;; classify all of the variables as to how they are used
                ;; so that things can be put into the right places later.
                ;; 
-               ;; A variable can be bound through one of: buffer, bind, fixed-slot, var-slot, search, search-slot
+               ;; A variable can be bound through one of: buffer, bind, fixed-slot, var-slot, search, search-slot, rhs-bind
                
-               (dolist (cond lhs)
-                 (let* ((c cond)  ;; so the closures bind correctly
-                        (buffer (cdar c))
-                        ;(bi (cdr (assoc buffer (procedural-buffer-indices prod))))
-                        )
-                   (case (caar c)
+               (dolist (c lhs)
+                 (let ((target (production-statement-target c)))
+                   
+                   (case (production-statement-op c)
                      (#\=
-                      (let* ((var-spec-list (fourth c))
-                             (var2-spec-list (eighth c)))
+                      (let ((constant-bound-slots (mapcan (lambda (x)
+                                                            (when (and (chunk-spec-variable-p (act-r-slot-spec-value x))
+                                                                       (not (chunk-spec-variable-p (act-r-slot-spec-name x)))
+                                                                       (eq '= (act-r-slot-spec-modifier x)))
+                                                              (list (act-r-slot-spec-value x))))
+                                                    (act-r-chunk-spec-slots (production-statement-spec c))))
+                            (variable-bound-slots (mapcan (lambda (x)
+                                                            (when (and (chunk-spec-variable-p (act-r-slot-spec-value x))
+                                                                       (chunk-spec-variable-p (act-r-slot-spec-name x))
+                                                                       (eql '= (act-r-slot-spec-modifier x)))
+                                                              (list (cons (act-r-slot-spec-name x) (act-r-slot-spec-value x)))))
+                                                    (act-r-chunk-spec-slots (production-statement-spec c)))))
                         
-                        (dolist (v var-spec-list)
-                          (let ((var (third v)))
-                            (if (searchable-buffer buffer)
-                                (unless (gethash var var-table)
-                                  (setf (gethash var var-table) 'search-slot))
-                              
-                              (unless (gethash var var-table)
-                                (setf (gethash var var-table) 'fixed-slot)))))
+                        (setf slot-variables (append slot-variables (act-r-chunk-spec-slot-vars (production-statement-spec c))))
+                        (setf dependencies (append dependencies (act-r-chunk-spec-dependencies (production-statement-spec c))))
                         
+                        (dolist (v constant-bound-slots)
+                          (let ((current (gethash v var-table)))
+                            (when (or (null current) (eq current 'var-slot))
+                              (setf (gethash v var-table) (if (searchable-buffer target) 'search-slot 'fixed-slot)))))
                         
-                        (dolist (v var2-spec-list)
-                          (when (chunk-spec-variable-p (third v))
-                            (let ((var (third v)))
-                              (if (searchable-buffer buffer)
-                                  (case (gethash (second v) var-table)
-                                    ((buffer bind fixed-slot var-slot)
-                                     (unless (gethash var var-table)
-                                       (setf (gethash var var-table) 'search-slot)))
-                                    (t
-                                     (bad-production-exit "indirection not allowed among search buffer slots.")))
-                                (unless (gethash var var-table)
-                                  (setf (gethash var var-table) 'var-slot))))))))
+                        (dolist (s-v variable-bound-slots)
+                          (if (searchable-buffer target)
+                              (case (gethash (car s-v) var-table)
+                                ((buffer bind fixed-slot)
+                                 (unless (gethash (cdr s-v) var-table)
+                                   (setf (gethash (cdr s-v) var-table) 'search-slot)))
+                                (t
+                                 (bad-production-exit "indirection not allowed among search buffer slots.")))
+                            (unless (gethash (cdr s-v) var-table)
+                              (setf (gethash (cdr s-v) var-table) 'var-slot))))))
+                     (#\?
+                      (setf slot-variables (append slot-variables (act-r-chunk-spec-slot-vars (production-statement-spec c))))
+                      (setf dependencies (append dependencies (act-r-chunk-spec-dependencies (production-statement-spec c)))))
                      
                      (#\!
-                      (case (cdar c)
+                      (case target
                         ((bind safe-bind)
-                         (let ((var (car (second c))))
-                           (unless (gethash var var-table)
-                             (setf (gethash var var-table) 'bind))))
+                         (let ((var (first (production-statement-definition c))))
+                           (if (gethash var var-table)
+                               (bad-production-exit (format nil "Because variable ~s is bound more than once on the LHS." var))
+                             (setf (gethash var var-table) 'bind))
+                           (awhen (find-variables (rest (production-statement-definition c)))
+                                  (push (push var it) dependencies))))
                         ((mv-bind)
-                         
-                         (let ((bind-vars (car (second c))))
+                         (let ((bind-vars (first (production-statement-definition c))))
                            (dolist (x bind-vars)
-                             (unless (gethash x var-table)
-                               (setf (gethash x var-table) 'bind))))))))))
+                             (if (gethash x var-table)
+                                 (bad-production-exit (format nil "Because variable ~s is bound more than once on the LHS." x))
+                               (setf (gethash x var-table) 'bind))
+                             (awhen (find-variables (rest (production-statement-definition c)))
+                                    (push (push x it) dependencies))))))))))
                
                
-               ;(inspect var-table)
+               ;; up front check for disallowed indirection and unbound vars
+               ;; - more than one layer deep
+               ;; - from a search buffer
+               ;; - from an explicit binding
                
+               (dolist (x slot-variables)
+                 
+                 (case (gethash x var-table)
+                   ((buffer fixed-slot)
+                    )
+                   (var-slot
+                    (bad-production-exit (format nil "Because slot-name variable ~s requires more than one level of indirection." x)))
+                   ((search search-slot)
+                    (bad-production-exit (format nil "Because slot-name variable ~s is bound in a search buffer match." x)))
+                   (bind
+                    (bad-production-exit (format nil "Because slot-name variable ~s is bound in an explicit bind." x)))
+                   (t
+                    (bad-production-exit (format nil "Variable ~s is not bound on the LHS." x)))))
+               
+               ;; check the rest to make sure they're bound
+               
+               (dolist (x lhs-variables)
+                 (unless (gethash x var-table)
+                   (bad-production-exit (format nil "Variable ~s is not bound on the LHS." x))))
+               
+               ;; check for circularity up front now too
+               
+               (let ((d-vars (mapcar (lambda (x) (list x)) lhs-variables)))
+                 (dolist (x dependencies)
+                   (awhen (assoc (car x) d-vars)
+                          (rplacd it (append (cdr it) (cdr x)))))
+                 (if (circular-references d-vars)
+                     (bad-production-exit "Because there are circular variable bindings on the LHS.")
+                   (setf dependencies d-vars)))
+               
+               ;(pprint dependencies)
+               
+               (dolist (c rhs) ;; also check the explicit binds on the RHS
+                 (let ((target (production-statement-target c)))
+                   (case (production-statement-op c)
+                     (#\!
+                      (case target
+                        ((bind safe-bind)
+                         (let ((var (first (production-statement-definition c))))
+                           (if (gethash var var-table)
+                               (bad-production-exit (format nil "Because variable ~s is bound more than once." var))
+                             (setf (gethash var var-table) 'rhs-bind))
+                           (awhen (find-variables (rest (production-statement-definition c)))
+                                  (push (push var it) rhs-dependencies))))
+                        ((mv-bind)
+                         (let ((bind-vars (first (production-statement-definition c))))
+                           (dolist (x bind-vars)
+                             (if (gethash x var-table)
+                                 (bad-production-exit (format nil "Because variable ~s is bound more than once." x))
+                               (setf (gethash x var-table) 'rhs-bind))
+                             (awhen (find-variables (rest (production-statement-definition c)))
+                                    (push (push x it) rhs-dependencies))))))))))
+               
+               
+               (dolist (x rhs-variables)
+                 (unless (gethash x var-table)
+                   (bad-production-exit (format nil "Variable ~s is not bound on the RHS." x))))
+               
+               ;; check for circularity 
+               
+               (let ((d-vars (mapcar (lambda (x) (list x)) rhs-variables)))
+                 (dolist (x rhs-dependencies)
+                   (awhen (assoc (car x) d-vars)
+                          (rplacd it (append (cdr it) (cdr x)))))
+                 (when (circular-references d-vars)
+                   (bad-production-exit "Because there are circular variable bindings on the RHS.")))
+               
+                              
+               ;;; iterate over the lhs here
                
                (dolist (cond lhs)
-                 (let* ((c cond)  ;; so the closures bind correctly
-                        (buffer (cdar c))
-                        (bi (cdr (assoc buffer (procedural-buffer-indices prod)))))
-                   (case (caar c)
+                 (let* ((buffer (production-statement-target cond))
+                        (bi (cdr (assoc buffer (procedural-buffer-indices prod))))
+                        (spec (production-statement-spec cond))
+                        (definition (production-statement-definition cond)))
+                   
+                   (case (production-statement-op cond)
                      (#\=
-                      (let* ((constant (third c))
-                             (ct (chunk-spec-chunk-type constant))
-                             (var-spec-list (fourth c))
-                             (var2-spec-list (eighth c))
-                             (others-spec-list (sixth c))
-                             (slot-vars (seventh c)))
-                        
-                        (setf slot-variables (append slot-vars slot-variables))
-                        
-                        (when (and (not dynamicp) slot-vars)
-                          (bad-production-exit "Slot name variables not allowed in non-dynamic productions."))
-                        
-                        (if (searchable-buffer buffer)
-                            (let ((search-specs (list (make-cr-condition :type 'isa :buffer buffer :bi bi :value ct))))
-                              
-                              ;;; guarantee a search buffer is only used as a single condition
-                              
-                              (if (find buffer searched-buffers)
-                                  (bad-production-exit (format nil "Search buffer ~s is specified as more than one condition." buffer))
-                                (push buffer searched-buffers))
-                                                            
-                              ;; don't put anything on the lists for the tree and put all of the 
-                              ;; tests into the search spots or save them for building the chunk-spec
-                              ;; at the end
-                              
-                              (push-last (list 'buffer-search buffer) selection)
-                              
-                              (dolist (spec (chunk-spec-slot-spec constant))
-                                ;; just collect the constants
-                                (case (car spec)
-                                  
-                                  (= (push-last (make-cr-condition :type 'slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec))) search-specs))
-                                  
-                                  (> (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe> :result t) search-specs)
-                                     (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) search-specs))
-                                  
-                                  (< (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe< :result t) search-specs)
-                                     (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) search-specs))
-                                  
-                                  (>= (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe>= :result t) search-specs)
-                                      (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) search-specs))
-                                  
-                                  (<= (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe<= :result t) search-specs)
-                                      (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) search-specs))
-                                  
-                                  (- (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) search-specs))))
-                              
-                              
-                              (dolist (v var-spec-list)
-                                (let ((var (third v))
-                                      (binding-slot (second v)))
-                                  
-                                  ;; all slots with a variable should let the search know it must be full whether or not this is the binding
-                                  
-                                  (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot binding-slot :si (get-slot-index ct binding-slot) :result nil) search-specs)
-                                  
-                                  (when (find var (production-bindings production))
-                                    (setf (production-bindings production)
-                                      (remove var (production-bindings production)))
-                                    
-                                    (setf others-spec-list (remove v others-spec-list :test 'equal))
-                                    
-                                    ;;; create the binding condition for it to set the value
-                                    (push-last (make-cr-condition :type 'bind-slot :buffer buffer :bi bi :slot binding-slot :si (get-slot-index ct binding-slot) :value var) search-bind)
-                                    )))
-                              
-                              
-                              (dolist (v var2-spec-list)  ;; for a search buffer this is essentially the same as the 
-                                ;; regular bindings since indirection is only through previously bound slots  
-                                (when (chunk-spec-variable-p (third v))
-                                  (let ((var (third v))  ;; binding the variable from the search
-                                        (binding-slot (second v)))
-                                    
-                                    (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second v) :result nil) search-specs)
-                                    
-                                    (when (find var (production-bindings production))
-                                      (setf (production-bindings production)
-                                        (remove var (production-bindings production)))
-                                      
-                                      (setf others-spec-list (remove v others-spec-list :test 'equal))
-                                      
-                                      ;;; create the binding condition for it to set the value
-                                      (push-last (make-cr-condition :type 'bind-var-slot :buffer buffer :bi bi :slot binding-slot :value var) search-bind)
-                                      ))))
-                              
-                              (dolist (spec others-spec-list) ;; slots that contained variables which aren't bindings
-                                (let* ((type (if (chunk-spec-variable-p (second spec)) 'test-var-slot 'test-slot))
-                                       (condition 
-                                        (case (car spec) 
-                                          (=  (make-cr-condition :type type :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (when (eq type 'test-slot) (get-slot-index ct (second spec))) :test 'safe-chunk-slot-equal :result t))
-                                          (>  (make-cr-condition :type type :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (when (eq type 'test-slot) (get-slot-index ct (second spec))) :test 'safe> :result t))
-                                          (<  (make-cr-condition :type type :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (when (eq type 'test-slot) (get-slot-index ct (second spec))) :test 'safe< :result t))
-                                          (>= (make-cr-condition :type type :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (when (eq type 'test-slot) (get-slot-index ct (second spec))) :test 'safe>= :result t))
-                                          (<= (make-cr-condition :type type :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (when (eq type 'test-slot) (get-slot-index ct (second spec))) :test 'safe<= :result t))                                          
-                                          (-  (make-cr-condition :type type :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (when (eq type 'test-slot) (get-slot-index ct (second spec))) :test 'safe-chunk-slot-equal :result nil)))))
-                                  
-                                  ;; If all the variables are bound outside of searches then it goes into the
-                                  ;; main search spec.  Otherwise it goes on the others list.
-                                  ;; Either the slot, value, or both is a variable otherwise it'd be in the constants.
-                                  
-                                  (if (or 
-                                       ;; only the value is a variable
-                                       (and (eq type 'test-slot) (not (eq 'search (gethash (third spec) var-table))) (not (eq 'search-slot (gethash (third spec) var-table))))
-                                       ;; only the slot is a variable 
-                                       (and (eq type 'test-var-slot) (not (chunk-spec-variable-p (third spec))) (not (eq 'search (gethash (second spec) var-table))) (not (eq 'search-slot (gethash (second spec) var-table))))
-                                       ;; both variables
-                                       (and (eq type 'test-var-slot) (chunk-spec-variable-p (third spec)) (not (eq 'search (gethash (second spec) var-table))) (not (eq 'search-slot (gethash (second spec) var-table)))
-                                            (not (eq 'search (gethash (third spec) var-table))) (not (eq 'search-slot (gethash (third spec) var-table)))))
-                                      (push-last condition search-specs)
-                                    (push-last condition search-other))))
-                              
-                              (push (make-cr-condition :type 'search :buffer buffer :bi bi :value search-specs :test (intern (concatenate 'string "=" (symbol-name buffer)))) search))
+                      (if (searchable-buffer buffer)
+                          (let ((search-specs (list (make-cr-condition :type 'isa :buffer buffer :bi bi 
+                                                        :value (cons (act-r-chunk-spec-filled-slots spec)
+                                                                     (act-r-chunk-spec-empty-slots spec))))))
+                            
+                          (push-last (list 'buffer-search buffer) selection)
                           
-                          (progn ;; The standard production parsing from before
-                            
-                            
-                            (push-last (make-cr-condition :type 'isa :buffer buffer :bi bi :value ct) constants)
-                            
-                            (dolist (type (cdr (chunk-type-supertypes-fct ct)))
-                              (push (make-cr-condition :type 'isa :buffer buffer :bi bi :value type) implicit))
-                            
-                            (push-last (list 'buffer-read buffer) selection)
-                            
-                            
-                            (dolist (spec (chunk-spec-slot-spec constant))
-                              
-                              (case (car spec)
-                                
-                                (= 
-                                 ;; add the slot value for the "wide" test
-                                 (push-last (make-cr-condition :type 'slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec))) constants)
-                                 ;; note that the slot should be full or empty for the implicit tests if needed
-                                 (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result (if (third spec) nil t)) implicit)
-                                 ;; implicit test for numbers to allow better filtering when any of the relative tests used
-                                 (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result (if (numberp (third spec)) t nil)) implicit))
-                                
-                                (> 
-                                 ;; add the specific test
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe> :result t) constants)
-                                 ;; Explicitly this must be a number
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) constants)
-                                 ;; implicitly that means it's not <=
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe<= :result nil) implicit)
-                                 ;; note that the slot should be full for the implicit tests if needed
-                                 (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                
-                                (< ;(push (list 'slot buffer bi (second spec)  #'safe>= (third spec) nil) constants))
-                                 ;; add the specific test
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe< :result t) constants)
-                                 ;; Explicitly this must be a number
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) constants)
-                                 ;; implicitly that means it's not >=
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe>= :result nil) implicit)
-                                 ;; note that the slot should be full for the implicit tests if needed
-                                 (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                
-                                (>= ;(push (list 'slot buffer bi (second spec)  #'safe>= (third spec) t) constants))
-                                 ;; add the specific test
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe>= :result t) constants)
-                                 ;; Explicitly this must be a number
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) constants)
-                                 ;; implicitly that means it's not <
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe< :result nil) implicit)
-                                 ;; note that the slot should be full for the implicit tests if needed
-                                 (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                
-                                (<= ;(push (list 'slot buffer bi (second spec)  #'safe> (third spec) nil) constants))
-                                 ;; add the specific test
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe<= :result t) constants)
-                                 ;; Explicitly this must be a number
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'number-test :slot (second spec) :si (get-slot-index ct (second spec)) :result t) constants)
-                                 ;; implicitly that means it's not >
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (if (numberp (third spec)) (third spec) nil) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe> :result nil) implicit)
-                                 ;; note that the slot should be full for the implicit tests if needed
-                                 (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                
-                                
-                                (- 
-                                 ;; negation test is on the others
-                                 (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) others)
-                                 ;; if it's '- <slot> nil' then that's got an implicit test the slot must be full
-                                 (when (null (third spec))
-                                   (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                 )))
-                            
-                            
-                            (dolist (v var-spec-list)
-                              (let ((var (third v)))
-                                (when (find var (production-bindings production))
-                                  (setf (production-bindings production)
-                                    (remove var (production-bindings production)))
+                          
+                          (dolist (slot-spec (act-r-chunk-spec-slots spec))
+                            (let* ((value (act-r-slot-spec-value slot-spec))
+                                   (slot (act-r-slot-spec-name slot-spec))
+                                   (si (unless (chunk-spec-variable-p slot) (slot-name->index slot)))
+                                   (variable (act-r-slot-spec-variable slot-spec))
+                                   (modifier (act-r-slot-spec-modifier slot-spec)))
+                              (flet ((new-condition (&key type value test result)
+                                                    (make-cr-condition :buffer buffer 
+                                                                       :bi bi
+                                                                       :slot slot
+                                                                       :si si
+                                                                       :type type 
+                                                                       :value value 
+                                                                       :test test
+                                                                       :result result))
+                                     )
+                                (if (null variable) ;; A constant
+                                    (progn ;;put it onto the search-specs list
+                                      (case modifier 
+                                        (=
+                                         (push-last (new-condition :type 'slot :value value) search-specs))
+                                        
+                                        (-
+                                         (push-last (new-condition :type 'test-slot :value value :test 'safe-chunk-slot-equal :result nil) search-specs))
+                                        
+                                        (t
+                                         ;; Explicitly this must be a number
+                                         (push-last (new-condition :type 'test-slot :test 'number-test :result t) search-specs)
+                                         
+                                         ;; The specified test
+                                         
+                                         (push-last (new-condition :type 'test-slot :value (if (numberp value) value nil) 
+                                                                   :test (case modifier 
+                                                                           (> 'safe>)
+                                                                           (< 'safe<)
+                                                                           (>= 'safe>=)
+                                                                           (<= 'safe<=))
+                                                                   :result t) 
+                                                    search-specs))))
                                   
-                                  (setf others-spec-list (remove v others-spec-list :test 'equal))
+                                  ;; it's got a variable somewhere...
                                   
-                                  (push var safe-bindings)
-                                  
-                                  (let ((binding-slot (second v)))
-                                    (push-last (make-cr-condition :type 'bind-slot :buffer buffer :bi bi :slot binding-slot :si (get-slot-index ct binding-slot) :value var) vars)
-                                    
-                                    ;; if there isn't already an explicit test for it not being nil 
-                                    ;; add one 
-                                    (unless (find (list buffer binding-slot) constants :test #'equal 
-                                                  :key (lambda (x) 
-                                                         (when (or (and (eq (cr-condition-type x) 'slot) ;; slot with a non-nil value
-                                                                        (cr-condition-value x))
-                                                                   (and (eq (cr-condition-type x) 'test-slot) ;; test-slot with either inequality test or not equal nil
-                                                                        (or (not (eq (cr-condition-test x) 'safe-chunk-slot-equal))
-                                                                            (and (null (cr-condition-value x)) (null (cr-condition-result x)))
-                                                                            (and (cr-condition-value x) (cr-condition-result x)))))
-                                                           
-                                                           (list (cr-condition-buffer x) (cr-condition-slot x)))))
+                                  (cond (;; only the value is a variable and this is the binding
+                                         (and (eq modifier '=)
+                                              (eq variable :value) 
+                                              (eq (gethash value var-table) 'search-slot)
+                                              (find value unbound-vars))
+                                         
+                                         (setf unbound-vars (remove value unbound-vars))
+                                         
+                                         (push-last (new-condition :type 'bind-slot :value value) search-bind))
+                                             
+                                        (;;bound in a var slot which is ok since the slot had to be bound elsewhere     
+                                        (and (eq modifier '=)
+                                             (eq variable :both) 
+                                             (eq (gethash value var-table) 'search-slot)
+                                             (find value unbound-vars))
+                                         
+                                         ;; add a test for the slot existing to the constant tests since the 'isa' won't 
+                                         ;; have the variablized slot in the required set
+                                         
+                                         (push-last (new-condition :type 'test-var-slot :value nil :test 'safe-chunk-slot-equal :result nil) search-specs)
+                                         
+                                         (setf unbound-vars (remove value unbound-vars))
+                                         
+                                         (push-last (new-condition :type 'bind-var-slot :value value) search-bind))
+                                        
+                                        (;; something else...
+                                         t
+                                         (let* ((type (if (eq variable :value) 'test-slot 'test-var-slot))
+                                                (var-kind (gethash value var-table))
+                                                (search (and var-kind (or (eq var-kind 'search) (eq var-kind 'search-slot))))
+                                                (condition (new-condition :type type
+                                                                          :value value
+                                                                          :test (case modifier
+                                                                                  ((= -) 'safe-chunk-slot-equal)
+                                                                                  (> 'safe>)
+                                                                                  (< 'safe<)
+                                                                                  (>= 'safe>=)
+                                                                                  (<= 'safe<=))
+                                                                          :result (if (eq modifier '-) nil t))))
+                                        
+                                        ;; nothing implicit is known nor is a slot index available
+                                        ;; just add a test to the appropriate list (based on whether it
+                                        ;; requires the search to have completed)
+                                        
+                                        (if search 
+                                            (push-last condition search-other)
+                                          (push-last condition search-specs)))))))))
+                            
+                           (push-last (make-cr-condition :type 'search :buffer buffer :bi bi :value search-specs :test (intern (concatenate 'string "=" (symbol-name buffer)))) search)) 
+                            
+                        (progn                  
+                          (push-last (make-cr-condition :type 'isa :buffer buffer :bi bi 
+                                                        :value (cons (act-r-chunk-spec-filled-slots spec)
+                                                                     (act-r-chunk-spec-empty-slots spec)))
+                                     constants)
+                          
+                          (push-last (list 'buffer-read buffer) selection)
+                          
+                          
+                          (dolist (slot-spec (act-r-chunk-spec-slots spec))
+                            (let* ((value (act-r-slot-spec-value slot-spec))
+                                   (slot (act-r-slot-spec-name slot-spec))
+                                   (si (unless (chunk-spec-variable-p slot) (slot-name->index slot)))
+                                   (variable (act-r-slot-spec-variable slot-spec))
+                                   (modifier (act-r-slot-spec-modifier slot-spec))
+                                   (other t))
+                              (flet ((new-condition (&key type value test result)
+                                                    (make-cr-condition :buffer buffer 
+                                                                       :bi bi
+                                                                       :slot slot
+                                                                       :si si
+                                                                       :type type 
+                                                                       :value value 
+                                                                       :test test
+                                                                       :result result))
+                                     (must-be (target result)
+                                              (unless (find (list buffer slot) target :test 'equalp
+                                                            :key (lambda (x) 
+                                                                   (when (or (and (eq (cr-condition-type x) 'slot) ;; slot with a non-nil value
+                                                                                  (cr-condition-value x))
+                                                                             (and (eq (cr-condition-type x) 'test-slot) ;; test-slot with either inequality test or not equal nil
+                                                                                  (or (not (eq (cr-condition-test x) 'safe-chunk-slot-equal))
+                                                                                      (and (null (cr-condition-value x)) (null (cr-condition-result x)))
+                                                                                      (and (cr-condition-value x) (cr-condition-result x)))))
+                                                                     (list (cr-condition-buffer x) (cr-condition-slot x)))))
+                                                
+                                                (make-cr-condition :buffer buffer 
+                                                                              :bi bi
+                                                                              :slot slot
+                                                                              :si si
+                                                                              :type 'test-slot 
+                                                                              :value nil 
+                                                                              :test 'safe-chunk-slot-equal 
+                                                                              :result result))))
+                                (cond ((null variable) ;; A constant
+                                       (setf other nil)
+                                       (case modifier 
+                                         (=
+                                          ;; add the slot value for the "wide" test
+                                          (push-last (new-condition :type 'slot :value value) constants)
+                                          
+                                          ;; note that the slot should be full or empty for the implicit tests if needed
+                                          (awhen (must-be implicit (if value nil t)) (push-last it implicit))
+                                          ;; implicit test for numbers to allow better filtering when any of the relative tests used
+                                          (push (new-condition :type 'test-slot :test 'number-test :result (if (numberp value) t nil)) implicit))
+                                         
+                                         (-
+                                          ;; negation test is on the others
+                                          (push-last (new-condition :type 'test-slot :value value :test 'safe-chunk-slot-equal :result nil) others)
+                                          
+                                          ;; if it's '- <slot> nil' then that's got an implicit test the slot must be full
+                                          (awhen (must-be implicit nil) (push it implicit)))
+                                         
+                                         (t
+                                          ;; Explicitly this must be a number
+                                          (push-last (new-condition :type 'test-slot :test 'number-test :result t) constants)
+                                          
+                                          ;; The specified test
+                                          
+                                          (push-last (new-condition :type 'test-slot :value (if (numberp value) value nil) 
+                                                                    :test (case modifier 
+                                                                            (> 'safe>)
+                                                                            (< 'safe<)
+                                                                            (>= 'safe>=)
+                                                                            (<= 'safe<=))
+                                                                    :result t) 
+                                                     constants)
+                                          
+                                          ;; implicitly it must be full
+                                          (awhen (must-be implicit nil) (push-last it implicit))
+                                          
+                                          ;; implicitly it's not the opposite test
+                                          (push-last (new-condition :type 'test-slot :value (if (numberp value) value nil) 
+                                                                    :test (case modifier 
+                                                                            (> 'safe<=)
+                                                                            (< 'safe>=)
+                                                                            (>= 'safe<)
+                                                                            (<= 'safe>))
+                                                                    :result nil) 
+                                                     implicit))))
                                       
-                                      (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot binding-slot :si (get-slot-index ct binding-slot) :result nil) constants))))))
-                            
-                            
-                            (dolist (v var2-spec-list)
-                              (when (chunk-spec-variable-p (third v))
-                                (let ((var (third v)))
-                                  (when (find var (production-bindings production))
-                                    (setf (production-bindings production)
-                                      (remove var (production-bindings production)))
-                                    
-                                    (setf others-spec-list (remove v others-spec-list :test 'equal))
-                                    
-                                    (let ((binding-slot (second v)))
                                       
-                                      (push (make-cr-condition :type 'bind-var-slot :buffer buffer :bi bi :slot binding-slot :value var) var2s))))))
+                                      ((eq modifier '=) ;; a variable which may require a binding
                             
-                            (dolist (spec others-spec-list) ;; slots that contained variables
-                              (if (chunk-spec-variable-p (second spec)) 
-                                  (case (car spec)  ;; nothing implicit is known nor is a slot index available
-                                    
-                                    ;; If the value is a variable check to see if it is a search variable for
-                                    ;; the non = tests (the = test couldn't be because it would be a var-slot instead)
-                                    
-                                    (= (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe-chunk-slot-equal :result t) others))
-                                    (> (if (and (chunk-spec-variable-p (third spec)) (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table))))
-                                           (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe> :result t) search-other)
-                                         (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe> :result t) others)))
-                                    (< (if (and (chunk-spec-variable-p (third spec)) (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table))))
-                                           (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe< :result t) search-other)
-                                         (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe< :result t) others)))
-                                    (>= (if (and (chunk-spec-variable-p (third spec)) (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table))))
-                                            (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe>= :result t) search-other)
-                                          (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe>= :result t) others)))
-                                    (<= (if (and (chunk-spec-variable-p (third spec)) (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table))))
-                                            (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe<= :result t) search-other)
-                                          (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :test 'safe<= :result t) others)))
-                                    (- (if (and (chunk-spec-variable-p (third spec)) (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table))))
-                                           (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :test 'safe-chunk-slot-equal :slot (second spec) :result nil) search-other)
-                                         (push-last (make-cr-condition :type 'test-var-slot :buffer buffer :bi bi :value (third spec) :test 'safe-chunk-slot-equal :slot (second spec) :result nil) others))))
+                                       (cond ((and (eq variable :value) ;; constant slot with a variable
+                                                   (eq (gethash value var-table) 'fixed-slot) ;; that's bound that way
+                                                   (find value unbound-vars)) 
+                                              
+                                              (setf unbound-vars (remove value unbound-vars))
+                                              (setf other nil)
+                                              
+                                              (push-last (new-condition :type 'bind-slot :value value) vars)
+                                              
+                                              ;; if there isn't already an explicit test for it not being nil add one
+                                              ;; put it on the implicit list since the buffer slot vectors will have
+                                              ;; already handled that for the "real" testing 
+                                              (awhen (must-be implicit nil) (push-last it implicit)))
+                                             
+                                             
+                                             ((and (eq variable :both) ;; variable value in variable slot
+                                                   (eq (gethash value var-table) 'var-slot) ;; and that's how it's bound
+                                                   (find value unbound-vars))
+                                              
+                                              (setf unbound-vars (remove value unbound-vars))
+                                              (setf other nil)
+                                              
+                                              (push-last (new-condition :type 'bind-var-slot :value value) var2s)))))
                                 
-                                
-                                (case (car spec) ; treat it just like a normal
-                                  
-                                  ;; Need to test the slot value because it could be a search bound variable
-                                  ;; in which case the test must go onto the search-other list instead.
-                                  ;; that isn't necessary for the = test here either since that would be
-                                  ;; a fixed-slot binding instead.
-                                  
-                                  ;; The value must be a variable in this case otherwise it would be a constant test
-                                  
-                                  (and (chunk-spec-variable-p (third spec)) (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table))))
-                                  
-                                  (= 
-                                   ;; add the slot value for the "wide" test
-                                   (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe-chunk-slot-equal :result t) others)
-                                   ;; note that the slot should be full for the implicit tests if needed
-                                   (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                  
-                                  (> 
-                                   ;; add the specific test
-                                   (if (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table)))
-                                       (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe> :result t) search-other)
-                                     (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe> :result t) others))
-                                   ;; note that the slot should be full for the implicit tests if needed
-                                   (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                  
-                                  (< ;(push (list 'slot buffer bi (second spec)  #'safe>= (third spec) nil) constants))
-                                   ;; add the specific test
-                                   (if (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table)))
-                                       (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe< :result t) search-other)
-                                     (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe< :result t) others))
-                                   ;; note that the slot should be full for the implicit tests if needed
-                                   (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                  
-                                  (>= ;(push (list 'slot buffer bi (second spec)  #'safe>= (third spec) t) constants))
-                                   ;; add the specific test
-                                   (if (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table)))
-                                       (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe>= :result t) search-other)
-                                     (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe>= :result t) others))
-                                   ;; note that the slot should be full for the implicit tests if needed
-                                   (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                  
-                                  (<= ;(push (list 'slot buffer bi (second spec)  #'safe> (third spec) nil) constants))
-                                   ;; add the specific test
-                                   (if (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table)))
-                                       (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe<= :result t) search-other)
-                                     (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :slot (second spec) :si (get-slot-index ct (second spec)) :test 'safe<= :result t) others))
-                                   ;; note that the slot should be full for the implicit tests if needed
-                                   (push (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value nil :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) implicit))
-                                  
-                                  (- 
-                                   ;; negation test with a variable gives no implicit info
-                                   (if (or (eq 'search (gethash (third spec) var-table)) (eq 'search-slot (gethash (third spec) var-table)))
-                                       (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) search-other)
-                                     (push-last (make-cr-condition :type 'test-slot :buffer buffer :bi bi :value (third spec) :test 'safe-chunk-slot-equal :slot (second spec) :si (get-slot-index ct (second spec)) :result nil) others))))))))))
+                                (when other
+                                  (if (and variable (not (eq variable :value))) ;; a variablized slot and maybe value
+                                                                                ;; slot var can't be "search bound" is a restriction imposed above
+                                      (let* ((var-kind (gethash value var-table))
+                                             (search (and var-kind (or (eq var-kind 'search) (eq var-kind 'search-slot))))
+                                             (condition (new-condition :type 'test-var-slot
+                                                                       :value value
+                                                                       :test (case modifier
+                                                                               ((= -) 'safe-chunk-slot-equal)
+                                                                               (> 'safe>)
+                                                                               (< 'safe<)
+                                                                               (>= 'safe>=)
+                                                                               (<= 'safe<=))
+                                                                       :result (if (eq modifier '-) nil t))))
+                                        
+                                        
+                                        ;; nothing implicit is known nor is a slot index available
+                                        ;; just add a test to the appropriate list (based on whether it
+                                        ;; requires the search to have completed)
+                                        
+                                        (if search 
+                                            (push-last condition search-other)
+                                          (push-last condition others)))
+                                    
+                                    ;; it's a fixed slot but may be a varible value
+                                    ;; treat it basically like a constant, but make sure
+                                    ;; if it's a search bound var to put it on the search-other
+                                    ;; list.
+                                    
+                                    (let* ((var-kind (gethash value var-table))
+                                           (search (and var-kind (or (eq var-kind 'search) (eq var-kind 'search-slot)))))
+                                      
+                                               
+                                      (case modifier 
+                                        (=
+                                         ;; add the slot value test
+                                         (if search
+                                             (push-last (new-condition :type 'test-slot :test 'safe-chunk-slot-equal :value value :result t) search-other)
+                                           (push-last (new-condition :type 'test-slot :test 'safe-chunk-slot-equal :value value :result t) others))
+                                         ;; note that the slot should be full or empty for the implicit tests if needed
+                                         (awhen (must-be implicit (if value nil t)) (push-last it implicit)))
+                                        
+                                        (-
+                                         ;; negation test is on the others
+                                         (if search
+                                             (push-last (new-condition :type 'test-slot :test 'safe-chunk-slot-equal :value value :result nil) search-other)
+                                           (push-last (new-condition :type 'test-slot :test 'safe-chunk-slot-equal :value value :result nil) others)))
+                                        
+                                        (t
+                                         ;; non empty
+                                         (awhen (must-be implicit nil) (push-last it implicit))
+
+                                         ;; The specified test
+                                          
+                                         (let ((condition (new-condition :type 'test-slot :value value 
+                                                                         :test (case modifier 
+                                                                                 (> 'safe>)
+                                                                                 (< 'safe<)
+                                                                                 (>= 'safe>=)
+                                                                                 (<= 'safe<=))
+                                                                         :result t)))
+                                           (if search
+                                               (push-last condition search-other)
+                                             (push-last condition others))
+                                           
+                                           (awhen (must-be implicit nil) (push-last it implicit))))))))))))))
                      (#\?
-                      (let ((constant-queries (third c))
-                            (variable-queries (fourth c)))
+                      (dolist (slot-spec (act-r-chunk-spec-slots spec))
                         
-                        ;(pprint constant-queries)
-                        ;(pprint variable-queries)
-                        (dolist (q constant-queries)
-                          (push-last (make-cr-condition :type 'query :buffer buffer :slot (second q) :value (third q) :result (if (eq '= (first q)) t nil)) constants))
-                        
-                        (dolist (q variable-queries)
-                          (push-last (make-cr-condition :type 'query :buffer buffer :slot (second q) :value (third q) :result (if (eq '= (first q)) t nil)) search-other))
-                        
-                        (push-last
-                         (list 'query-buffer buffer                             
-                               (mapcar #'(lambda (x)
-                                           (cons (second x) (third x)))
-                                 (append constant-queries variable-queries)))
-                         selection)))
-                     (t
-                      (case (cdar c)
+                        (let ((cr (make-cr-condition :type 'query :buffer buffer 
+                                                     :slot (act-r-slot-spec-name slot-spec) 
+                                                     :value (act-r-slot-spec-value slot-spec) 
+                                                     :result (if (eq '= (act-r-slot-spec-modifier slot-spec)) t nil))))
+                          
+                          (if (act-r-slot-spec-variable slot-spec) 
+                              (push-last cr search-other)
+                            (push-last cr constants))))
+                      
+                      (push-last (list 'query-buffer buffer spec) selection))
+                     
+                     (t ;#\!
+                      (case buffer ;; (really the command)
                         ((eval safe-eval)
-                         (push-last (make-cr-condition :type 'eval :value (car (second c))) search-other)
-                         )
-                        
+                         (push-last (make-cr-condition :type 'eval :value (first definition)) search-other))
                         
                         ((bind safe-bind)
                          
-                         (unless (find (car (second c)) (production-bindings production))
-                           (bad-production-exit (format nil "Cannot have two explicit bindings for variable ~S" (car (second c)))))
+                         (setf unbound-vars (remove (first definition) unbound-vars))
                          
-                         (setf (production-bindings production)
-                           (remove (car (second c))
-                                   (production-bindings production)))
-                         (push (cons
-                                (cons (car (second c)) (find-variables (second (second c))))
-                                (make-cr-condition :type 'bind :value (car (second c)) :result (second (second c))))
-                               binds))
-                        ((mv-bind)
+                         (push-last (cons
+                                     (assoc (first definition) dependencies)
+                                     (make-cr-condition :type 'bind :value (first definition) :result (second definition)))
+                                    binds))
+                        (mv-bind
                          
-                         (let ((bind-vars (car (second c))))
-                           (dolist (x bind-vars)
-                             (unless (find x (production-bindings production))
-                               (bad-production-exit (format nil "Cannot have two explicit bindings for variable ~S" x))))
+                         (let ((bind-vars (first definition))
+                               (depends nil))
                            
                            (dolist (x bind-vars)
-                             (setf (production-bindings production)
-                               (remove x (production-bindings production))))
+                             (setf unbound-vars (remove x unbound-vars)))
                            
-                           (push (cons
-                                  (cons bind-vars (find-variables (second (second c))))
-                                  (make-cr-condition :type 'mv-bind :value bind-vars :result (second (second c))))
-                                 binds))))))))
+                           (dolist (x bind-vars)
+                             (setf depends (append depends (cdr (assoc x dependencies)))))
+                           
+                           (push-last (cons
+                                       (cons bind-vars (remove-duplicates depends))
+                                       (make-cr-condition :type 'mv-bind :value bind-vars :result (second definition)))
+                                      binds))))))))
                
                
-               ;;; Make sure everything necessary is bound
+               ;;; sort the binding operations based on dependency
                
-               ;(format t "Variables: ~s bindings: ~s~%" lhs-variables (production-bindings production))
-               
-               (awhen (some (lambda (x) (find x (production-bindings production))) lhs-variables)
-                      (bad-production-exit (format nil "Because ~s is not bound on the LHS." it)))
-               
-               
-               ;;; Make sure that none of the slot name variables are bound in an unsafe manner
-               
-               (awhen (find-if-not (lambda (x) (find x safe-bindings)) slot-variables)
-                      (bad-production-exit (format nil "Because slot-name variable ~s is not bound in a constant named slot i.e. there is more than one level of indirection." it)))
-               
-               
-               ;;; Check the explicit bindings for circularities
-               
-               (when (circular-references binds)
-                 (bad-production-exit "Because there are circular references in the explicit LHS !bind!'s."))               
-               
-               (setf binds (sort-for-bind-order (reverse binds)))
+               (setf binds (sort-for-bind-order binds))
                
                ;; split the binds if any need search vars...
                
@@ -747,18 +899,16 @@
                                            (some (lambda (y)
                                                    (or (eq (gethash y var-table) 'search)
                                                        (eq (gethash y var-table) 'search-slot)))
-                                                 (cdr x))) binds :key #'car)))
+                                                 (cdr x))) 
+                                         binds :key 'car)))
                  
                  (if split
                      (progn
-                       
-                       (setf search-bind (append search-bind (mapcar #'cdr (subseq binds split))))
-                       (setf binds (mapcar #'cdr (subseq binds 0 split))))
-                   (setf binds (mapcar #'cdr binds))))
+                       (setf search-bind (append search-bind (mapcar 'cdr (subseq binds split))))
+                       (setf binds (mapcar 'cdr (subseq binds 0 split))))
+                   (setf binds (mapcar 'cdr binds))))
                
-               
-               ;;; build the whole conditions list
-               
+               ;;; Now set the production slots
                
                (setf (production-constants production) constants)
                (setf (production-binds production) (append vars var2s binds))
@@ -768,369 +918,376 @@
                (setf (production-search-others production) search-other)
                
                (setf (production-selection-code production) selection)
-               (setf (production-implicit production) implicit)
-               ))
+               (setf (production-implicit production) implicit)))
            
-           ;(pprint (production-conditions production))
-           
-           
-           
-           (let ((rhs-binds nil)
-                 )
+           (let ((rhs-binds nil))
              (dolist (action rhs)
-               (let ((a action))
-               
-               
-               (case (caar a)
-                 (#\=
-                  (cond ((null (second a))
-                         ;; That's a dummy action to keep the
-                         ;; buffer alive
-                         )
-                        ((= (length (second a)) 1)
-                         ;; an overwrite
-                         
-                         (push-last 
-                          (list #'(lambda () 
-                                    (schedule-overwrite-buffer-chunk (cdar a)
-                                                                     (replace-variables (first (second a))
-                                                                                        (production-bindings production))
-                                                                     0
-                                                                     :module 'procedural
-                                                                     :priority 90
-                                                                     :output (procedural-rhst prod)))
-                                a)
-                          (production-actions production)))
-                        (t
-                         
-                         ;; make sure non-dynamic production doesn't have dynamic slots
-                         
-                         (unless dynamicp
-                           (do ((data (second a) (cddr data)))
-                               ((null data))
-                         
-                             (when (chunk-spec-variable-p (car data))
-                               (bad-production-exit "Slot name variables not allowed in buffer modification actions of non-dynamic productions."))))
-                         
-                         ;; a true buffer modification
-                         (push-last 
-                          (list #'(lambda () 
-                                    (let ((expansion (replace-variables (second a) (production-bindings production)))
-                                          (buffer (cdar a)))
-                                      (when dynamicp 
-                                        (extend-buffer-chunk buffer expansion))
-                                      (schedule-mod-buffer-chunk buffer
-                                                                 expansion
-                                                                 0
-                                                                 :module 'procedural
-                                                                 :priority 100
-                                                                 :output (procedural-rhst prod))))
-                                a)
-                          (production-actions production)))))
+               (let ((op (production-statement-op action))
+                     (target (production-statement-target action))
+                     (definition (production-statement-definition action))
+                     (spec (production-statement-spec action)))
                  
-                 (#\-
-                  (push-last 
-                   (list #'(lambda () 
-                             (schedule-clear-buffer (cdar a)
-                                                    0
+                 (case op
+                   (#\=
+                    (cond ((null definition)
+                           ;; That's a dummy action to keep the
+                           ;; buffer alive
+                           )
+                          ((= (length definition) 1) ;; it's a chunk so it won't need to extend
+                           (push-last 
+                              (lambda () 
+                                (schedule-mod-buffer-chunk target (define-chunk-spec-fct 
+                                                                      (replace-variables definition (production-bindings production)))
+                                                           0
+                                                           :time-in-ms t
+                                                           :module 'procedural
+                                                           :priority 100
+                                                           :output (procedural-rhst prod)))
+                              (production-actions production)))
+                          (t
+                           (push-last 
+                            (lambda () 
+                              (multiple-value-bind (spec extended)
+                                  (instantiate-chunk-spec spec (production-bindings production))
+                                (schedule-mod-buffer-chunk target spec 0
+                                                           :time-in-ms t
+                                                           :module 'procedural
+                                                           :priority 100
+                                                           :output (procedural-rhst prod))
+                                (when extended
+                                  (schedule-event-now 'extend-buffer-chunk
+                                                      :module 'procedural
+                                                      :priority 101
+                                                      :params (list target)
+                                                      :output (procedural-rhst prod)))))
+                            (production-actions production)))))
+                   (#\*
+                    (cond ((null definition)
+                           ;; not really allowed, but do these even get through?
+                           )
+                          ((= (length definition) 1)
+                           (push-last 
+                            (lambda () 
+                              (push-last (multiple-value-bind (event tag)
+                                             (schedule-module-mod-request target 
+                                                                          (define-chunk-spec-fct 
+                                                                              (replace-variables definition (production-bindings production)))
+                                                                          0
+                                                                          :time-in-ms t
+                                                                          :module 'procedural
+                                                                          :priority 60
+                                                                          :output (procedural-rhst prod)
+                                                                          :track t)
+                                           (declare (ignore event))
+                                           tag)
+                              (production-requested-actions (production-name production))))
+                            (production-actions production)))
+                          (t
+                           (push-last 
+                            (lambda () 
+                              (multiple-value-bind (spec extended)
+                                  (instantiate-chunk-spec spec (production-bindings production))
+                                (push-last (multiple-value-bind (event tag)
+                                               (schedule-module-mod-request target spec 0
+                                                                            :time-in-ms t 
+                                                                            :module 'procedural
+                                                                            :priority 60
+                                                                            :output (procedural-rhst prod)
+                                                                            :track t)
+                                             (declare (ignore event))
+                                             tag)
+                                      (production-requested-actions (production-name production)))
+                                (when extended
+                                  (schedule-event-now 'extend-buffer-chunk
+                                                      :module 'procedural
+                                                      :priority 61
+                                                      :params (list target)
+                                                      :output (procedural-rhst prod)))))
+                            (production-actions production)))))
+                   (#\@
+                    (push-last 
+                     (lambda () 
+                       (schedule-overwrite-buffer-chunk target
+                                                        (replace-variables (first definition) (production-bindings production))
+                                                        0
+                                                        :time-in-ms t
+                                                        :module 'procedural
+                                                        :priority 90
+                                                        :output (procedural-rhst prod)))
+                     (production-actions production)))
+                   (#\-
+                    (push-last 
+                     (lambda () 
+                       (schedule-clear-buffer target
+                                              0
+                                              :time-in-ms t
+                                              :module 'procedural
+                                              :priority 10
+                                              :output (when (procedural-rhst prod) 'medium)))
+                     (production-actions production)))
+                   
+                   (#\+  ;; The "direct" requests need to schedule an event to schedule the event
+                         ;; instead of scheduling it directly because it has to delay the evaluation
+                         ;; of the chunk->chunk-spec expansion since the production modifications
+                         ;; need to happen first and they have a priority of 100.
+                         ;; Is there a better way to handle that?
+                    (cond ((null spec) ;; request specifying only a chunk/variable
+                           (push-last 
+                            (lambda () 
+                              (schedule-event-now (lambda () 
+                                                    (push-last (multiple-value-bind (event tag)
+                                                                   (schedule-module-request target
+                                                                                            (define-chunk-spec-fct 
+                                                                                                (replace-variables definition (production-bindings production)))
+                                                                                            0
+                                                                                            :time-in-ms t
+                                                                                            :module 'procedural
+                                                                                            :priority 50
+                                                                                            :output (procedural-rhst prod)
+                                                                                            :track t)
+                                                                 (declare (ignore event))
+                                                                 tag)
+                                                          (production-requested-actions (production-name production))))
+                                                  :module 'procedural
+                                                  :priority 99
+                                                  :output nil))
+                            (production-actions production)))
+                          ((= (length definition) 1) ;; a request specifying a chunk and params
+                           (let ((chunk (first (first definition))))
+                             (push-last 
+                              (lambda () 
+                                (schedule-event-now (lambda () 
+                                                      (push-last (multiple-value-bind (event tag)
+                                                                     (schedule-module-request target
+                                                                                              (merge-chunk-specs 
+                                                                                               (chunk-name-to-chunk-spec (replace-variables chunk (production-bindings production)))
+                                                                                               spec)
+                                                                                              0
+                                                                                              :time-in-ms t
+                                                                                              :module 'procedural
+                                                                                              :priority 50
+                                                                                              :output (procedural-rhst prod)
+                                                                                              :track t)
+                                                                   (declare (ignore event))
+                                                                   tag)
+                                                            (production-requested-actions (production-name production))))
                                                     :module 'procedural
-                                                    :priority 10
-                                                    :output (when (procedural-rhst prod) 'medium)))
-                         a)
-                   (production-actions production)))
-                 
-                 (#\+
-                  (cond ((eq (car (second a)) 'isa)
-                         ;; a full request
-                         
-                         ;; make sure non-dynamic production doesn't have dynamic slots
-                         
-                         (unless dynamicp
-                           
-                             (when (some 'chunk-spec-variable-p (chunk-spec-slots (define-variable-chunk-spec-fct (second a))))
-                               (bad-production-exit "Slot name variables not allowed in buffer request actions of non-dynamic productions.")))
-                         
-
-                         (push-last 
-                          (list #'(lambda () 
-                                    (schedule-module-request (cdar a)
-                                                             (define-chunk-spec-fct 
-                                                                 (replace-variables (second a) (production-bindings production)))
-                                                             0
-                                                             :module 'procedural
-                                                             :priority 50
-                                                             :output (procedural-rhst prod)))
-                                a)
-                          (production-actions production)))
-                        ((= (length (second a)) 1)
-                         ;; a direct request
-                         
-                         (push-last 
-                          (list #'(lambda () 
-                                    
-                                    (schedule-event-relative 0 #'(lambda () (schedule-module-request (cdar a)
-                                                                                                     (chunk-name-to-chunk-spec 
-                                                                                                      (car (replace-variables (second a)
-                                                                                                                              (production-bindings production))))
-                                                                                                     0
-                                                                                                     :module 'procedural
-                                                                                                     :priority 50
-                                                                                                     :output (procedural-rhst prod)))
-                                                             :module 'procedural
-                                                             :priority 99
-                                                             :output nil))
-                                a)
-                          (production-actions production)))
-                        
-                        (t
-                         ;; a buffer modification request
-                         (unless dynamicp
-                           (do ((data (second a) (cddr data)))
-                               ((null data))
-                         
-                             (when (chunk-spec-variable-p (car data))
-                               (bad-production-exit "Slot name variables not allowed in buffer request actions of non-dynamic productions."))))
-                         
-                         (push-last 
-                          (list #'(lambda () 
-                                    (schedule-module-mod-request (cdar a)
-                                                                 (replace-variables (second a)
-                                                                                    (production-bindings production))
-                                                                 0
-                                                                 :verify (not dynamicp)
-                                                                 :module 'procedural
-                                                                 :priority 50
-                                                                 :output (procedural-rhst prod)))
-                                a)
-                          (production-actions production)))))
-                 
-                 (t
-                  (case (cdar a)
-                    ((eval safe-eval)
-                     (push-last (cons
-                            (cons nil (find-variables (second a)))
-                            (list #'(lambda ()
-                                      (eval (replace-variables-for-eval (car (second a))
-                                                                        (production-bindings production))))
-                                  a))
-                            rhs-binds)
-                     )
-                    
-                    ((bind safe-bind)
-                     (setf (production-bindings production)
-                       (remove (car (second a)) (production-bindings production)))
-                     (push-last 
+                                                    :priority 99
+                                                    :output nil))
+                              (production-actions production))))
+                          
+                          (t  ;; a full request 
+                           (push-last 
+                            (lambda ()
+                              (push-last (multiple-value-bind (event tag)
+                                             (schedule-module-request target
+                                                                      (instantiate-chunk-spec spec (production-bindings production))
+                                                                      0
+                                                                      :time-in-ms t
+                                                                      :module 'procedural
+                                                                      :priority 50
+                                                                      :output (procedural-rhst prod)
+                                                                      :track t)
+                                           (declare (ignore event))
+                                           tag)
+                                    (production-requested-actions (production-name production))))
+                            (production-actions production)))))
+                   
+                   (t ;; #\!
+                    (case target
+                      (stop
+                       (push-last 
+                        (lambda ()
+                          (schedule-break-relative 0 :priority :min :details "Stopped by !stop!"))
+                        (production-actions production)))
                       
-                      (cons
-                       (cons (car (second a)) (find-variables (second (second a))))
-                       (list #'(lambda ()
-                                  (bind-variable (car (second a))
-                                                 (eval (replace-variables-for-eval (second (second a))
-                                                                                   (production-bindings production)))
-                                                 production))
-                             a))
-                      rhs-binds)
-                     
-                      
-                     )
-                    
-                    ((mv-bind)
-                     (let ((bind-vars (car (second a))))
-                       (dolist (x bind-vars)
-                         (unless (find x (production-bindings production))
-                           (bad-production-exit (format nil "Cannot have two explicit bindings for variable ~S" x))))
-                       
-                       (dolist (x bind-vars)
-                         (setf (production-bindings production)
-                           (remove x (production-bindings production))))
-                       
+                      ((eval safe-eval)
                        (push-last 
                         (cons
-                         (cons (car (second a)) (find-variables (second (second a))))
-                         (list 
-                          #'(lambda ()
-                              (let ((vals (multiple-value-list 
-                                           (eval (replace-variables-for-eval (second (second a)) (production-bindings production))))))
-                                (dolist (x bind-vars)
-                                  (bind-variable x (if vals (pop vals) nil) production))))
-                          a))
+                         (cons nil (find-variables definition))
+                         (lambda ()
+                           (eval (replace-variables-for-eval (first definition) (production-bindings production)))))
                         rhs-binds))
-                     
-                     )
-                    
-                    (output
-                     (push-last (cons
-                            (cons nil (find-variables (second a)))
-                            (list #'(lambda ()
-                                          (print-production-output 
-                                           (second a)
-                                           (replace-variables (second a)
-                                                              (production-bindings production))))
-                                      a))
-                           rhs-binds)
-                     )
-                    (stop
-                     (push-last (list #'(lambda ()
-                                          (schedule-break-relative 0 :priority :min
-                                                                   :details "Stopped by !stop!"))
-                                      a)
-                                (production-actions production))))))))
-           
-           
-           
-           ;;; verify that all variables are bound in the actions
-           
-             (dolist (action rhs)
-               (awhen (some #'(lambda (x)
-                                (find x (production-bindings production)))
-                            (find-variables  (if (or (equal (car action) (cons #\! 'bind))
-                                                     (equal (car action) (cons #\! 'safe-bind))
-                                                     (equal (car action) (cons #\! 'mv-bind)))
-                                                 (progn  (cdr (second action)))
-                                               (progn  (second action)))))
                       
-                      (bad-production-exit (format nil "Unbound variable ~s on RHS in ~s." it (second action)))))
+                      (output
+                       (push-last 
+                        (cons
+                         (cons nil (find-variables definition))
+                         (lambda ()
+                           (print-production-output (first definition) (replace-variables definition (production-bindings production)))))
+                        rhs-binds))
+                      
+                      
+                      ((bind safe-bind)
+                       (push-last 
+                        (cons
+                         (cons (first definition) (find-variables (rest definition)))
+                         (lambda ()
+                           (bind-variable (first definition)
+                                          (eval (replace-variables-for-eval (second definition) (production-bindings production)))
+                                          production)))
+                        rhs-binds))
+                      
+                      ((mv-bind)
+                       (let ((bind-vars (first definition)))
+                         (push-last 
+                          (cons
+                           (cons bind-vars (find-variables (rest definition)))
+                           (lambda ()
+                             (let ((vals (multiple-value-list 
+                                          (eval (replace-variables-for-eval (second definition) (production-bindings production))))))
+                               (dolist (x bind-vars)
+                                 (bind-variable x (if vals (pop vals) nil) production)))))
+                          rhs-binds))))))))
              
-           
-             ;;; check rhs bindings 
              
-             
-             ;;; Check the explicit bindings for circularities
-             
-             (when (circular-references rhs-binds)
-               (bad-production-exit "Because there are circular references in the explicit RHS !bind!'s."))
+             ;; just get the dependencies set right -- I know there aren't any circularities
+             (circular-references (mapcar 'car rhs-binds))
              
              (let ((original-binds (copy-list rhs-binds)))
                
                (setf rhs-binds (sort-for-bind-order rhs-binds))
                (unless (equalp rhs-binds original-binds)
-                 
                  (let ((*error-output* original-error-stream))
-                   (print-warning "RHS !bind!, !eval!, and/or !output! actions of production ~s had to be reordered because of interdependencies of variables.~% If those actions have side effects check the actions carefully to ensure proper operation." (production-name production)))))
+                   (print-warning "RHS !bind!, !eval!, and/or !output! actions of production ~s had to be reordered because of interdependencies of variables." 
+                                  (production-name production))
+                   (print-warning "If those actions have side effects check the actions carefully to ensure proper operation." (production-name production)))))
              
              ;; make sure the bindings happen first
-             
-             (setf (production-actions production) (append (mapcar 'cdr rhs-binds) (production-actions production)))
-             )
+             (setf (production-actions production) (append (mapcar 'cdr rhs-binds) (production-actions production))))
            
-           ;;; Add the implicit clears
-           
+           ;;; Add the implicit clears for strict harvesting
            (dolist (y lhs)
-             (let ((x y))
-               (when (eql #\= (caar x))
-                 (unless (or (find (cdar x) (procedural-unharvested-buffers prod))
-                             (find (cdar x) rhs :key #'cdar))
-                   
+             (when (or (eql #\= (production-statement-op y))
+                       ;; test for the buffer failure queries
+                       ;; don't worry about doubling up on this
+                       ;; since a buffer can't both have a chunk and
+                       ;; a failure so even if it's done it'll never
+                       ;; actually happen.
+                       
+                       (and (eql #\? (production-statement-op y))
+                            (find (list '= 'buffer 'failure)
+                                  (chunk-spec-slot-spec (production-statement-spec y) 'buffer)
+                                  :test 'equalp)))
+               (let ((target (production-statement-target y)))
+                 (unless (or (find target (procedural-unharvested-buffers prod))
+                             (find target rhs :key 'production-statement-target))
                    (push-last 
-                    (list #'(lambda () 
-                              (schedule-clear-buffer (cdar x)
-                                                     0
-                                                     :module 'procedural
-                                                     :priority 10
-                                                     :output (when (procedural-rhst prod) 'medium)))
-                          (list 'implicitly 'clear (cdar x)))
+                    (lambda () 
+                      (schedule-clear-buffer target
+                                             0
+                                             :time-in-ms t
+                                             :module 'procedural
+                                             :priority 10
+                                             :output (when (procedural-rhst prod) 'medium)))
                     (production-actions production))))))
            
+           ;;; Add the implicit clears for requests
            (dolist (y rhs)
-             (let ((x y))
-               (when (and (eql #\+ (caar x)) 
-                          (or
-                           (eq 'isa (car (second x)))
-                           (= (length (second x)) 1))
-                          (not (find (cons #\- (cdar x)) rhs :key #'car :test #'equal)))
-                 
+             (let ((target (production-statement-target y)))
+               (when (and (eql #\+ (production-statement-op y)) 
+                          (not (find-if (lambda (x)
+                                          (and (eql #\- (production-statement-op x))
+                                               (eql target (production-statement-target x))))
+                                        rhs)))
                  (push-last 
-                  (list #'(lambda () 
-                            (schedule-clear-buffer (cdar x)
-                                                   0
-                                                   :module 'procedural
-                                                   :priority 10
-                                                   :output (when (procedural-rhst prod) 'medium)))
-                        (list 'clear 'on 'request (cdar x)))
-                  (production-actions production))))) 
+                  (lambda () 
+                    (schedule-clear-buffer target
+                                           0
+                                           :time-in-ms t
+                                           :module 'procedural
+                                           :priority 10
+                                           :output (when (procedural-rhst prod) 'medium)))
+                  (production-actions production)))))
            
            ;;; Parse LHS for unknown chunks
            
            (dolist (x lhs)
-             (cond ((eql #\= (caar x))
-                    (dolist (slot (fifth x))
-                      (unless (or (chunk-spec-variable-p (third slot))
-                                  (chunk-p-fct (third slot))
-                                  (stringp (third slot))
-                                  (listp (third slot))
-                                  (numberp (third slot))
-                                  (eq t (third slot)))
-                        (create-undefined-chunk (third slot)))))
-                   ((eql #\? (caar x))
-                    (dolist (slot (third x))
-                      (unless (or (chunk-spec-variable-p (third slot))
-                                  (chunk-p-fct (third slot))
-                                  (numberp (third slot))
-                                  (stringp (third slot))
-                                  (listp (third slot))
-                                  (numberp (third slot))
-                                  (eq t (third slot)))
-                        (create-undefined-chunk (third slot)))))))
+             (when (or (eql #\= (production-statement-op x))
+                       (eql #\? (production-statement-op x)))
+               (dolist (slot (act-r-chunk-spec-slots (production-statement-spec x)))
+                 (let ((value (act-r-slot-spec-value slot)))
+                   (unless (or (chunk-spec-variable-p value)
+                               (chunk-p-fct value)
+                               (stringp value)
+                               (listp value)
+                               (numberp value)
+                               (keywordp value)
+                               (eq t value))
+                     (create-undefined-chunk value))))))
            
            ;;; Parse RHS for unknown chunks
-           ;;; Only in = modifications and direct requests though
-           ;;; anything in a full + is up to the module to
-           ;;; handle i.e. this is where I see something
-           ;;; like retrieval variables being not an =
-           ;;; working in about 2 minutes...
+           ;;; Only in modifications, overwrites, and indirect requests (+ or *)
+           ;;; anything in a full + or * is up to the module to figure out
+           ;;; which allows for things like &variable in visual-location
+           ;;; requests 
            
            (dolist (x rhs)
-             (cond ((eql #\= (caar x))
-                    (if (= (length (second x)) 1)
-                        (cond ((or (chunk-spec-variable-p (car (second x)))
-                                   (chunk-p-fct (car (second x))))
-                               ;;; nothing because that's safe
-                               )
-                              ((symbolp (car (second x)))
-                               (create-undefined-chunk (car (second x))))
-                              (t
-                               (bad-production-exit (format nil "~s is not a variable or chunk name in a buffer overwrite action." (car (second x))))))
-                      (dolist (val (mapcar #'cdr (query-list-to-conses (second x)))) ;; I know it's a slot-value pair list
-                        
-                        (unless (or (chunk-spec-variable-p val)
-                                    (chunk-p-fct val)
-                                    (numberp val)
-                                    (stringp val)
-                                    (listp val)
-                                    (numberp val)
-                                    (eq t val))
-                          (create-undefined-chunk val)))))
-                   ((eql #\+ (caar x))
-                    (when (= (length (second x)) 1) ;; don't create chunks in full requests
-                      (cond ((or (chunk-spec-variable-p (car (second x)))
-                                 (chunk-p-fct (car (second x))))
-                             ;;; nothing because that's safe
-                             )
-                            ((symbolp (car (second x)))
-                             (create-undefined-chunk (car (second x))))
-                            (t
-                             (bad-production-exit (format nil "~s is not a variable or chunk name in a direct request action." (car (second x))))))))))
+             (let ((op (production-statement-op x))
+                   (definition (production-statement-definition x))
+                   (spec (production-statement-spec x)))
+               (cond ((or (eql #\= op)
+                          (eql #\@ op))
+                      (cond ((= (length definition) 1)
+                             (unless (or (chunk-spec-variable-p (first definition))
+                                         (chunk-p-fct (first definition)))
+                               (create-undefined-chunk (first definition))))
+                            (spec
+                             (dolist (slot (act-r-chunk-spec-slots spec))
+                               (let ((val (act-r-slot-spec-value slot)))
+                                 
+                                 (unless (or (chunk-spec-variable-p val)
+                                             (chunk-p-fct val)
+                                             (numberp val)
+                                             (stringp val)
+                                             (listp val)
+                                             (keywordp val)
+                                             (eq t val))
+                                   (when (symbolp val)
+                                     (create-undefined-chunk val))))))))
+                     ((and (or (eql #\+ op)
+                               (eql #\* op))
+                           (= (length definition) 1))
+                      (if (atom (first definition))
+                          (unless (or (chunk-spec-variable-p (first definition))
+                                      (chunk-p-fct (first definition)))
+                            (create-undefined-chunk (first definition)))
+                        (let ((val (first (first definition))))
+                          (unless (or (chunk-spec-variable-p val)
+                                      (chunk-p-fct val))
+                            (create-undefined-chunk val))))))))
            
-           ;; Replace the special case for vision and
-           ;; use the warning mechanism that's available now
+           ;; Send any module which needs it a warning after conflict resolution
+           ;; only for + requests right now, but should that change to allow * too?
            
            (dolist (x rhs)
-             (let ((y x))
-               (when (and (eql #\+ (caar x))
-                          (or (= (length (second x)) 1) ;; a direct request
-                              (eq (car (second x)) 'isa)) ;; a full request
-                          (require-module-warning? (cdar x)))
-                 (if (= (length (second x)) 1)
-                     
-                     (push #'(lambda ()
-                               (module-warning (cdar y) (chunk-chunk-type-fct (car (replace-variables (second y) (production-bindings production))))))
-                           (production-conflict-code production))
-                   (push #'(lambda ()
-                             (module-warning (cdar y) (second (second y))))
-                         (production-conflict-code production))))))
+             (let ((op (production-statement-op x))
+                   (target (production-statement-target x))
+                   (definition (production-statement-definition x))
+                   (spec (production-statement-spec x)))
+               
+               (when (and (eql #\+ op)
+                          (require-module-warning? target))
+                 
+                 (cond ((null spec) ;; request specifying only a chunk/variable
+                         (push-last 
+                          (lambda () 
+                            (module-warning target (define-chunk-spec-fct (replace-variables definition (production-bindings production)))))
+                          (production-conflict-code production)))
+                        ((= (length definition) 1) 
+                         (let ((chunk (first (first definition))))
+                           (push-last 
+                            (lambda () 
+                              (module-warning target (merge-chunk-specs (chunk-name-to-chunk-spec (replace-variables chunk (production-bindings production)))
+                                                                        spec)))
+                            (production-conflict-code production))))
+                       (t  ;; a full request
+                         (push-last 
+                          (lambda ()
+                            (module-warning target (instantiate-chunk-spec spec (production-bindings production))))
+                          (production-conflict-code production)))))))
            
-           ;(pprint (production-actions production))
-           
+           ;; warn if it exists
            (awhen (get-production-internal (production-name production) prod)
                   (let ((*error-output* original-error-stream))
                     (print-warning "Production ~S already exists and it is being redefined." (production-name production)))
@@ -1180,294 +1337,310 @@
                      (progn 
                        (format *error-output* warn-text)))))))
            
+           (when (and (procedural-style-warnings prod) (procedural-style-check prod)
+                      (not (procedural-delay-tree prod)))
+             (check-production-for-style prod production)
+             (check-between-production-style prod))
+           
            (close error-string-stream)
            
            (production-name production))
          (bad-production-exit "Production is missing the ==> separator.")))))
 
 
-
-
-(defun parse-conditions (procedural definition)
+(defun parse-conditions (procedural p-name definition buffers)
   (aif (gethash definition (procedural-condition-parse-table procedural))
-       it
-  (let ((segments (segment-production definition)))
-    (if (eq segments :error)
-        (progn
-          (print-warning "First item on LHS is not a valid command")
-          :error)
-      (do* ((segs segments (cdr segs))
-            (seg (car segs) (car segs))
-            (cmd (parse-command (car seg) :operators '(#\? #\=)
-                                :commands '(eval safe-eval bind safe-bind mv-bind)) 
-                 (parse-command (car seg) :operators '(#\? #\=)
-                                :commands '(eval safe-eval bind safe-bind mv-bind)))
-            (conditions nil))
-            
-           ((null seg) (setf (gethash definition (procedural-condition-parse-table procedural)) conditions))
+       (progn
+         (when (cdr it)
+           (dolist (x (cdr it))
+             (if (listp x)
+                 (model-warning "Production ~s tests invalid slot ~s for type ~s." p-name (third x) (second x))
+               (unless (valid-slot-name x)
+                 (model-warning "Production ~s uses previously undefined slot ~s." p-name x)
+                 (extend-possible-slots x nil)))))
+         
+         (car it))
+       (flet ((bad-condition-exit (string)
+                                  (print-warning string)
+                                  (return-from parse-conditions :error)))
+
+         (let ((segments (segment-production definition buffers))
+               (conditions nil)
+               (new-slots nil))
+           (if (eq segments :error)
+               (bad-condition-exit "First item on LHS is not a valid command")
+             (dolist (seg segments)
+               (let ((statement (parse-statement seg)))
                
-        (case (car cmd)
-          (#\=
-           (if (< (length (cdr seg)) 2)
-               (progn
-                 (print-warning "Missing chunk-type test in condition for ~s buffer." (cdr cmd))
-                 (return-from parse-conditions :error))
-             (aif (define-variable-chunk-spec-fct (cdr seg))
-                  (progn
-                    (when (some #'keywordp (chunk-spec-slots it))
-                      (print-warning "Request parameters not allowed in buffer tests: ~s" seg)
-                      (return-from parse-conditions :error))
-                    (let* ((slot-specs (chunk-spec-slot-spec it))
-                           (constants)
-                           (variables)
-                           (var2)
-                           (others)
-                           (slot-vars))
-                      
-                      (dolist (spec slot-specs)
+               (case (production-statement-op statement) 
+                 (#\=
+                  (cond ((find statement conditions :test (lambda (x y) 
+                                                           (and (eql (production-statement-op x) (production-statement-op y))
+                                                                (eql (production-statement-target x) (production-statement-target y)))))
+                         (bad-condition-exit (format nil "Only one ~s condition allowed." (car seg))))
+                                                                         
+                        ;; Don't allow a "direct" chunk comparison to the buffer -- Should that be allowed now?
+                        ((= (length (production-statement-definition statement)) 1)
+                         (bad-condition-exit (format nil "Insufficient conditions specified in ~s" seg)))
+                        ((= (length (production-statement-definition statement)) 0)
+                         (setf (production-statement-definition statement) (list 'isa 'chunk))
+                         (setf (production-statement-spec statement) (define-chunk-spec isa chunk))
+                         (push-last statement conditions))
+                        (t
+                         (multiple-value-bind (spec slots)
+                             (define-chunk-spec-fct (production-statement-definition statement) t nil)
+                           (if spec
+                               (if (= 0 (act-r-chunk-spec-request-param-slots spec))
+                                   (progn
+                                     (when slots
+                                       (let ((extended-slots (remove-if 'listp slots))
+                                             (invalid-type-slots (remove-if-not 'listp slots)))
+                                         (when extended-slots
+                                           (model-warning "Production ~s uses previously undefined slots ~s." p-name extended-slots))
+                                         (dolist (x invalid-type-slots)
+                                           (model-warning "Production ~s tests invalid slot ~s for type ~s." p-name (third x) (second x))))
+                                       
+                                       (dolist (x slots) (pushnew x new-slots)))
+                                     (setf (production-statement-spec statement) spec)
+                                     (push-last statement conditions))
+                                 (bad-condition-exit (format nil "Request parameters not allowed in production conditions: ~s" seg)))
+                             (bad-condition-exit (format nil "Invalid syntax in ~s condition." seg)))))))
+                 (#\?
+                  (cond ((find statement conditions :test (lambda (x y) 
+                                                           (and (eql (production-statement-op x) (production-statement-op y))
+                                                                (eql (production-statement-target x) (production-statement-target y)))))
+                         (bad-condition-exit (format nil "Only one ~s condition allowed." (car seg))))
                         
-                        (when (chunk-spec-variable-p (second spec))
-                          (push (second spec) slot-vars))
+                        ;; query must be of the form {mod} query value
+                        ((< (length (production-statement-definition statement)) 2)
+                         (bad-condition-exit (format nil "Insufficient conditions specified in ~s" seg)))
                         
-                        
-                        (cond ((and (not (chunk-spec-variable-p (second spec)))
-                                    (not (chunk-spec-variable-p (third spec))))
-                               (push-last spec constants))
-                              ((not (eq '= (first spec)))
-                               (push-last spec others))
-                              ((chunk-spec-variable-p (second spec))
-                               (push-last spec var2)
-                               (push-last spec others))
-                              ((chunk-spec-variable-p (third spec))
-                               (push-last spec variables)
-                               (push-last spec others))
-                              (t
-                               (push-last spec constants))))
-                      
-                      
-                      
-                      (push-last (list cmd (cdr seg) 
-                                       (define-chunk-spec-fct (slot-specs-to-chunk-spec-list (chunk-spec-chunk-type it) constants))
-                                       variables
-                                       slot-specs 
-                                       others ;(when others (slot-specs-to-chunk-spec-list (chunk-spec-chunk-type it) others))
-                                       slot-vars
-                                       var2)
-                                 conditions)))
-                  (progn
-                    (print-warning "Invalid syntax in ~s condition." (car seg))
-                    (return-from parse-conditions :error)))))
-          (#\?
-           (let ((queries (process-query-specs (cdr cmd) (cdr seg))))
+                        (t
+                         (aif (define-query-spec-fct (production-statement-definition statement))
+                              (cond ((not (zerop (act-r-chunk-spec-relative-slots it)))
+                                     (bad-condition-exit (format nil "Invalid buffer query uses modifiers other than = or -: ~s" seg)))
+                                    ((act-r-chunk-spec-slot-vars it)
+                                     (bad-condition-exit (format nil "Invalid buffer query uses variables in query names: ~s" seg)))
+                                    ((not (every (lambda (x)
+                                                  (member (act-r-slot-spec-name x) (valid-buffer-queries (production-statement-target statement))))
+                                                 (act-r-chunk-spec-slots it)))
+                                     (print-warning "Production ~s makes invalid query of buffer ~S.  Only available queries are ~S." p-name
+                                                    (production-statement-target statement) (act-r-buffer-queries (production-statement-target statement))))
+                                    (t
+                                     (setf (production-statement-spec statement) it)
+                                     (push-last statement conditions)))
+                              (bad-condition-exit (format nil "Invalid syntax in ~s condition." seg))))))
+                 (#\! 
+                  (case (production-statement-target statement)
+                    ((bind safe-bind)
+                     (if (and (= (length (production-statement-definition statement)) 2)
+                              (chunk-spec-variable-p (first (production-statement-definition statement))))
+                         (push-last statement conditions)
+                       (bad-condition-exit (format nil "Invalid bind command: ~s" seg))))
+                    ((mv-bind)
+                     (if (and (= (length (production-statement-definition statement)) 2)
+                              (listp (first (production-statement-definition statement)))
+                              (every 'chunk-spec-variable-p (first (production-statement-definition statement))))
+                         (push-last statement conditions)
+                       (bad-condition-exit (format nil "Invalid mv-bind command: ~s" seg))))
+                    ((eval safe-eval)
+                     (if (= (length (production-statement-definition statement)) 1)
+                         (push-last statement conditions)
+                       (bad-condition-exit (format nil "Invalid eval command: ~s" seg))))
+                    (t
+                     (bad-condition-exit (format nil "Invalid condition: ~s" seg)))))
+                 (t
+                  (bad-condition-exit (format nil "Invalid condition: ~s" seg)))))))
              
-             (cond ((eq queries :error)
-                    (print-warning "Invalid buffer query ~S." seg)
-                    (return-from parse-conditions :error))
-                   
-                   (t
-                    (let ((constant-queries (remove-if #'chunk-spec-variable-p queries :key #'third))
-                          (variable-queries (remove-if-not #'chunk-spec-variable-p queries :key #'third)))
-                      (push-last (list cmd (cdr seg) constant-queries variable-queries) conditions))))))
-          (t
-           (case (cdr cmd)
-             ((bind safe-bind)
-              (if (and (= (length seg) 3)
-                       (chunk-spec-variable-p (second seg)))
-                  (push-last (list cmd (cdr seg)) conditions)
-                (progn
-                  (print-warning "Invalid bind command: ~s" seg)
-                  (return-from parse-conditions :error))))
-             ((mv-bind)
-              (if (and (= (length seg) 3)
-                       (listp (second seg))
-                       (every 'chunk-spec-variable-p (second seg)))
-                  (push-last (list cmd (cdr seg)) conditions)
-                (progn
-                  (print-warning "Invalid mv-bind command: ~s" seg)
-                  (return-from parse-conditions :error))))
-             ((eval safe-eval)
-              (if (= (length seg) 2)
-                  (push-last (list cmd (cdr seg)) conditions)
-                (progn
-                  (print-warning "Invalid eval command: ~s" seg)
-                  (return-from parse-conditions :error))))
-             (t
-              (print-warning "Invalid command: ~s" seg)
-              (return-from parse-conditions :error))))))))))
+             (car (setf (gethash definition (procedural-condition-parse-table procedural)) (cons conditions new-slots)))))))
 
-(defun parse-actions (procedural definition conditions dynamicp)
+
+
+(defun parse-actions (procedural p-name definition conditions buffers)
   (aif (gethash (cons definition conditions) (procedural-action-parse-table procedural))
-       it
-       (let ((segments (segment-production definition)))
-    (if (eq segments :error)
-        (progn
-          (print-warning "First item on RHS is not a valid command")
-          :error)
-      (do* ((segs segments (cdr segs))
-            (seg (car segs) (car segs))
-            (cmd (parse-command (car seg) :operators '(#\- #\+  #\=)) 
-                 (parse-command (car seg) :operators '(#\- #\+  #\=)))
-            (actions nil))
-           
-           ((null seg) (setf (gethash (cons definition conditions) (procedural-action-parse-table procedural)) actions))
-        (when (null cmd)
-          (print-warning "Invalid command on RHS: ~S" (car seg))
-          (return-from parse-actions :error))
-        
-        (case (car cmd)
-          (#\-
-           (if (= (length seg) 1)
-               (push-last (list cmd) actions)
-             (progn
-               (print-warning "Invalid - buffer command: ~s" seg)
-               (return-from parse-actions :error))))
-          
-          (#\=
-           (cond ((= (length seg) 1)
-                  (push-last (list cmd) actions)
-                  (unless (find (cons #\= (cdr cmd)) conditions :test #'equal :key #'car)
-                    (print-warning "Empty buffer modification action for untested buffer ~s." seg)
-                    (return-from parse-actions :error)))
-                 ((= (length seg) 2)
-                  (push-last (list cmd (cdr seg)) actions))
-                 (t
-                  (let* ((lhs-binding (find (cons #\= (cdr cmd)) conditions
-                                           :test #'equal :key #'car))
-                         (chunk-type (if lhs-binding
-                                         (chunk-spec-chunk-type (third lhs-binding))
-                                       nil)))
-                    (if chunk-type
-                        (if (or (and (not dynamicp) (valid-chunk-mod-spec chunk-type (cdr seg)))
-                                (and dynamicp (valid-variable-chunk-mod-spec chunk-type (cdr seg))))
-                            (push-last (list cmd (cdr seg)) actions)
-                          (progn
-                            (print-warning "Invalid buffer modification ~s." seg)
-                            (return-from parse-actions :error)))
-                      (progn
-                        (print-warning "Cannot modify buffer ~s if not matched on LHS." (cdr cmd))
-                        (return-from parse-actions :error)))))))
-                    
-           (#\+
-           (cond ((= (length seg) 1)
-                  (print-warning "Buffer request ~s requires some parameters." (car seg))
-                  (return-from parse-actions :error))
-                 ((= (length seg) 2)
-                  (push-last (list cmd (cdr seg)) actions))
-                 (t
-                  (if (eq (second seg) 'isa)
-                      ;; This is a full request
-                      (progn
-                        (aif (define-variable-chunk-spec-fct (cdr seg))
-                             (progn
-                               (unless (every (lambda (x)
-                                                ; check for the variables
-                                                (or (and dynamicp (chunk-spec-variable-p x))
-                                                    (valid-buffer-request-slot 
-                                                     (cdr cmd) 
-                                                     (chunk-spec-chunk-type it) x)))
-                                                (chunk-spec-slots it))
-                                 
-                                 (print-warning  "Invalid slot value in request: ~s" seg)
-                                 (return-from parse-actions :error))
+       (progn
+         (when (cdr it)
+           (dolist (x (cdr it))
+             (if (listp x)
+                 (model-warning "Production ~s action has invalid slot ~s for type ~s." p-name (third x) (second x))
+               (unless (valid-slot-name x)
+                 (model-warning "Production ~s uses previously undefined slot ~s." p-name x)
+                 (extend-possible-slots x nil)))))
+         
+         (car it))
+       (flet ((bad-action-exit (string)
+                               (print-warning string)
+                               (return-from parse-actions :error)))
+
+         (let ((segments (segment-production definition buffers))
+               (actions nil)
+               (new-slots nil))
+           (if (eq segments :error)
+               (bad-action-exit "First item on RHS is not a valid command")
+             (dolist (seg segments)
+               (let ((statement (parse-statement seg)))
                   
-                               (push-last (list cmd (cdr seg)) actions))
-                             (progn
-                               (print-warning "Invalid syntax in action ~s." seg)
-                               (return-from parse-actions :error))))
-                    ;; otherwise it's assumed to be a modification request
-                    (progn
-                      (let* ((lhs-binding (find (cons #\= (cdr cmd)) conditions
-                                                :test #'equal :key #'car))
-                             (chunk-type (if lhs-binding
-                                             (chunk-spec-chunk-type (third lhs-binding))
-                                           nil)))
-                        (if chunk-type
-                            (if (or (and (not dynamicp) (valid-chunk-mod-spec chunk-type (cdr seg)))
-                                    (and dynamicp (valid-variable-chunk-mod-spec chunk-type (cdr seg))))
-                                (push-last (list cmd (cdr seg)) actions)
-                              (progn
-                                (print-warning "Invalid buffer modification ~s." seg)
-                                (return-from parse-actions :error)))
-                          (progn
-                            (print-warning "Cannot modify buffer ~s if not matched on LHS." 
-                             (cdr cmd))
-                            (return-from parse-actions :error)))))))))
-          
-          (t
-           (case (cdr cmd)
-             ((bind safe-bind)
-              (if (and (= (length seg) 3)
-                       (chunk-spec-variable-p (second seg)))
-                  (push-last (list cmd (cdr seg)) actions)
-                (progn
-                  (print-warning "Invalid bind command: ~s" seg)
-                  (return-from parse-actions :error))))
-             ((mv-bind)
-              (if (and (= (length seg) 3)
-                       (listp (second seg))
-                       (every 'chunk-spec-variable-p (second seg)))
-                  (push-last (list cmd (cdr seg)) actions)
-                (progn
-                  (print-warning "Invalid mv-bind command: ~s" seg)
-                  (return-from parse-actions :error))))
-             ((eval safe-eval output)
-              (if (= (length seg) 2)
-                  (push-last (list cmd (cdr seg)) actions)
-                (progn
-                  (print-warning "Invalid ~s command: ~s" (cdr cmd) seg)
-                  (return-from parse-actions :error))))
-             (stop
-              (if (= (length seg) 1)
-                  (push-last (list cmd) actions)
-                (progn
-                  (print-warning "Invalid stop command: ~s" seg)
-                  (return-from parse-actions :error))))
-             (t
-              (print-warning "Invalid command: ~s" seg)
-              (return-from parse-actions :error))))))))))
+                 (case (production-statement-op statement) 
+                   (#\-
+                    (if (= (length (production-statement-definition statement)) 0)
+                        (push-last statement actions)
+                      (bad-action-exit (format nil "Invalid - buffer command: ~s" seg))))
+                   
+                   (#\@ ;; now this is the specific overwrite action instead of =buffer> <chunk>
+                    (if (= (length (production-statement-definition statement)) 1)
+                        (let ((chunk? (first (production-statement-definition statement))))
+                          (if (or (chunk-spec-variable-p chunk?) (chunk-p-fct chunk?))
+                              (push-last statement actions)
+                            (bad-action-exit (format nil "Invalid overwrite action: ~s.  Must provide a variable or chunk name." seg))))
+                      (bad-action-exit (format nil "Invalid overwrite action: ~s.  Must have a single parameter." seg))))
+
+                   ((#\= #\*)  ;; production modifications and module modifications 
+                               ;; have the same requirements and allow the same syntax
+                               ;; except that an empty * is not allowed only an empty
+                               ;; = can be used to avoid strict harvesting
+                    
+                    ;; must test buffer on LHS
+                    (unless (or (find-if (lambda (x)
+                                           (and (eql (production-statement-op x) #\=)
+                                                (eql (production-statement-target x) (production-statement-target statement))))
+                                         conditions)
+                                
+                                ;; a buffer failure query allows the empty modifications
+                                
+                                (and (= (length (production-statement-definition statement)) 0)
+                                     (eql (production-statement-op statement) #\=)
+                                     
+                                     (find-if (lambda (x)
+                                                (and (eql (production-statement-op x) #\?)
+                                                     (eql (production-statement-target x) (production-statement-target statement))
+                                                     (find (list '= 'buffer 'failure)
+                                                           (chunk-spec-slot-spec (production-statement-spec x) 'buffer)
+                                                           :test 'equalp)))
+                                              conditions)))
+                      (bad-action-exit (format nil "Buffer modification action for untested buffer ~s." seg)))
+                    
+                    (cond ((= (length (production-statement-definition statement)) 0) ;; empty =buffer operation
+                           (if (eql #\= (production-statement-op statement))
+                               (progn
+                                 (setf (production-statement-spec statement) (define-chunk-spec isa chunk))
+                                 (push-last statement actions))
+                             (bad-action-exit (format nil "Modification request ~s requires some modification." (car seg)))))
+                          ;; this is not an overwrite anymore!
+                          ((= (length (production-statement-definition statement)) 1)
+                           (let ((chunk? (first (production-statement-definition statement))))
+                             (if (or (chunk-spec-variable-p chunk?) (chunk-p-fct chunk?))
+                                 (push-last statement actions)
+                               (bad-action-exit (format nil "Invalid single operator modification action: ~s.  Must be a variable or chunk name." seg)))))
+                          (t ;; it should be a full modification
+                           ;; now that's allowed to have an ISA !!!
+                           ;; and there's no "carry over" of the LHS isa to the RHS validity testing
+                           
+                           (multiple-value-bind (spec slots)
+                             (define-chunk-spec-fct (production-statement-definition statement) t nil)
+                           (if spec
+                               (if (or (zerop (act-r-chunk-spec-request-param-slots spec))
+                                        (and (eql #\* (production-statement-op statement))
+                                             (valid-request-params-for-buffer (production-statement-target statement) (act-r-chunk-spec-request-param-slots spec))))
+                                    (progn 
+                                      (when slots
+                                       (let ((extended-slots (remove-if 'listp slots))
+                                             (invalid-type-slots (remove-if-not 'listp slots)))
+                                         (when extended-slots
+                                           (model-warning "Production ~s uses previously undefined slots ~s." p-name extended-slots))
+                                         (dolist (x invalid-type-slots)
+                                           (model-warning "Production ~s action has invalid slot ~s for type ~s." p-name (third x) (second x))))
+                                       
+                                       (dolist (x slots) (pushnew x new-slots)))
+                                      
+                                      (setf (production-statement-spec statement) spec)
+                                      (push-last statement actions))
+                                  (bad-action-exit (format nil "Invalid request parameters in modification action ~s." seg)))
+                               (bad-action-exit (format nil "Invalid buffer modification ~s." seg)))))))
+                   (#\+
+                    (cond ((= (length (production-statement-definition statement)) 0)
+                           ; Don't error out now -- just make it "isa chunk" because production compilation
+                           ; can result in requests which have no specified slots and they should still result
+                           ; in a production being defined.
+                           ;(bad-action-exit (format nil "Buffer request ~s requires some parameters." (car seg)))
+                           (setf (production-statement-spec statement) (define-chunk-spec isa chunk))
+                           (push-last statement actions))
+                          ((= (length (production-statement-definition statement)) 1)
+                           (let ((chunk? (first (production-statement-definition statement))))
+                             (if (or (chunk-spec-variable-p chunk?) (chunk-p-fct chunk?))
+                                 (push-last statement actions)
+                               (if (listp chunk?)
+                                   (let ((c2? (first chunk?))
+                                         (request-spec (define-chunk-spec-fct (cdr chunk?) nil)))
+                                     (if (and (or (chunk-spec-variable-p c2?) (chunk-p-fct c2?))
+                                              request-spec
+                                              (valid-request-params-for-buffer (production-statement-target statement) (act-r-chunk-spec-request-param-slots request-spec)))
+                                         (progn 
+                                           (setf (production-statement-spec statement) request-spec)
+                                           (push-last statement actions))
+                                       (bad-action-exit (format nil "Invalid indirect request list: ~s.  Must be a list with a chunk or variable and a valid request parameters settings." seg))))
+                                 (bad-action-exit (format nil "Invalid single operator modification action: ~s.  Must be a variable or chunk name." seg))))))
+                          (t ;; a full request which may or may not have an isa
+                           
+                           (multiple-value-bind (spec slots)
+                               (define-chunk-spec-fct (production-statement-definition statement) t nil)
+                             (if spec
+                                 (if (or (zerop (act-r-chunk-spec-request-param-slots spec))
+                                         (valid-request-params-for-buffer (production-statement-target statement) (act-r-chunk-spec-request-param-slots spec)))
+                                     (progn 
+                                       (when slots
+                                       (let ((extended-slots (remove-if 'listp slots))
+                                             (invalid-type-slots (remove-if-not 'listp slots)))
+                                         (when extended-slots
+                                           (model-warning "Production ~s uses previously undefined slots ~s." p-name extended-slots))
+                                         (dolist (x invalid-type-slots)
+                                           (model-warning "Production ~s action has invalid slot ~s for type ~s." p-name (third x) (second x))))
+                                       
+                                         (dolist (x slots) (pushnew x new-slots)))
+                                       
+                                       (setf (production-statement-spec statement) spec)
+                                       (push-last statement actions))
+                                   (bad-action-exit (format nil "Invalid request parameters in request ~s." seg)))
+                               (bad-action-exit (format nil "Invalid buffer request ~s." seg)))))))
+                   (#\!
+                    (case (production-statement-target statement)
+                      ((bind safe-bind)
+                       (if (and (= (length (production-statement-definition statement)) 2)
+                                (chunk-spec-variable-p (first (production-statement-definition statement))))
+                           (push-last statement actions)
+                         (bad-action-exit (format nil "Invalid bind command: ~s" seg))))
+                      ((mv-bind)
+                       (if (and (= (length (production-statement-definition statement)) 2)
+                                (listp (first (production-statement-definition statement)))
+                                (every 'chunk-spec-variable-p (first (production-statement-definition statement))))
+                           (push-last statement actions)
+                         (bad-action-exit (format nil "Invalid mv-bind command: ~s" seg))))
+                      ((eval safe-eval output)
+                       (if (= (length (production-statement-definition statement)) 1)
+                           (push-last statement actions)
+                         (bad-action-exit (format nil "Invalid ~s command: ~s" (production-statement-target statement) (cdr seg)))))
+                      (stop
+                       (if (zerop (length (production-statement-definition statement)))
+                           (push-last statement actions)
+                         (bad-action-exit (format nil "Invalid stop command: ~s" seg))))
+                      (t
+                       (bad-action-exit (format nil "Invalid action: ~s" seg)))))
+                   (bad-action-exit (format nil "Invalid command on RHS: ~S" seg))))))
+                              
+           (car (setf (gethash (cons definition conditions) (procedural-action-parse-table procedural)) (cons actions new-slots)))))))
 
 
-(defun sort-for-binding (condition-list)
-  (stable-sort (copy-tree condition-list) (lambda (x y) 
-                                            (or (and (eq (car x) #\!) (not (eq (car y) #\!)))  ;; eval and binds first
-                                                (and (eq (car x) #\=) (not (searchable-buffer (cdr x)))   ;; non-search buffers 
-                                                     (eq (car y) #\=) (searchable-buffer (cdr y)))))      ;; before search buffers
-                                            :key #'car))
-
-(defun circular-references (bindings)
-  (let ((checks (mapcar #'car bindings)))
-    
-    ;;; Actually modify the dependencies info so that bind-order can use it...
-
-    (dolist (x checks)
-      (dolist (y (cdr x))
-        (awhen (find y checks :test (lambda (i j) (if (listp (car j))
-                                                      (find i (car j))
-                                                    (eq i (car j)))))
-                                                             
-               (setf (cdr x) (append (cdr x) (cdr it))))))
-    
-    (some (lambda (x) 
-            (if (listp (car x))
-                (some (lambda (z) (find z (cdr x))) (car x))
-              (find (car x) (cdr x)))) checks)))
+(defun sort-for-binding (condition-list) ;; eval and binds before buffers and queries, regular buffers before searchable buffers
+  (stable-sort (copy-tree condition-list) 
+               (lambda (x y) 
+                 (or (and (eq (production-statement-op x) #\!) (not (eq (production-statement-op y) #\!)))  
+                     (and (eq (production-statement-op x) #\=) (not (searchable-buffer (production-statement-target x))) 
+                          (eq (production-statement-op y) #\=) (searchable-buffer (production-statement-target y)))))))
 
 
 (defun number-test (val ignore)
   (declare (ignore ignore))
-  (if (numberp val)
-      t
-    nil))
+  (if (numberp val) t nil))
 
-
-#| doesn't always work right
-(defun bind-order (x y)
-  (if (and (null (cdr x)) (cdr y))
-      t
-    (if (listp (car x))
-        (some (lambda (z) (find z (cdr y))) (car x))
-      (find (car x) (cdr y)))))
-|#
 
 (defun sort-for-bind-order (ordering)
   (let ((result nil))
@@ -1476,73 +1649,43 @@
            (setf result (splice-into-position-des result it x))
            (push-last x result)))))
 
-(defun process-query-specs (buffer specs)
-  (let ((slots nil))
-    (loop 
-      (when (null specs) (return slots))
-      (let ((spec nil))
-        (if (member (car specs) '(= -)) ;; for now only allow = and - queries
-            (push (pop specs) spec)
-          (push '= spec))
-        (when (null specs) (return :error))
-        (unless (valid-buffer-query buffer (car specs)) 
-          (return :error))
-        (push-last (pop specs) spec)
-        (when (null specs) (return :error))
-        (push-last (pop specs) spec)
-        (push spec slots)))))
-
 
 (defun print-production-output (original data)
-  (let ((vals (car data)))
-        (cond ((atom vals)
-         (model-output "~s" vals))
-        ((stringp (caar original))
-         (model-output "~?" (car vals) (cdr vals)))
-        (t
-         (model-output "~{~S ~}" vals)))))
+  (let* ((vals (car data))
+         (text (cond ((atom vals)
+                      (format nil "~s" vals))
+                     ((stringp (car original))
+                      (format nil "~?" (car vals) (cdr vals)))
+                     (t
+                      (format nil "~{~S ~}" vals)))))
+    (add-buffer-trace-notes 'production text)
+    (model-output text)))
+    
 
 (defun find-variables (arg)
   (cond ((listp arg) (remove-duplicates (mapcan 'find-variables arg)))
         ((chunk-spec-variable-p arg) (list arg))
         (t nil)))
 
-(defun replace-variables (arg bindings)
-  (cond ((and (consp arg) (eq (last arg) arg))  ;; detect that it's something like (a . b)
-         (cons (replace-variables (car arg) bindings)
-               (replace-variables (cdr arg) bindings)))
-         
-         ((listp arg) 
-         (mapcar #'(lambda (x)
-                     (replace-variables x bindings))
-           arg))
-        ((chunk-spec-variable-p arg) 
-         (aif (assoc arg bindings)
-              (cdr it)
-              arg))
-        (t arg)))
-
-
 
 (defun replace-variables-for-eval (arg bindings)
   (cond ((listp arg) 
-               
          (cond ((listp (car arg))
                 ;; If the head is a list just parse the whole thing
-                (mapcar #'(lambda (x)
-                            (replace-variables-for-eval x bindings))
+                (mapcar (lambda (x)
+                          (replace-variables-for-eval x bindings))
                   arg))
                ((eq (car arg) 'quote)
-               ;; If it's already quoted don't requote
-                (mapcar #'(lambda (x)
-                            (replace-variables x bindings))
+                ;; If it's already quoted don't requote
+                (mapcar (lambda (x)
+                          (replace-variables x bindings))
                   arg))
                (t
                 (cons (replace-variables (car arg) bindings)
-                      (mapcar #'(lambda (x)
-                                  (replace-variables-for-eval x bindings))
+                      (mapcar (lambda (x)
+                                (replace-variables-for-eval x bindings))
                         (cdr arg))))))
-               
+        
         ((chunk-spec-variable-p arg) 
          (aif (assoc arg bindings)
               (if (or (chunk-spec-variable-p (cdr it))
@@ -1553,72 +1696,52 @@
         (t arg)))
 
 
-
-(defun segment-production (definition)
+(defun segment-production (definition buffers)
   (when definition
     (do ((res nil (push-last where res))
-         (where (position-if 'parse-command definition )
-                (position-if 'parse-command definition :start (1+ where))))
+         (where (position-if (lambda (x) (command-symbol-p x buffers)) definition)
+                (position-if (lambda (x) (command-symbol-p x buffers)) definition :start (1+ where))))
         ((null where)
          (if (and res (zerop (car res)))
-             (mapcar #'(lambda (start end)
-                         (subseq definition start end))
+             (mapcar (lambda (start end)
+                       (subseq definition start end))
                res (push-last nil (cdr res)))
            :error)))))
 
-(defun parse-command (cmd &key (operators '(#\? #\= #\- #\+))
-                          (commands '(eval safe-eval bind safe-bind mv-bind stop output)))
-  (when (symbolp cmd)
-    (let* ((name (symbol-name cmd))
-           (len (length name))
-           (first-char (aref name 0))
-           (last-char (aref name (1- len))))
-      (when (> len 2)
-        (let ((cmd-name (intern (subseq name 1 (1- len)))))
-          (cond ((and (eql first-char #\!) (eql last-char #\!)
-                      (find cmd-name commands))
-                 (cons #\! cmd-name))
-                ((and (eql last-char #\>)
-                      (find cmd-name (buffers))
-                      (find first-char operators))
-                 
-                 (cons first-char cmd-name))
-                
-                ;; Don't worry about warnings here - just parse it
-                (t nil)))))))
-  
-(defun query-list-to-conses (queries)
-  (do* ((s (copy-tree queries))
-        (slot (pop s) (pop s))
-        (value (pop s) (pop s))
-        (tests (list (cons slot value))
-               (push-last (cons slot value) tests)))
-       ((null s) tests)))
+(defun command-symbol-p (cmd buffers 
+                        &key (operators '(#\? #\= #\- #\+ #\* #\@))
+                             (commands '(eval safe-eval bind safe-bind mv-bind stop output)))
+  (and (symbolp cmd)
+       (let* ((name (symbol-name cmd))
+              (len (length name)))
+         (and (> len 2)
+              (let ((cmd-name (intern (subseq name 1 (1- len))))
+                    (first-char (aref name 0))
+                    (last-char (aref name (1- len))))
+                (or (and (eql first-char #\!) 
+                         (eql last-char #\!)
+                         (find cmd-name commands))
+                    (and (eql last-char #\>)
+                         (find first-char operators)
+                         (find cmd-name buffers))))))))
 
 
-(defun valid-chunk-mod-spec (chunk-type modifications-list)
-  (if (oddp (length modifications-list))
-      (print-warning "Odd length modifications list.")
-    (do ((slots nil (cons (car s) slots))
-         (s modifications-list (cddr s)))
-        ((null s) 
-         (and (every #'(lambda (slot)
-                         (valid-slot-name slot (get-chunk-type chunk-type)))
-                     slots)
-              (= (length slots) (length (remove-duplicates slots))))))))
-    
-(defun valid-buffer-query (buffer-name slot)
-  (let ((buf (buffer-instance buffer-name)))
-    (find slot (act-r-buffer-queries buf)))) 
+;; know it's valid since it has already passed segment-production
+;; but might be something like =goal> =var so don't want to make
+;; the spec here since that's not a valid spec but fine for the RHS action
 
-(defun valid-buffer-request-param (buffer-name slot)
-  (let ((buf (buffer-instance buffer-name)))
-    (find slot (act-r-buffer-requests buf))))
+(defun parse-statement (segment)  
+  (let ((name (symbol-name (car segment))))
+    (make-production-statement :op (aref name 0) 
+                               :target (intern (subseq name 1 (1- (length name))))
+                               :definition (cdr segment))))
 
-(defun valid-buffer-request-slot (buffer-name chunk-type slot)
-  (if (keywordp slot)
-      (valid-buffer-request-param buffer-name slot)
-    (valid-slot-name slot (get-chunk-type chunk-type))))
+
+;; Dummy function for showing in the trace from an = or * action
+
+(defun extend-buffer-chunk (buffer-name)
+  "just a dummy function now"
+  (declare (ignore buffer-name)))
 
 (provide "PRODUCTION-PARSING")
 

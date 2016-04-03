@@ -8,6 +8,22 @@
 ;; value to magnitude functions for the 
 ;; blending module to map the values in the
 ;; slots to numbers and then back.
+;;
+;; This model demonstrates a potential issue one
+;; should be careful about: chunks which match
+;; the blending request but don't have a value
+;; for a slot which is blended do not get considered
+;; for that slot.  However the probabilities are
+;; only calculated once over all the chunks which
+;; matched the request.  That means that if a blended
+;; slot value is computed via the weighted average
+;; it's possible that the weights will not total 1.0
+;; because of missing values.
+;;
+;; To be safe, one probably wants to ensure that 
+;; only chunks which have values for all of the
+;; important slots match the request.
+
 
 (clear-all)
 
@@ -47,7 +63,7 @@
          :mag->value map-numbers-to-sizes)
   
   (chunk-type target key size)
-  (chunk-type size)
+  (chunk-type size (size-type t))
   
   ;; some chunks which don't need to be in DM
   (define-chunks 
@@ -104,6 +120,8 @@
      =blending>
        isa target
        size  =size
+     ?blending>
+       state free
      ==>
      !output! (blended size is =size)
      
@@ -111,7 +129,7 @@
      ; being added to dm.  Not necessary, but keeps the 
      ; examples simpler.
      
-     =blending> dummy
+     @blending> dummy
      
      +blending>
        isa target
@@ -119,52 +137,52 @@
   )
 
 #| Here's a trace of the run
-CG-USER(17): (run 1)
+CG-USER(38): (run 10)
      0.000   PROCEDURAL             CONFLICT-RESOLUTION 
      0.050   PROCEDURAL             PRODUCTION-FIRED P1 
      0.050   PROCEDURAL             CLEAR-BUFFER BLENDING 
      0.050   BLENDING               START-BLENDING 
-Blending request for chunks of type TARGET
+Blending request for chunks with slots (KEY) 
 Blending temperature defaults to (* (sqrt 2) :ans): 0.35355338
-Chunk C matches blending request
-  Activation 3.5325232
-  Probability of recall 0.2851124
+Chunk A matches blending request
+  Activation 2.5325232
+  Probability of recall 0.004971579
 
 Chunk B matches blending request
   Activation 3.763482
-  Probability of recall 0.5479227
+  Probability of recall 0.1616471
 
-Chunk A matches blending request
-  Activation 3.3433368
-  Probability of recall 0.16696489
+Chunk C matches blending request
+  Activation 4.3433366
+  Probability of recall 0.8333813
 
 
 Slots to be blended: (SIZE)
 Finding blended value for slot: SIZE
-Matched chunks' slots contain: (TINY X-LARGE LARGE)
-Magnitude values for those items: (1 5 4)
+Matched chunks' slots contain: (LARGE X-LARGE TINY)
+Magnitude values for those items: (4 5 1)
 With numeric magnitudes blending by weighted average
- Chunk C with probability 0.2851124 times magnitude 1.0 cumulative result: 0.2851124
- Chunk B with probability 0.5479227 times magnitude 5.0 cumulative result: 3.0247257
- Chunk A with probability 0.16696489 times magnitude 4.0 cumulative result: 3.6925852
- Final result: 3.6925852  Converted to value: LARGE
+ Chunk A with probability 0.004971579 times magnitude 4.0 = 0.019886317 cumulative result: 0.019886317
+ Chunk B with probability 0.1616471 times magnitude 5.0 = 0.80823547 cumulative result: 0.8281218
+ Chunk C with probability 0.8333813 times magnitude 1.0 = 0.8333813 cumulative result: 1.6615031
+ Final result: 1.6615031  Converted to value: SMALL
 This is the definition of the blended chunk:
-(ISA TARGET KEY KEY-1 SIZE LARGE)
+(KEY KEY-1 SIZE SMALL)
 
 Computing activation and latency for the blended chunk
- Activation of chunk C is 3.5325232
+ Activation of chunk A is 2.5325232
  Activation of chunk B is 3.763482
- Activation of chunk A is 3.3433368
-Activation for blended chunk is: 4.6598654
+ Activation of chunk C is 4.3433366
+Activation for blended chunk is: 4.8876944
      0.050   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.059   BLENDING               BLENDING-COMPLETE 
-     0.059   BLENDING               SET-BUFFER-CHUNK BLENDING TARGET0 
-     0.059   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.109   PROCEDURAL             PRODUCTION-FIRED P2 
-BLENDED SIZE IS LARGE 
-     0.109   PROCEDURAL             CLEAR-BUFFER BLENDING 
-     0.109   BLENDING               START-BLENDING 
-Blending request for chunks of type TARGET
+     0.058   BLENDING               BLENDING-COMPLETE 
+     0.058   BLENDING               SET-BUFFER-CHUNK BLENDING CHUNK0 
+     0.058   PROCEDURAL             CONFLICT-RESOLUTION 
+     0.108   PROCEDURAL             PRODUCTION-FIRED P2 
+BLENDED SIZE IS SMALL 
+     0.108   PROCEDURAL             CLEAR-BUFFER BLENDING 
+     0.108   BLENDING               START-BLENDING 
+Blending request for chunks with slots (KEY) 
 Blending temperature defaults to (* (sqrt 2) :ans): 0.35355338
 Chunk E matches blending request
   Activation 3.2689652
@@ -177,25 +195,24 @@ Chunk D matches blending request
 
 Slots to be blended: (SIZE)
 Finding blended value for slot: SIZE
-Matched chunks' slots contain: (SMALL NIL)
-Magnitude values for those items: (2 3)
+Matched chunks' slots contain: (SMALL)
+Magnitude values for those items: (2)
 With numeric magnitudes blending by weighted average
- Chunk E with probability 0.90319115 times magnitude 2.0 cumulative result: 1.8063823
- Chunk D with probability 0.096808806 times magnitude 3.0 cumulative result: 2.0968087
- Final result: 2.0968087  Converted to value: SMALL
+ Chunk E with probability 0.90319115 times magnitude 2.0 = 1.8063823 cumulative result: 1.8063823
+ Final result: 1.8063823  Converted to value: SMALL
 This is the definition of the blended chunk:
-(ISA TARGET KEY KEY-2 SIZE SMALL)
+(KEY KEY-2 SIZE SMALL)
 
 Computing activation and latency for the blended chunk
  Activation of chunk E is 3.2689652
  Activation of chunk D is 2.4794111
 Activation for blended chunk is: 3.643316
 Not above threshold so blending failed
-     0.109   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.127   BLENDING               BLENDING-FAILURE 
-     0.127   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.127   ------                 Stopped because no events left to process 
-0.127
-25
+     0.108   PROCEDURAL             CONFLICT-RESOLUTION 
+     0.126   BLENDING               BLENDING-FAILURE 
+     0.126   PROCEDURAL             CONFLICT-RESOLUTION 
+     0.126   ------                 Stopped because no events left to process 
+0.126
+28
 NIL
 |#

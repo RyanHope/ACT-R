@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : buffer-trace.lisp
-;;; Version     : 1.0
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Provide a tool that shows what activities are occuring in
 ;;;             : the buffers instead of the current "event" based trace and
@@ -73,6 +73,29 @@
 ;;;             : * Changed add-buffer-trace-notes to return the notes passed
 ;;;             :   instead of the event that gets scheduled and check to make
 ;;;             :   sure the buffer is a valid name.
+;;; 2013.09.18 Dan
+;;;             : * Fixing it so that setting the buffer-trace param returns the
+;;;             :   value that was set.
+;;; 2014.03.17 Dan [2.0]
+;;;            : * Changed the query-buffer call to be consistent with the new
+;;;            :   internal code.
+;;; 2014.05.28 Dan
+;;;            : * Changed how the module request summary is recorded since it
+;;;            :   can't be the chunk-type of the spec.  Now it's the whole 
+;;;            :   spec printed to a single line.
+;;; 2014.10.22 Dan
+;;;            : * When the buffer-trace-step is set only record steps when there's
+;;;            :   a "real" action that's going to occur i.e. if the run would
+;;;            :   end without the step event let it.
+;;; 2015.03.18 Dan
+;;;            : * Fixed the return value from setting :save-buffer-trace so it
+;;;            :   returns t when set to t.
+;;;            : * Changed the parameter warning strings to remove the final '.'.
+;;; 2015.06.04 Dan
+;;;            : * The :buffer-trace-step parameter was returning an incorrectly
+;;;            :   converted result since it's set in seconds.
+;;; 2015.06.05 Dan
+;;;            : * Use schedule-event-now instead of a realtive 0.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -153,8 +176,8 @@
 ;;; current time the buffer record will indicate t.
 ;;;
 ;;; For the requests, each request overwrites any prior request recorded
-;;; at that time.  The value recorded is a string of the chunk-type of the
-;;; chunk-spec or the details string provided for the event if there was one.
+;;; at that time.  The value recorded is the details string provided for the event
+;;; if there was one or a printing of the request's chunk-spec if not.
 ;;; If a chunk is set into the buffer, then the name of that chunk is recorded,
 ;;; and only the last setting at a specific time is recorded.
 ;;; The notes are set to the string specified by add-buffer-trace-notes, but
@@ -497,7 +520,15 @@ CG-USER(86): (do-experiment)
                   (setf (buffer-summary-request it)
                     (if (and (>= (length (evt-details evt)) 15)
                              (string-equal "module-request " (subseq (evt-details evt) 0 15)))
-                        (string (chunk-spec-chunk-type (second (evt-params evt))))
+                        (let ((last nil))
+                          (remove-if (lambda (x)
+                                       (prog1 
+                                           (and (or (eq last #\space) (null last))
+                                                (eq x #\space))
+                                         (setf last x)))
+                                     (substitute #\space #\newline
+                                                 (substitute #\space #\linefeed
+                                                             (capture-model-output (pprint-chunk-spec (second (evt-params evt))))))))
                       (evt-details evt)))))
          
          )
@@ -522,15 +553,15 @@ CG-USER(86): (do-experiment)
       ;; Now for each one set busy, error, and full
       
       (dolist (x (buffer-record-buffers (btm-current-summary btm)))
-        (if (query-buffer (buffer-summary-name x) '((state . busy)))
+        (if (query-buffer (buffer-summary-name x) '(state  busy))
             (setf (buffer-summary-busy x) t)
           (when (buffer-summary-busy x)
               (setf (buffer-summary-busy->free x) t)))
-        (if (query-buffer (buffer-summary-name x) '((state . error)))
+        (if (query-buffer (buffer-summary-name x) '(state error))
             (setf (buffer-summary-error x) t)
           (when (buffer-summary-error x)
               (setf (buffer-summary-error->clear x) t)))
-        (when (query-buffer (buffer-summary-name x) '((buffer . full)))
+        (when (query-buffer (buffer-summary-name x) '(buffer full))
           (setf (buffer-summary-full x) t)))
       
       ;; Now, just check to see if it should stop or add a time-step check event
@@ -561,7 +592,9 @@ CG-USER(86): (do-experiment)
         (when (and (or new 
                        (eq (evt-action evt) 'buffer-trace-time-step-event))
                    (numberp (btm-time-step btm))
-                   (null (btm-next-step-time btm)))
+                   (null (btm-next-step-time btm))
+                   ;; only if there's something else that's going to happen...
+                   (not (zerop (mp-queue-count))))
           (setf (btm-next-step-time btm)
             (schedule-event-relative (btm-time-step btm)
                                      'buffer-trace-time-step-event
@@ -588,9 +621,9 @@ CG-USER(86): (do-experiment)
 (defun add-buffer-trace-notes (buffer notes)
   (if (and (current-model) (find buffer (buffers)))
       (progn 
-        (schedule-event-relative 0 'record-buffer-trace-notes
-                                 :maintenance t :priority :max
-                                 :output nil :params (list buffer notes))
+        (schedule-event-now 'record-buffer-trace-notes
+                            :maintenance t :priority :max
+                            :output nil :params (list buffer notes))
         notes)
     (if (current-model)
         (print-warning "~s does not name a buffer in the current model no notes added." buffer)
@@ -622,7 +655,8 @@ CG-USER(86): (do-experiment)
             (btm-buffers btm))
            
            (:buffer-trace-step 
-            (setf (btm-time-step btm) (if (numberp (cdr param)) (seconds->ms (cdr param)) nil)))
+            (setf (btm-time-step btm) (if (numberp (cdr param)) (safe-seconds->ms (cdr param) 'sgp) nil))
+            (cdr param))
            
            (:buffer-trace-colors 
             (setf (btm-colors btm) (cdr param)))
@@ -642,16 +676,18 @@ CG-USER(86): (do-experiment)
             
             (if (cdr param)
                 (no-output (sgp-fct (list :trace-filter 'disable-event-trace)))
-              (no-output (sgp-fct (list :trace-filter nil)))))
+              (no-output (sgp-fct (list :trace-filter nil))))
+            (cdr param))
            
            (:save-buffer-trace 
-             (setf (btm-save btm) (cdr param))
-            (setf (btm-enabled btm)
-              (or (btm-save btm) (btm-trace btm) (btm-hooks btm)))
-            (when (btm-enabled btm)
-              ;; eventually will need to record this for later removal
-              (add-post-event-hook 'buffer-trace-event-recorder nil)))
-           
+            (prog1 
+                (setf (btm-save btm) (cdr param))
+              (setf (btm-enabled btm)
+                (or (btm-save btm) (btm-trace btm) (btm-hooks btm)))
+              (when (btm-enabled btm)
+                ;; eventually will need to record this for later removal
+                (add-post-event-hook 'buffer-trace-event-recorder nil))))
+            
            (:buffer-trace-hook
             (if (cdr param)
                 (if (member (cdr param) (btm-hooks btm))
@@ -673,7 +709,7 @@ CG-USER(86): (do-experiment)
            (:save-buffer-trace (btm-save btm))
            (:buffer-trace-colors (btm-colors btm))
            (:graphic-column-widths (btm-graphic-column-widths btm))
-           (:buffer-trace-step (if (numberp (btm-time-step btm)) (seconds->ms (btm-time-step btm)) nil))
+           (:buffer-trace-step (if (numberp (btm-time-step btm)) (ms->seconds (btm-time-step btm)) nil))
            (:traced-buffers (btm-buffers btm))
            (:buffer-trace (btm-trace btm))))))
 
@@ -682,7 +718,7 @@ CG-USER(86): (do-experiment)
 (define-module-fct 'buffer-trace nil
   (list (define-parameter :buffer-trace
           :valid-test #'tornil 
-          :warning "t or nil."
+          :warning "t or nil"
           :default-value nil
           :documentation "Display the trace as a buffer summary instead of as an event list.")
         (define-parameter :traced-buffers
@@ -690,12 +726,12 @@ CG-USER(86): (do-experiment)
                           (or (eq t x) 
                               (and (listp x) 
                                    (every (lambda (y) (find y (buffers))) x))))
-          :warning "t or a list of valid buffer names."
+          :warning "t or a list of valid buffer names"
           :default-value t
           :documentation "The list of buffers to be traced (all buffers if set to t).")
         (define-parameter :buffer-trace-step
           :valid-test #'posnumornil
-          :warning "a positive number or nil."
+          :warning "a positive number or nil"
           :default-value nil
           :documentation "The maximum amount of time (in seconds) allowed to elapse before creating a buffer summary.")
         
@@ -709,29 +745,29 @@ CG-USER(86): (do-experiment)
                                                                  (= (length y) 10))
                                                              (char-equal #\# (aref y 0)))))
                                                   x)))
-          :warning "a list of color strings or nil."
+          :warning "a list of color strings or nil"
           :default-value nil
           :documentation "The colors used to draw the buffer data using the graphic tracing tool.")
         
         (define-parameter :graphic-column-widths
             :valid-test #'(lambda (x) (and (listp x)
                                            (every #'posnumornil x)))
-          :warning "a list of positive numbers or nil."
+          :warning "a list of positive numbers or nil"
           :default-value nil
           :documentation "The pixel width of the columns drawn for the buffers using the graphic tracing tool.")
         
         
         (define-parameter :save-buffer-trace
           :valid-test #'tornil 
-          :warning "t or nil."
+          :warning "t or nil"
           :default-value nil
           :documentation "Whether to save the buffer summary for a run or not.")
         (define-parameter :buffer-trace-hook
           :valid-test #'fctornil
-          :warning "a function or nil."
+          :warning "a function or nil"
           :default-value nil
           :documentation "A function to call with each buffer summary."))
-  :version "1.0"
+  :version "2.0"
   :documentation "A module that provides a buffer based tracing mechanism."
   :creation #'(lambda (x) (declare (ignore x)) (make-buffer-trace-module))
   :reset #'reset-buffer-trace-module

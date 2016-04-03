@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      :Cogworks Laboratory
@@ -20,7 +20,9 @@
 ;;;             : NOTE: The UWI is only still around to support the 
 ;;;             :       ACT-R GUI interface. I don't advocate using it directly.      
 ;;; 
-;;; Bugs        : 
+;;; Bugs        : [ ] Uses the undocumented gp:gf function to create a font
+;;;             :     for the static text items.  Not safe with respect to 
+;;;             :     future LW updates.
 ;;; --- History ---
 ;;; 2007.09.10  : Dan
 ;;;             : * Changed allow-event-manager from calling sleep to useing
@@ -48,6 +50,18 @@
 ;;;             :   so that a user method on the rpm-window class gets called.
 ;;;             : * Also changed it to passing a vector of the x-y position 
 ;;;             :   instead of a list so that it works the same as virtuals.
+;;; 2014.02.10  : Dan
+;;;             : * Save the button color in the foreground slot which doesn't
+;;;             :   seem to change the display, but lets the model find it at
+;;;             :   least.
+;;; 2015.05.26  : Dan
+;;;             : * Added the font-size parameter to make-static-text-for-rpm-window
+;;;             :   but it doesn't work yet.
+;;; 2015.05.28  : Dan
+;;;             : * Using the undocumented gp:gf function to generate the font
+;;;             :   for a "static text" item since I can't seem to get the other
+;;;             :   mechanisms to work right.  May need to fix that at some point
+;;;             :   in the future.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -239,7 +253,7 @@
                         :x x :y y
                         :visible-min-width width :visible-min-height height
                         :text text
-                        
+                        :foreground (color-symbol->system-color color)
                         :callback-type :item
                         :callback action
                         ))
@@ -248,15 +262,18 @@
 ;;; Description : Build and return a static-text-dialog-item based on the
 ;;;             : parameters supplied.
 ;;; 29 Jul 2008 LW MODIFIED TO USE ITEM-PINBOARD-OBJECT
+
 (defmethod make-static-text-for-rpm-window ((win rpm-real-window) 
                                             &key (x 0) (y 0) (text "") 
-                                            (height 20) (width 80) (color 'black))
+                                            (height 20) (width 80) (color 'black) font-size)
+  (unless (numberp font-size)
+    (setf font-size 12))
   (make-instance 'capi:item-pinboard-object
-                       :x x :y y
-                       :visible-min-width width :visible-min-height height
-                       :text text
-                       :graphics-args (list :foreground (read-from-string (format nil ":~S" color)))
-                        ))
+    :x x :y y
+    :visible-min-width width :visible-min-height height
+    :text text
+    :graphics-args (list :foreground (read-from-string (format nil ":~S" color))
+                         :font (gp:gf "courier" nil nil nil font-size))))
 
 
 ;;; MAKE-LINE-FOR-RPM-WINDOW  [Method]

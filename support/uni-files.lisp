@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : uni-files.lisp
-;;; Version     : 2.1
+;;; Version     : 2.2
 ;;; 
 ;;; Description : Contains the system dependent code for things needed by
 ;;;             : the environment, but now part of support for use by other
@@ -240,6 +240,30 @@
 ;;;            : * The allegro-ide uni-process-system-events now includes the
 ;;;            :   cg:: package on process-pending-events so it works right
 ;;;            :   when ACT-R is loaded in some other package.
+;;; 2014.12.05 Dan
+;;;            : * Updated the uni-stream-closed function for allegro to 
+;;;            :   actually check something.
+;;; 2014.12.15 Dan
+;;;            : * Added some safety checking when SBCL requires sb-bsd-sockets
+;;;            :   because that doesn't seem to work on some of the newer 
+;;;            :   Windows builds...
+;;; 2015.02.20 Dan [2.2]
+;;;            : * Changed uni-run-process for CCL so that it binds *standard-output*
+;;;            :   to *terminal-io* instead of the current *standard-output*
+;;;            :   when requested via an optional third parameter to make sure 
+;;;            :   output goes to the listener and not AltConsole or /dev/null 
+;;;            :   like it can otherwise.  That needs to be on a switch because
+;;;            :   the environment spawns a process from a process and that 
+;;;            :   second process needs to use its parent's stream since the
+;;;            :   *terminal-io* at that point is the "special place".
+;;;            :   This assumes that the listener in which the thread was 
+;;;            :   started is still available -- otherwise it'll again go to 
+;;;            :   the "alt" output.
+;;;            : * Adding the optional parameter for all versions, eventhough
+;;;            :   it's not needed in the others at this point.
+;;; 2015.08.10 Dan
+;;;            : * Adjusting the LispWorks version tests since v7 is now
+;;;            :   available and I'm assuming it works like 6...
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -257,7 +281,12 @@
               (require "OPENTRANSPORT"))
 
 
-#+:sbcl (eval-when (:compile-toplevel :load-toplevel) (require 'sb-bsd-sockets))
+#+:sbcl (eval-when (:compile-toplevel :load-toplevel) 
+          (ignore-errors (require 'sb-bsd-sockets))
+          (unless (find-package "SB-BSD-SOCKETS")
+            (make-package "SB-BSD-SOCKETS")
+            (format t "#|WARNING: SB-BSD-SOCKETS package not loaded.|#~%")
+            (format t "#|         ACT-R Environment will not work!|#~%")))
 
 #+:allegro (eval-when (:compile-toplevel :load-toplevel :execute)
              (require :sock))
@@ -317,72 +346,77 @@
 ;;; function (in the appropriate package) and returns that process.
 
 #+(and :allegro (not :allegro-ide))
-(defun uni-run-process (name function)
+(defun uni-run-process (name function &optional special-stream)
+  (declare (ignore special-stream))
   (mp::process-run-function name
-                            #'(lambda ()
-                                (let ((*package* *actr-default-package-name*))
-                                  (funcall function)))))
+    #'(lambda ()
+        (let ((*package* *actr-default-package-name*))
+          (funcall function)))))
 
 
 #+:allegro-ide
-(defun uni-run-process (name function)
+(defun uni-run-process (name function &optional special-stream)
+  (declare (ignore special-stream))
   (let ((debug-pane *standard-output*))
     (mp::process-run-function name 
-                              #'(lambda ()
-                                  (let ((*standard-output* debug-pane)
-                                        (*error-output* debug-pane)
-                                        (*package* *actr-default-package-name*))
-                                    (funcall function)))))) 
-
+      #'(lambda ()
+          (let ((*standard-output* debug-pane)
+                (*error-output* debug-pane)
+                (*package* *actr-default-package-name*))
+            (funcall function)))))) 
 
 
 #+(and :mcl (not :openmcl))
-(defun uni-run-process (name function)
+(defun uni-run-process (name function &optional special-stream)
+  (declare (ignore special-stream))
   (let ((front *standard-output*)) 
     (process-run-function (list :name name) 
-                          #'(lambda ()
-                              (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
-                                    (*standard-output* front)
-                                    (*error-output* front)
-                                    (*package* *actr-default-package-name*))
-                                (funcall function))))))
+      #'(lambda ()
+          (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
+                (*standard-output* front)
+                (*error-output* front)
+                (*package* *actr-default-package-name*))
+            (funcall function))))))
 
 
 #+:openmcl
-(defun uni-run-process (name function)
-  (let ((front *standard-output*)) 
+(defun uni-run-process (name function &optional special-stream)
+  (let ((front (if special-stream (two-way-stream-output-stream *terminal-io*) *standard-output*))) 
     (process-run-function (list :name name) 
-                          #'(lambda ()
-                              (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
-                                    (*standard-output* front)
-                                    (*error-output* front)
-                                    (*package* *actr-default-package-name*))
-                                (funcall function))))))
+      #'(lambda ()
+          (let ((CCL::*SUPPRESS-COMPILER-WARNINGS* t)
+                (*standard-output* front)
+                (*error-output* front)
+                (*package* *actr-default-package-name*))
+            (funcall function))))))
 
 
 #+:lispworks
-(defun uni-run-process (name function)
+(defun uni-run-process (name function &optional special-stream)
+  (declare (ignore special-stream))
   (let ((front *standard-output*))
     (mp::process-run-function name nil
-                              #'(lambda ()
-                                  (let ((*standard-output* front)
-                                        (*error-output* front)
-                                        (*package* *actr-default-package-name*)) 
-                                    (funcall function))))))
+      #'(lambda ()
+          (let ((*standard-output* front)
+                (*error-output* front)
+                (*package* *actr-default-package-name*)) 
+            (funcall function))))))
 
 #+:cmu
-(defun uni-run-process (name function)
+(defun uni-run-process (name function &optional special-stream)
+  (declare (ignore special-stream))
   (mp:make-process #'(lambda ()
                        (let ((*package* *actr-default-package-name*))
                          (funcall function)))
                    :name name))
 
 #+:sbcl
-(defun uni-run-process (name function)
+(defun uni-run-process (name function &optional special-stream)
+  (declare (ignore special-stream))
   (sb-thread:make-thread #'(lambda ()
                              (let ((*package* *actr-default-package-name*))
                                (funcall function)))
-                             :name name))
+                         :name name))
 
 
 ;;; uni-process-kill
@@ -435,14 +469,14 @@
 #+:sbcl (defmacro uni-without-interrupts (&body body)
           `(sb-sys:without-interrupts ,@body))
 
-#-(or :sbcl :cmu :lispworks6) (defmacro uni-without-interrupts (&body body)
+#-(or :sbcl :cmu :lispworks6 :lispworks7) (defmacro uni-without-interrupts (&body body)
           `(without-interrupts ,@body))
 
 
 ;;; Not all that useful now, so send-string is hacked with a 
 ;;; specific lock instead. 
 
-#+:lispworks6 (defmacro uni-without-interrupts (&body body)
+#+(or :lispworks6 :lispworks7) (defmacro uni-without-interrupts (&body body)
                 `(mp::with-interrupts-blocked ,@body))
 
 ;; same as with lispworks6 above
@@ -584,17 +618,17 @@
     (write-string string socket)
     (finish-output socket)))
 
-#+(and (not :openmcl-native-threads) (not :allegro) (not :lispworks6)) 
+#+(and (not :openmcl-native-threads) (not :allegro) (not (or :lispworks6 :lispworks7))) 
 (defun uni-send-string (socket string)
   (uni-without-interrupts 
    (write-string string socket)
    (finish-output socket)))
 
 
-#+:lispworks6
+#+(or :lispworks6 :lispworks7)
 (defvar *environment-lock* (mp::make-lock))
 
-#+:lispworks6
+#+(or :lispworks6 :lispworks7)
 (defun uni-send-string (socket string)
   (mp::with-lock (*environment-lock*)
     (write-string string socket)
@@ -635,7 +669,9 @@
 
 #+:allegro
 (defun uni-stream-closed (stream)
-  (null stream))
+  (or (null stream)
+      (null (open-stream-p stream))))
+  
 
 #+(and :mcl (not :openmcl))
 (defun uni-stream-closed (stream)

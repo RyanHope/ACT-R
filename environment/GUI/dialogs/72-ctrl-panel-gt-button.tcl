@@ -257,12 +257,12 @@ proc display_horiz_data {win level model} {
                                                       set $win.notesvar \"\""
           } elseif {[lindex $x 7] != "nil"} {
             $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 3] - [lindex $x 1])]]: [format "%.3f" [expr 0.001 * [lindex $x 1]]] - [format "%.3f" [expr 0.001 * [lindex $x 3]]]\" 
-                                                      set $win.notesvar \"[lindex $x 7]\""
+                                                      set $win.notesvar {[lindex $x 7]}"
             $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
                                                       set $win.notesvar \"\""
           } elseif {[lindex $x 6] != "nil"} {
             $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 3] - [lindex $x 1])]]: [format "%.3f" [expr 0.001 * [lindex $x 1]]] - [format "%.3f" [expr 0.001 * [lindex $x 3]]]\" 
-                                                      set $win.notesvar \"[lindex $x 6]\""
+                                                      set $win.notesvar {[lindex $x 6]}"
             $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
                                                       set $win.notesvar \"\""
           } else {
@@ -350,17 +350,17 @@ proc display_horiz_data {win level model} {
 
         if {[lindex $x 8] != "nil"} {
             $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 3] - [lindex $x 1])]]: [format "%.3f" [expr 0.001 * [lindex $x 1]]] - [format "%.3f" [expr 0.001 * [lindex $x 3]]]\" 
-                                                      set $win.notesvar \"[lindex $x 8]\""
+                                                      set $win.notesvar {[lindex $x 8]}"
             $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
                                                       set $win.notesvar \"\""
           } elseif {[lindex $x 7] != "nil"} {
             $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 3] - [lindex $x 1])]]: [format "%.3f" [expr 0.001 * [lindex $x 1]]] - [format "%.3f" [expr 0.001 * [lindex $x 3]]]\" 
-                                                      set $win.notesvar \"[lindex $x 7]\""
+                                                      set $win.notesvar {[lindex $x 7]}"
             $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
                                                       set $win.notesvar \"\""
           } elseif {[lindex $x 6] != "nil"} {
             $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 3] - [lindex $x 1])]]: [format "%.3f" [expr 0.001 * [lindex $x 1]]] - [format "%.3f" [expr 0.001 * [lindex $x 3]]]\" 
-                                                      set $win.notesvar \"[lindex $x 6]\""
+                                                      set $win.notesvar {[lindex $x 6]}"
             $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
                                                       set $win.notesvar \"\""
           } else {

@@ -20,12 +20,14 @@
                (ores (compute-outcome ocards mcards)))
           
           (show-model-results mcards ocards mres ores)
+          (when (eq *opponent-rule* 'play-human)
+            (show-human-results ocards mcards ores mres))
           
           (when print-game
             (format t "Model: ~{~2d ~} -> ~2d (~4s)   Opponent: ~{~2d ~}-> ~2d (~4s)~%"
               mcards mtot mres ocards otot ores))
           
-          (setf scores (mapcar #'+ scores
+          (setf scores (mapcar '+ scores
                          (list (if (eq mres 'win) 1 0)
                                (if (eq ores 'win) 1 0)
                                (if (and (eq mres 'bust) (eq ores 'bust)) 1 0)
@@ -44,28 +46,30 @@
       (funcall game)
       (if (null data)
           (setf data (run-blocks 20 5))
-        (setf data (mapcar (lambda (x y) (mapcar #'+ x y)) data (run-blocks 20 5)))))
+        (setf data (mapcar (lambda (x y) (mapcar '+ x y)) data (run-blocks 20 5)))))
     (let ((percentages (mapcar (lambda (x) (/ (car x) (* n 5.0))) data)))
       (when graph
         (draw-graph percentages))
-      (list (list (/ (apply #'+ (subseq percentages 0 5)) 5)
-                  (/ (apply #'+ (subseq percentages 5 10)) 5)
-                  (/ (apply #'+ (subseq percentages 10 15)) 5)
-                  (/ (apply #'+ (subseq percentages 15 20)) 5))
+      (list (list (/ (apply '+ (subseq percentages 0 5)) 5)
+                  (/ (apply '+ (subseq percentages 5 10)) 5)
+                  (/ (apply '+ (subseq percentages 10 15)) 5)
+                  (/ (apply '+ (subseq percentages 15 20)) 5))
                   percentages))))
 
 (defun draw-graph (points)
-  (open-exp-window "Data" :width 550 :height 430 :visible t)
-  (add-line-to-exp-window '(50 0) '(50 400) :color 'white)
-  (dotimes (i 5)
-    (add-text-to-exp-window :x 0 :y (- 380 (* i 80)) :width 40 :text (format nil "~2,1f" (* (+ i 2) .1)))
-    (add-line-to-exp-window (list 50 (- 390 (* i 80))) (list 550 (- 390 (* i 80))) :color 'white))
-  
-  (let ((x 50))
-    (mapcar (lambda (a b) (add-line-to-exp-window (list x (floor (- 550 (* 800 a))))
-                                                  (list (incf x 25) (floor (- 550 (* 800 b))))
-                                                  :color 'blue))
-      (butlast points) (cdr points))))
+  (let ((w (open-exp-window "Data" :width 550 :height 460 :visible t)))
+    (allow-event-manager w)
+    (add-line-to-exp-window '(50 0) '(50 420) :color 'white :window "Data")
+    (dotimes (i 11)
+      (add-text-to-exp-window :x 5 :y (+ 5 (* i 40)) :width 35 :text (format nil "~3,1f" (- 1 (* i .1))) :window "Data")
+      (add-line-to-exp-window (list 45 (+ 10 (* i 40))) (list 550 (+ 10 (* i 40))) :color 'white :window "Data"))
+    
+    (let ((x 50))
+      (mapcar (lambda (a b) (add-line-to-exp-window (list x (floor (- 410 (* a 400))))
+                                                  (list (incf x 25) (floor (- 410 (* b 400))))
+                                                    :color 'blue :window "Data"))
+        (butlast points) (cdr points)))
+    (allow-event-manager w)))
 
 (defun deal (deck)
   (list (funcall deck)
@@ -75,12 +79,12 @@
 (defun score-cards (list &optional (bust 21))
   (if (find 1 list)
       (special-score list bust)
-    (apply #'+ list)))
+    (apply '+ list)))
 
 (defun special-score (list bust)
-  (let ((possible (list (apply #'+ list))))
+  (let ((possible (list (apply '+ list))))
     (dotimes (i (count 1 list))
-      (push (+ (* 10 (1+ i)) (apply #'+ list)) possible))
+      (push (+ (* 10 (1+ i)) (apply '+ list)) possible))
     (apply 'max (remove-if (lambda (x) (> x bust)) possible))))
   
 (defun compute-outcome (p1cards p2cards &optional (bust 21))
@@ -105,13 +109,15 @@
                                     oresult nil state start))))))
   (setf *model-action* nil)
   (run-full-time 10)
-  *model-action*
-  )
+  *model-action*)
 
 (defvar *model-action* nil)
 
 (defmethod rpm-window-key-event-handler ((win rpm-window) key)
-  (setf *model-action* (string key)))
+  (if (eq win (current-device))
+      (setf *model-action* (string key))
+    (unless *human-action*
+      (setf *human-action* (string key)))))
 
 (defun show-model-results (mcards ocards mres ores)
   (if (buffer-read 'goal)
@@ -129,21 +135,63 @@
   (run-full-time 10))
 
 
+(defun play-human (cards oc1)
+  (let ((win (open-exp-window "Human")))
+    (add-text-to-exp-window :window "Human" :x 50 :y 20 :text "You")
+    (add-text-to-exp-window :window "Human" :x 200 :y 20 :text "Model")
+    (dotimes (i 2)
+      (dotimes (j 3)
+        (add-text-to-exp-window :window "Human" :x (+ 25 (* j 30) (* i 150)) :y 40 :width 20 :text (format nil "C~d" (1+ j)))
+        (cond ((and (zerop i) (< j 2))
+               (add-text-to-exp-window :window "Human" :x (+ 25 (* j 30) (* i 150)) :y 60 :width 20 :text (princ-to-string (nth j cards))))
+              ((and (= i 1) (zerop j))
+               (add-text-to-exp-window :window "Human" :x (+ 25 (* j 30) (* i 150)) :y 60 :width 20 :text (princ-to-string oc1))))))
+    (setf *human-action* nil)
+    (allow-event-manager win)
+    (sleep 10)
+    (if *human-action*
+        *human-action*
+      "s")))
+               
+(defun show-human-results (own-cards others-cards own-result others-result)
+  (let ((win (open-exp-window "Human")))
+    (add-text-to-exp-window :window "Human" :x 50 :y 20 :text "You")
+    (add-text-to-exp-window :window "Human" :x 200 :y 20 :text "Model")
+    (dotimes (i 2)
+      (dotimes (j 3)
+        (add-text-to-exp-window :window "Human" :x (+ 25 (* j 30) (* i 150)) :y 40 :width 20 :text (format nil "C~d" (1+ j)))
+        (if (zerop i)
+            (when (nth j own-cards)
+              (add-text-to-exp-window :window "Human" :x (+ 25 (* j 30) (* i 150)) :y 60 :width 20 :text (princ-to-string (nth j own-cards))))
+            (when (nth j others-cards)
+              (add-text-to-exp-window :window "Human" :x (+ 25 (* j 30) (* i 150)) :y 60 :width 20 :text (princ-to-string (nth j others-cards)))))))
+    (add-text-to-exp-window :window "Human" :x 50 :y 85 :text (princ-to-string own-result))
+    (add-text-to-exp-window :window "Human" :x 200 :y 85 :text (princ-to-string others-result))
+    (allow-event-manager win)
+    (sleep 10)))
+
+
+
 (defun regular-deck ()
   (min 10 (1+ (act-r-random 13))))
 
 (defvar *opponent-rule* 'fixed-threshold)
 
+(defun play-against-model (hands &optional (print-game nil))
+  (let ((old-rule *opponent-rule*)
+        (*opponent-rule* 'play-human))
+    (unwind-protect
+        (play-hands hands print-game)
+      (setf *opponent-rule* old-rule))))
+
 (defun show-opponent-cards (cards mc1)
   (funcall *opponent-rule* cards mc1))
+
 
 (defvar *opponent-threshold* 15)
 
 (defun fixed-threshold (cards mc1)
   (if (< (score-cards cards) *opponent-threshold*) "h" "s"))
-
-
- 
 
 (defun game0 ()
   (setf *deck1* 'regular-deck)
@@ -163,7 +211,7 @@
 
 (defun load-stacked-deck ()
   (let* ((card1 (+ 5 (act-r-random 6)))
-         (card2 (+ 5 (act-r-random 6)))
+         (card2 (+ 7 (act-r-random 4)))
          (card4 (if (> (act-r-random 1.0) .5) 2 8))
          (card3 (if (= card4 2) 10 (- 21 (+ card1 card2))))
          (card5 10)
@@ -185,11 +233,11 @@
 
 (define-model 1-hit-model 
     
-    ;; do not change these parameters
-    (sgp :esc t :bll .5 :ol t :sim-hook number-sims :er t :ncnar nil :lf 0 :rt -60)
+  ;; do not change these parameters
+  (sgp :esc t :bll .5 :ol t :sim-hook number-sims :er t :lf 0)
   
   ;; adjust these as needed
-  (sgp :v nil :ans .2 :mp 10.0)
+  (sgp :v nil :ans .2 :mp 10.0 :rt -60)
   
   ;; create a device for the model to interact with
   
@@ -197,108 +245,111 @@
   
   ;; This type holds all the game info 
   
-  (chunk-type game-state mc1 mc2 mc3 mstart mtot mresult oc1 oc2 oc3 ostart otot oresult state bust)
+  (chunk-type game-state mc1 mc2 mc3 mstart mtot mresult oc1 oc2 oc3 ostart otot oresult state)
   
   ;; This chunk-type should be modified to contain the information needed
-  ;; for your model to learn
+  ;; for your model's learning strategy
   
   (chunk-type learned-info mc1 action)
   
+  ;; Declare the slots used for the goal buffer since it is
+  ;; not set in the model defintion or by the productions.
+  ;; See the experiment code text for more details.
+  
+  (declare-buffer-usage goal game-state :all)
    
   (define-chunks (win isa chunk) (lose isa chunk) (bust isa chunk) 
-    (done isa chunk) (retrieving isa chunk) (start isa chunk) (results isa chunk))
+     (retrieving isa chunk) (start isa chunk) (results isa chunk))
     
       
   (p start
-    =goal>
+     =goal>
        isa game-state
        state start
        MC1 =c
-   ==>
-    =goal>
+    ==>
+     =goal>
        state retrieving
-    +retrieval>
+     +retrieval>
        isa learned-info
        MC1 =c
-     )
+     - action nil)
 
   (p cant-remember-game
-    =goal>
+     =goal>
        isa game-state
        state retrieving
-    ?retrieval>
-       state   error
-    ?manual>
+     ?retrieval>
+       buffer  failure
+     ?manual>
        state free
-   ==>
-    =goal>
-       state done
-    +imaginal>
-       isa learned-info
-       action "s"
-    +manual>
-       isa press-key
-       key "s"
-     )
+    ==>
+     =goal>
+       state nil
+     +manual>
+       cmd press-key
+       key "s")
   
   (p remember-game
-    =goal>
+     =goal>
        isa game-state
        state retrieving
-    =retrieval>
+     =retrieval>
        isa learned-info
        action =act
-   ==>
-    =goal>
-       state done
-    +imaginal>
-       isa learned-info
-       action =act
-     
-    +manual>
-       isa press-key
+     ?manual>
+       state free
+    ==>
+     =goal>
+       state nil
+     +manual>
+       cmd press-key
        key =act
-     
-    =retrieval>
-       MC1 nil
+     =retrieval>
+       mc1 nil
        action nil
-    -retrieval>
-    )
-
+     -retrieval>)
+  
+  
   (p results-should-hit
-    =goal>
+     =goal>
        isa game-state
        state results
        mresult =outcome
        MC1 =c
-    =imaginal>
-       isa learned-info
-   ==>
-    !output! (I =outcome)
-
-    =imaginal>
+     ?imaginal>
+       state free
+    ==>
+     !output! (I =outcome)
+     =goal>
+       state nil
+     +imaginal>
        MC1 =c 
-       action "h"
-    -imaginal>
-    )
+       action "h")
 
   (spp results-should-hit :u 10)
 
   
   (p results-should-stay
-    =goal>
+     =goal>
        isa game-state
        state results
        mresult =outcome
        MC1 =c
-    =imaginal>
-       isa learned-info
-   ==>
-    !output! (I =outcome)
-     
-    =imaginal>
+     ?imaginal>
+       state free
+    ==>
+     !output! (I =outcome)
+     =goal>
+       state nil
+     +imaginal>
        MC1 =c 
-       action "s"
-    -imaginal>
-    ) 
+       action "s") 
+  
+  (p clear-new-imaginal-chunk
+     ?imaginal>
+       state free
+       buffer full
+     ==>
+     -imaginal>)
   )

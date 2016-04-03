@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -54,6 +54,8 @@
 ;;;             : * Removed everything using the :ACTR-ENV-ALONE switches and
 ;;;             :   some other code that was commented out long ago.
 ;;;             : * Moved the allegro require :sock to uni-files.
+;;; 2015.07.28 Dan
+;;;             : * Updated the logical pathnames to use ACT-R and ACT-R-support.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -70,7 +72,7 @@
   (pushnew :actr-environment *features*))
 
 
-(require-compiled "UNI-FILES" "ACT-R6:support;uni-files")
+(require-compiled "UNI-FILES" "ACT-R-support:uni-files")
 
 
 #+(and :mcl (not :openmcl))
@@ -97,7 +99,7 @@
 ;;; Finally, just loop over the file list and load them
 
 (dolist (x *environment-file-list*)
-  (compile-and-load (translate-logical-pathname (format nil "ACT-R6:environment;~a" x))))
+  (compile-and-load (translate-logical-pathname (format nil "ACT-R:environment;~a" x))))
 
 #|
 This library is free software; you can redistribute it and/or

@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -54,6 +54,15 @@
 ;;;             : * Make-rpm-window now uses print warning to report when there
 ;;;             :   isn't a visible window available when one is requested and
 ;;;             :   returns a virtual on instead.
+;;; 2013.01.10 Dan
+;;;             : * Visible-virtuals-available? now just calls check-with-environment-for-visible-virtuals
+;;;             :   if it's defined to avoid having to redefine visible-virtuals-available?
+;;;             :   it later.
+;;; 2015.05.26 Dan
+;;;             : * Added a font-size parameter to make-static-text-for-rpm-window.
+;;;             :   Should be a point size for the font, defaults to 12 and the
+;;;             :   height and width are based on the ratios for the previous
+;;;             :   defaults which were 10 high and 7 wide for 12 point.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -248,14 +257,18 @@
 (defgeneric make-static-text-for-rpm-window (window &key x y text height width color)
   (:documentation "Returns a text item built with the parameters supplied"))
 
-(defmethod make-static-text-for-rpm-window ((win rpm-virtual-window) &key (x 0) (y 0) (text "") (height 20) (width 80) (color 'black))
+(defmethod make-static-text-for-rpm-window ((win rpm-virtual-window) &key (x 0) (y 0) (text "") 
+                                            (height 20) (width 80) (color 'black) font-size)
+  (unless (numberp font-size)
+    (setf font-size 12))
   (make-instance 'static-text-vdi
     :x-pos x :y-pos y
     :dialog-item-text text
     :height height
     :width width
     :color color
-    ))
+    :text-height (round font-size 12/10)
+    :str-width-fct (let ((w (round font-size 12/7))) (lambda (str) (* (length str) w)))))
 
 
 ;;; MAKE-LINE-FOR-RPM-WINDOW  [Method]
@@ -289,7 +302,8 @@
 
 (defun visible-virtuals-available? () 
   "Return whether or not the visible-virtuals are available"
-  nil)
+  (and (fboundp 'check-with-environment-for-visible-virtuals)
+       (funcall 'check-with-environment-for-visible-virtuals)))
 
 #|
 This library is free software; you can redistribute it and/or

@@ -38,7 +38,7 @@
 
     
 (define-model model-1
-  (sgp :v t)
+  (sgp :v t :style-warnings nil)
   (sgp :show-focus t)
   (p attend
      =visual-location>
@@ -62,7 +62,7 @@
        key =value))                      
 
 (define-model model-2
-  (sgp :v t)
+  (sgp :v t :style-warnings nil)
   (sgp :show-focus t)
   (p attend
      =visual-location>

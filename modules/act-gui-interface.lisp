@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : act-gui-interface.lisp
-;;; Version     : 2.0a1
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Contains the functions that implement the abstract GUI
 ;;;             : interface used by the tutorial units and the misc functions
@@ -140,6 +140,10 @@
 ;;; 2012.12.12 Dan
 ;;;             : * Adding a check to make sure that the text is a string in
 ;;;             :   add-text-to-exp-window.
+;;; 2013.09.30 Dan [2.0]
+;;;             : * Time to remove the a1 from the version.
+;;; 2015.05.26 Dan
+;;;             : * Added a :font-size parameter to add-text-to-exp-window.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -193,7 +197,7 @@
 
 
 (define-module agi nil nil
-  :version "2.0a1"
+  :version "2.0"
   :documentation "Module based manager for AGI windows"
   :creation create-agi-module
   :reset reset-agi-module
@@ -464,7 +468,7 @@
 ;;;             : add it to the specified window (or current default if
 ;;;             : none povided).
 
-(defun add-text-to-exp-window (&key (x 0) (y 0) (text "") (height 20) (width 75) (color 'black) (window nil))
+(defun add-text-to-exp-window (&key (x 0) (y 0) (text "") (height 20) (width 75) (color 'black) (window nil) (font-size 12))
   "Create and display a text item in the experiment window"
   (if (stringp text)
       (aif (determine-exp-window window)
@@ -474,7 +478,8 @@
                                                         :y y
                                                         :width width
                                                         :height height
-                                                        :color color)))
+                                                        :color color
+                                                        :font-size font-size)))
              (add-visual-items-to-rpm-window it item)
              item)
            (print-warning "No window available for adding a text item."))

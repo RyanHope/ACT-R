@@ -42,7 +42,6 @@
   
   (p attend
      =visual-location>
-       isa visual-location
      ?visual>
        state free
     ==>

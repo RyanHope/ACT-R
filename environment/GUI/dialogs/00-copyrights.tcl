@@ -50,13 +50,9 @@ proc display_waiting_message {} {
 } 
 
 global copyrightlab30var 
-global copyrightlab37var 
-global copyrightlab38var 
    
 proc select_copyrights {} {
   global copyrightlab30var 
-  global copyrightlab37var 
-  global copyrightlab38var 
   global got_actr_connection
   global environment_socket
   global local_connection
@@ -81,80 +77,34 @@ proc select_copyrights {} {
 
 
     wm geometry .copyright \
-    "400x466+[expr $screen_center_x - 200]+[expr $screen_center_y - 233]"
-
-
+    "400x290+[expr $screen_center_x - 200]+[expr $screen_center_y - 145]"
 
     wm overrideredirect .copyright 1
 
-    label .copyright.lab22 -font intro_l_font -height 1 \
-          -text {ACT-R Environment} -width 40 -anchor center
-#    label .copyright.lab37 -font intro_l_font -height 1 \
-#          -textvariable copyrightlab37var -width 40 -anchor center
-    label .copyright.lab24 -font intro_s_font -height 1 -text {© 2002-2005} \
-          -width 56 -anchor center
-    label .copyright.lab33 -font intro_s_font -height 1 -anchor ne \
-          -text {Dan Bothell} -width 20 
-    label .copyright.lab43 -font intro_s_font -height 1 -anchor nw \
-          -text {John R. Anderson} -width 20 
-    label .copyright.lab35 -font intro_s_font -height 1 -anchor center \
-          -text {Department of Psychology, Carnegie Mellon University} \
-          -width 56 
+    label .copyright.lab22 -font intro_l_font -height 1 -text {ACT-R Environment} -anchor center
+    label .copyright.lab30 -font intro_l_font -height 2 -textvariable copyrightlab30var -anchor center
+    label .copyright.lab24 -font intro_s_font -height 1 -text {© 2002-2014} -anchor center
+    label .copyright.lab33 -font intro_s_font -height 1 -anchor center -text {Dan Bothell} 
+    label .copyright.lab43 -font intro_s_font -height 1 -anchor center -text {John R. Anderson}  
+    label .copyright.lab35 -font intro_s_font -height 1 -anchor center -text {Department of Psychology, Carnegie Mellon University}  
 
+    global tcl_env_dir
 
-    label .copyright.lab31 -font intro_l_font -height 1 -text {ACT-R 6} \
-          -width 40 -anchor center
-    label .copyright.lab30 -font intro_l_font -height 1 \
-          -textvariable copyrightlab30var -width 40 -anchor center
-    label .copyright.lab27 -font intro_s_font -height 1 -text {© 2004-2005} \
-          -width 56 -anchor center
-    label .copyright.lab39 -font intro_s_font -height 1 -anchor ne \
-          -text {Dan Bothell} -width 20 
-    label .copyright.lab49 -font intro_s_font -height 1 -anchor nw \
-          -text {John R. Anderson} -width 20 
-    label .copyright.lab36 -font intro_s_font -height 1 -anchor center \
-          -text {Department of Psychology, Carnegie Mellon University} -width 56 
+    image create photo small_onr_logo -file [file join $tcl_env_dir dialogs smalllogo.gif]
 
-    label .copyright.lab28 -font intro_l_font -height 1 -text ACT-R/PM \
-          -width 40 -anchor center
-#    label .copyright.lab38 -font intro_l_font -height 1 -width 40 \
-#          -textvariable copyrightlab38var -anchor center
-    label .copyright.lab34 -font intro_s_font -height 1 -text {© 1997-2004} \
-          -width 56 -anchor center
-    label .copyright.lab32 -font intro_s_font -height 0 -text {Mike Byrne} \
-          -width 56 -anchor center
-    label .copyright.lab26 -font intro_s_font -height 0 -anchor center \
-          -text {Department of Psychology, Rice University} -width 56
-
-
-    image create photo small_onr_logo -file smalllogo.gif
-
-    label .copyright.image -width 400 -height 142 -anchor center \
-          -image small_onr_logo
+    label .copyright.image -width 400 -height 142 -anchor center -image small_onr_logo
 
 
     ###################
     # SETTING GEOMETRY
     ###################
-    place .copyright.lab22 -x 0   -y 5 -anchor nw
-    place .copyright.lab24 -x 0   -y 45 -anchor nw 
-    place .copyright.lab33 -relx .5 -x -10  -y 62 -anchor ne
-    place .copyright.lab43 -relx .5 -x 10  -y 62 -anchor nw
-    place .copyright.lab35 -x 0   -y 79 -anchor nw 
-
-    place .copyright.lab31 -x 0   -y 105 -anchor nw
-    place .copyright.lab30 -x 0   -y 125 -anchor nw
-    place .copyright.lab27 -x 0   -y 145 -anchor nw
-    place .copyright.lab39 -relx .5 -x -10 -y 162 -anchor ne 
-    place .copyright.lab49 -relx .5 -x 10 -y 162 -anchor nw 
-    place .copyright.lab36 -x 0   -y 179 -anchor nw 
-
-    place .copyright.lab28 -x 0   -y 205 -anchor nw
-    place .copyright.lab34 -x 0   -y 245 -anchor nw
-    place .copyright.lab32 -x 0   -y 262 -anchor nw
-    place .copyright.lab26 -x 0   -y 296 -anchor nw
-
-    place .copyright.image -x 0   -y 320 -anchor nw
+    pack .copyright.lab22
+    pack .copyright.lab30 
+    pack .copyright.lab24
+    pack .copyright.lab33
+    pack .copyright.lab43
+    pack .copyright.lab35
+    pack .copyright.image
 
     # get the version strings, but being careful because an
     # overzelous clicker could clear the dialog before the 
@@ -163,8 +113,6 @@ proc select_copyrights {} {
     # the window
 
     set copyrightlab30var ""
-    set copyrightlab37var ""
-    set copyrightlab38var ""
     set local_connection ""
      
     # actually wait for the Lisp side to get up to speed...
@@ -178,11 +126,11 @@ proc select_copyrights {} {
 
     send_environment_cmd \
       "create simple-handler .copyright.lab30 copyrightlab30var \
-         (lambda (x) (meta-p-version (current-mp))) nil"
+         (lambda (x) (declare (ignore x)) (format nil \"ACT-R ~a~%version ~a\" *actr-major-version-string* *actr-version-string*)) nil"
 
     send_environment_cmd \
       "create simple-handler .checkstate local_connection \
-         (lambda (x) *local-connection*) nil"
+         (lambda (x) (declare (ignore x)) *local-connection*) nil"
 
     wait_for_non_null copyrightlab30var
 
@@ -201,21 +149,26 @@ proc select_copyrights {} {
 # start the lisp side running
 
 if {$standalone_mode == 1} {
-  cd "../../apps"
+  
+   set cur_dir [pwd]
 
- if [catch {exec "actr6s-64.exe" -V}] {
-    if [catch {exec "actr6s-32.exe" -V}] {
-      tk_messageBox -icon warning -title "No ACT-R available" \
-                    -message "Cannot run the ACT-R application. Contact Dan for help." -type ok
-      exit
-    } else {
+   global top_dir
+
+   cd [file join $top_dir apps]
+
+   if [catch {exec "actr-s-64.exe" -V}] {
+     if [catch {exec "actr-s-32.exe" -V}] {
+       tk_messageBox -icon warning -title "No ACT-R available" \
+                     -message "Cannot run the ACT-R application. Contact Dan for help." -type ok
+       exit
+     } else {
       exec "./run-32.bat" &
-    }
-  } else {
+     }
+   } else {
       exec "./run-64.bat" &
-  }
+   }
 
-  cd "../GUI/dialogs"
+   cd $cur_dir
 }
 
 
@@ -249,6 +202,5 @@ if {$options_array(show_copyrights) == 1} {
 
 destroy .copyright
 
-# remove_handler .copyright.lab37
 remove_handler .copyright.lab30
 remove_handler .checkstate

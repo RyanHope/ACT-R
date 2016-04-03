@@ -11,11 +11,6 @@
 (defvar *paired-probability* '(0.000 .526 .667 .798 .887 .924 .958 .954))
 
 (defun paired-task (size trials &optional who)
-  
-  (if (eq who 'human)
-      (setf *model-doing-task* nil)
-    (setf *model-doing-task* t))
-  
   (if (not (eq who 'human))
       (do-experiment-model size trials)
     (do-experiment-person size trials)))
@@ -24,6 +19,7 @@
   (let ((result nil)
         (window (open-exp-window "Paired-Associate Experiment" :visible nil)))
     
+    (setf *model-doing-task* t)
     (reset) 
     
     (install-device window)
@@ -62,6 +58,7 @@
   (let ((result nil)
         (window (open-exp-window "Paired-Associate Experiment" :visible t)))
     
+    (setf *model-doing-task* nil)
     (dotimes (i trials) 
       (let ((score 0.0)
             (time 0.0)
@@ -93,19 +90,19 @@
 (defun paired-experiment (n)
   (do ((count 1 (1+ count))
        (results (paired-task 20 8)
-                (mapcar #'(lambda (lis1 lis2)
-                            (list (+ (first lis1) (first lis2))
-                                  (+ (or (second lis1) 0) (or (second lis2) 0))))
+                (mapcar (lambda (lis1 lis2)
+                          (list (+ (first lis1) (first lis2))
+                                (+ (or (second lis1) 0) (or (second lis2) 0))))
                   results (paired-task 20 8))))
       ((equal count n) 
        (output-data results n))))
 
 (defun output-data (data n)
-   (let ((probability (mapcar #'(lambda (x) (/ (first x) n)) data))
-        (latency (mapcar #'(lambda (x) (/ (or (second x) 0) n)) data)))
+  (let ((probability (mapcar (lambda (x) (/ (first x) n)) data))
+        (latency (mapcar (lambda (x) (/ (or (second x) 0) n)) data)))
     (print-results latency *paired-latencies* "Latency")
-     (print-results probability *paired-probability* "Accuracy")))
-    
+    (print-results probability *paired-probability* "Accuracy")))
+
 (defun print-results (predicted data label)
  (format t "~%~%~A:~%" label)
   (correlation predicted data)
@@ -123,7 +120,7 @@
 
 (define-model paired
     
-(sgp :v t :esc t :rt -2 :lf 0.4 :ans 0.5 :bll 0.5 :act nil :ncnar nil) 
+(sgp :v nil :esc t :rt -2 :lf 0.4 :ans 0.5 :bll 0.5 :act nil :ncnar nil) 
 (sgp :seed (200 4))
 
 (chunk-type goal state)
@@ -141,12 +138,11 @@
       isa      goal
       state    start
     =visual-location>
-      isa      visual-location
     ?visual>
      state     free
    ==>
     +visual>               
-      isa      move-attention
+      cmd      move-attention
       screen-pos =visual-location
     =goal>
       state    attending-probe
@@ -157,9 +153,11 @@
       isa      goal
       state    attending-probe
     =visual>
-      isa      text
+      isa      visual-object
       value    =val
-==>
+    ?imaginal>
+      state    free
+   ==>
     +imaginal>
       isa      pair
       probe    =val
@@ -179,14 +177,16 @@
       answer   =ans
     ?manual>   
       state    free
-==>
+    ?visual>
+      state    free
+   ==>
     +manual>              
-      isa      press-key     
+      cmd      press-key     
       key      =ans
     =goal>
       state    read-study-item
     +visual>
-      isa      clear 
+      cmd      clear
 )
 
 
@@ -195,12 +195,14 @@
       isa      goal 
       state    testing
     ?retrieval>
-      state    error
+      buffer   failure
+    ?visual>
+      state    free
    ==>
     =goal>
-      state    read-study-item
+     state    read-study-item
     +visual>
-      isa      clear 
+     cmd      clear
 )
 
 (p detect-study-item
@@ -208,12 +210,11 @@
       isa      goal
       state    read-study-item
     =visual-location>
-      isa      visual-location
     ?visual>
       state    free
-==>
+   ==>
     +visual>               
-      isa      move-attention
+      cmd      move-attention
       screen-pos =visual-location
     =goal>
       state    attending-target
@@ -225,18 +226,21 @@
       isa      goal
       state    attending-target
     =visual>
-      isa      text
+      isa      visual-object
       value    =val
    =imaginal>
       isa      pair
-==>
+      probe    =probe
+    ?visual>
+      state    free
+  ==>
    =imaginal>
       answer   =val
    -imaginal>
    =goal>
-      state    start
+      state    start  
    +visual>
-      isa      clear 
+      cmd      clear
 )
 
 

@@ -39,6 +39,14 @@
 ;;; 2012.03.27 Dan
 ;;;             : * Fixed dm-history-chunk-display so that it doesn't show 
 ;;;             :   "History no longer available" when there was a failure.
+;;; 2015.05.05 Dan
+;;;             : * Added a suppress-warnings to the recording of the sdp info
+;;;             :   in dm-retrieval-set-recorder since there might be issues 
+;;;             :   with negative Sjis that don't matter in the actual model
+;;;             :   so don't want to see those warnings from the recorder.
+;;; 2015.06.09 Dan
+;;;             : * Record time in ms internally, but still show seconds to the
+;;;             :   user in the list.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -88,7 +96,7 @@
 
 (defun dm-request-recorder (request)
   (let ((history (get-module retrieval-history))
-        (block (make-dm-history :time (mp-time) :request request)))
+        (block (make-dm-history :time (mp-time-ms) :request request)))
     (push block (dm-history-module-history history))
     nil))
 
@@ -108,14 +116,16 @@
       (unless (eq x :retrieval-failure)
         (let ((s (make-string-output-stream)))
           (with-parameters-fct (:cmdt s)
-            (sdp-fct (list x))
-            (push (cons x (get-output-stream-string s)) (dm-history-params record)))
+            (suppress-warnings
+             (sdp-fct (list x))
+             (push (cons x (get-output-stream-string s)) (dm-history-params record))))
           (close s)))))
   nil)
 
 
-(defun dm-history-chunk-display (time chunk)
-  (let* ((history (get-module retrieval-history))
+(defun dm-history-chunk-display (time-string chunk)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-module retrieval-history))
          (record (find time (dm-history-module-history history) :key 'dm-history-time))
          (params (when (dm-history-p record) (cdr (assoc chunk (dm-history-params record))))))
          
@@ -126,30 +136,34 @@
       (unless (eq chunk :retrieval-failure) (format t "History no longer available")))))
 
 
-(defun dm-history-trace-display (time chunk)
-  (let* ((history (get-module retrieval-history))
+(defun dm-history-trace-display (time-string chunk)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-module retrieval-history))
          (record (find time (dm-history-module-history history) :key 'dm-history-time))
          (params (when (dm-history-p record) (cdr (assoc chunk (dm-history-params record))))))
          
     (when params
-      (print-chunk-activation-trace-fct chunk time))))
+      (print-chunk-activation-trace-fct chunk time t))))
 
                
-(defun dm-history-chunk-list (time)
-  (let* ((history (get-module retrieval-history))
+(defun dm-history-chunk-list (time-string)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-module retrieval-history))
          (record (find time (dm-history-module-history history) :key 'dm-history-time)))
     (dm-history-chunks record)))
 
-(defun dm-history-request-text (time)
-  (let* ((history (get-module retrieval-history))
+(defun dm-history-request-text (time-string)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-module retrieval-history))
          (record (find time (dm-history-module-history history) :key 'dm-history-time)))
     (pprint-chunk-spec (dm-history-request record))))
 
 
 (defun dm-history-get-time-list ()
-  (let* ((history (get-module retrieval-history))
-         )
-    (nreverse (mapcar 'dm-history-time (dm-history-module-history history)))))
+  (let ((history (get-module retrieval-history)))
+    (nreverse (mapcar (lambda (x) 
+                        (format nil "~/print-time-in-seconds/" (dm-history-time x))) 
+                (dm-history-module-history history)))))
 
 
 (defun reset-dm-history-module (module)

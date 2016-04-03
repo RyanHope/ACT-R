@@ -25,7 +25,10 @@
 ;;;
 ;;; 2004.10.07 Dan
 ;;;             : Created.
-;;;
+;;; 2013.01.04 Dan
+;;;             : * Added the cannot-define-model macro here.
+;;; 2013.01.07 Dan
+;;;             : * Changed cannot-define-model to use a count instead of t/nil.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -65,6 +68,12 @@
        (print-warning ,warning)
      (progn ,@body)))
 
+(defmacro cannot-define-model (&body body)
+  `(progn
+     (incf (meta-p-cannot-define-model (current-mp)))
+     (unwind-protect
+         (progn ,@body)
+       (decf (meta-p-cannot-define-model (current-mp))))))
 
 #|
 This library is free software; you can redistribute it and/or

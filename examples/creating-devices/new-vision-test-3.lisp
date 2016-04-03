@@ -12,7 +12,7 @@
 ;;; window and it will contain "subviews" for which we will have
 ;;; the features actually defined.  
 ;;; This is essentially how the current device interfaces work for
-;;; the virtual windows and the ACL/MCL native windows.
+;;; both the virtual and native Lisp windows.
 
 
 (clear-all)
@@ -43,7 +43,7 @@
 
 (defclass fake-box (fake-window-item)
   ((sides :accessor sides :initform 0 :initarg :sides)
-   (special :accessor special :initform nil :initarg :special))
+   (custom-width :accessor custom-width :initform nil :initarg :custom-width))
   (:default-initargs
       :kind 'polygon))
 
@@ -134,7 +134,7 @@
     
     (setf (chunk-visual-object vl) view)
     
-    ;; In addition for the box, if it's marked as special then we
+    ;; In addition for the box, if it's marked as custom-width then we
     ;; want to give it an approach-width function other than the 
     ;; default.
     ;; The approach-width function will be called with the visual-location
@@ -142,7 +142,7 @@
     ;; representing the perceived width of the item along that approach
     ;; angle.
     
-    (when (special view)
+    (when (custom-width view)
       (setf (chunk-visual-approach-width-fn vl) (lambda (vis-loc theta) 20)))
     
     ;; return the location
@@ -185,11 +185,11 @@ same thing.
 ;;; installs it, and then runs the model.  
 ;;;
 ;;; The optional parameter determines whether or not the box at 150,50 is
-;;; marked as special.  If it is marked as special, then it will have
+;;; marked as custom-width.  If it is marked as custom-width, then it will have
 ;;; an effective approach width much larger than the default which 
 ;;; will make the mouse movement to that item faster.
 
-(defun do-experiment (&optional special)
+(defun do-experiment (&optional custom-width)
   ;; Start by resetting the model.
   
   (reset)
@@ -205,13 +205,13 @@ same thing.
           (subs device))
     
     (push (make-instance 'fake-box
-            :x 50 :y 50 :color 'black :width 4 :height 4 :special nil :sides 4)
+            :x 50 :y 50 :color 'black :width 2 :height 2 :custom-width nil :sides 4)
           (subs device))
     
-    ;; Use the special parameter to mark this box 
+    ;; Use the custom-width parameter to mark this box 
     
     (push (make-instance 'fake-box
-            :x 150 :y 50 :color 'black :width 4 :height 4 :special special :sides 4)
+            :x 150 :y 50 :color 'black :width 2 :height 2 :custom-width custom-width :sides 4)
           (subs device))
     
     
@@ -226,6 +226,10 @@ same thing.
     ;; Check the features just to be sure
     
     (print-visicon)
+    
+    ;; Move the cursor to the starting point of 100,100
+    
+    (device-move-cursor-to device (vector 100 100))
     
     ;; run the model
     
@@ -246,95 +250,66 @@ same thing.
 (define-model new-visual-test-3
     
     (start-hand-at-mouse)
-  
+    
     (sgp :v t :trace-detail high)
   
   (chunk-type (polygon-feature (:include visual-location)) regular)
   (chunk-type (polygon (:include visual-object)) sides)
   (chunk-type goal step)
   
-  ;; Just do this to avoid the warning when the visual-locations are created
-  (define-chunks (polygon isa chunk))
+  ;; Do this to avoid the warnings for undefined chunks when the 
+  ;; visual-locations are created and the productions are defined.
+  
+  (define-chunks (polygon isa chunk) (return isa chunk) (next isa chunk))
+  
   
   ;; Create a chunk representing a point equidistant from the two boxes
   (define-chunks (loc-100x100 isa visual-location screen-x 100 screen-y 100))
   
-  
-  (p start
-     "Move the cursor to a point between the the 2 boxes"
+(p shift-attention
+     "Request an attention shift to that item and clear the motor module to remove any prepared features"
      ?goal>
-       buffer empty
-     ?manual>
-       state free
-     ?visual>
        buffer empty
      =visual-location>
        isa visual-location
+     ?manual>
+       state free
+     ?visual>
+       state free
      ==>
      +goal>
        isa goal
-       step nil
-     +manual>
-       isa move-cursor
-       loc loc-100x100
-     )
-
- 
-  (p find-next
-     "Find the next leftmost item"
-     =goal>
-       isa goal
-       step nil
-     ?visual-location>
-       buffer empty
-       error nil
-     ?visual>
-       buffer empty
-       state free
-     ==>
-     =goal>
-       step 1
-     +visual-location>
-       isa visual-location
-      > screen-x current
-       screen-x lowest)
-  
-  
-  (p shift-attention
-     "Request an attention shift to that item and clear the motor module to remove any prepared features"
-     =goal>
-       isa goal
-     =visual-location>
-       isa visual-location
-     ?manual>
-       state free
-     ==>
      +manual>
        isa clear
      +visual>
        isa move-attention
        screen-pos =visual-location)
+
   
   (p attend-item
      "Move the mouse to the attended object"
      =goal>
        isa goal
-       step =val
+       step nil
      =visual>
        isa visual-object
      ?manual>
        state free
      ==>
+     =goal>
+       step return
      !eval! (setf *start-time* (mp-time))
      +manual>
        isa move-cursor
-       object =visual
-     -goal>)   
+       object =visual)   
   
-  (p return-to-center
+  
+(p return-to-center
      "Report how long it took to make the last move and return the mouse to the center spot"
-     ?goal>
-       buffer empty
+   =goal>
+       isa goal
+       step return
+   
      ?manual>
        state free
      ?visual>
@@ -346,10 +321,31 @@ same thing.
      !output! (The time to move to the object was =move-time)
      +goal>
        isa goal
-       step nil
+       step next
      +manual>
        isa move-cursor
-       loc loc-100x100
-     )
+   loc loc-100x100)
+
+(p find-next
+     "Find the next leftmost item"
+     =goal>
+       isa goal
+       step next
+   
+   ?visual-location>
+       buffer empty
+       error nil
+     ?visual>
+       buffer empty
+       state free
+     ==>
+     -goal>
+     
+     +visual-location>
+       isa visual-location
+      > screen-x current
+       screen-x lowest)
+
+
   )
  

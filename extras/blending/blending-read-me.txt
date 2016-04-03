@@ -1,16 +1,16 @@
-This document describes the blending module for ACT-R 6.
+This document describes the blending module for ACT-R 6.1.
 
 The slides in the blending.pdf file describe the original
 ACT-R 4 version of the mechanism.  The theory of this module
 is basically same, but the implementation is different in
-ACT-R 6.  This document and the example blending-test models 
-show the details of using it in ACT-R 6.
+ACT-R 6.1.  This document and the example blending-test models 
+show the details of using it in ACT-R 6.1.
 
 
 To use the module move the blending.lisp file into the modules
 directory of the ACT-R source file distribution before loading
-the ACT-R 6 loader or load that file explicitly after loading 
-the ACT-R 6 loader.
+the ACT-R 6.1 loader or load that file explicitly after loading 
+the ACT-R 6.1 loader.
 
 
 Once the module is added to the system it will add another
@@ -72,7 +72,7 @@ magnitude to use for blending (see details below).
 
 If :mag->value is set to a function, then that function 
 will be used to convert magnitudes back into values when
-the :value-mag function has returned magnitude the values 
+the :value-mag function has returned magnitude values 
 (see details below).
 
 :blend-all-slots
@@ -105,7 +105,7 @@ be either the chunk saved in the buffer or nil if the request
 failed or was terminated by a new request.  The return value of 
 the function is ignored.  Note that since the chunk may not be 
 put into the buffer until some later time this function may not 
-be called at the same time as a request hook function.  Each 
+be called at the same time as the request hook function.  Each 
 setting adds a new function and the "current value" of the 
 parameter is a list of all functions that are set.  Setting a 
 value of nil clears all the functions from the hook.
@@ -135,9 +135,9 @@ The blending buffer takes requests the same way the retrieval
 buffer does and it will attempt to find a chunk that matches the
 request among the chunks in the model's declarative memory.
 
-It differs in that the chunk returned will have "blended" values 
-in its slots.  How those blended values are computed is described
-below.  
+It differs in that the chunk returned may have "blended" values 
+in some of its slots.  How those blended values are computed is 
+described below.  
 
 The module can only handle one request at a time.  If a new
 request is received while the module is busy it will cancel the
@@ -148,24 +148,20 @@ There are two request parameters allowed in a request :ignore-slots
 and :do-not-generalize.
 
 If :ignore-slots is provided it must specify a list of slot names.
-Those slots will not get a value in the result chunk i.e. they
-will have a value of nil.  When using that mechanism one needs to
-be careful because there could be issues if that result chunk is
-allowed to enter declarative memory.  One issue is that since it 
-will likely become another potential target to be blended the 
-empty slots could affect the results of later blended retrievals.
-Another issue is that with lots of empty slots it may be more
-likely to be merged with other blended results.  That could lead 
-to issues with the blended results because of higher activation 
-of those merged results.
+Those slots will not receive a blended value in the result chunk.
+This parameter is primarily for efficiency purposes because 
+creating a blended value for a slot can be a costly operation. 
+Thus, if there are slots in the target chunks for which the 
+model will not need a value in the resulting chunk then ignoring 
+those slots may provide a noticable improvement in the time it
+takes to run the model.
 
 If :do-not-generalize is provided it must specify a list of slot names.
-Those slots in the resulting chunk will still be computed via 
-the blending mechanism, but it will not use method c if the
-values to be blended are all chunks (as described later) for 
-computing the value.  Instead it will use method d for that
-slot.  This may be necessary when one wants to use chunks for
-the slot contents and doesn't want blending to potentially consider
+Any of those slots which will receive a blended value in the 
+resulting chunk will be computed without using blending method c if 
+the values to be blended are all chunks.  Instead it will use method 
+d for those slots.  This may be necessary when one wants to use chunks
+for the slot contents and doesn't want blending to potentially consider
 all other chunks as values.
 
 ----------------------------------------------------------------
@@ -184,15 +180,21 @@ below.
 
 For each chunk i in MS its activation is computed based on the
 current settings of the declarative module (including noise), 
-which will be called A(i).  Those activations and the temperature 
-value for the blending module are used to compute the probability 
-of recall for the chunks in MS using the Boltzmann equation (shown 
-in blending.pdf).  The probability of retrieving chunk i from MS 
-will be called p(i).
+which will be called A(i).  If the :min-bl parameter is specified
+for the model then any chunks which have a base-level activation
+below that value are removed from MS.  The activations and the 
+temperature value for the blending module are then used to compute
+the probability of recall for the chunks in MS using the 
+Boltzmann equation (shown in blending.pdf).  The probability of
+retrieving chunk i from MS will be called p(i).  [An important
+thing to note is that the p(i) values are computed up front
+based on all the chunks in MS.  There is a potential issue with
+that when the chunks in MS do not all have the same set of
+slots, which is noted below.]
 
-The chunk that results from the blending request will be of the 
-chunk-type specified in the request.  The contents of the slots 
-of that chunk will be set as follows:
+We will determine which slots that chunk will have based on 
+all of the chunks in MS.  Every slot which holds a value in
+some chunk of MS may occur in the resulting chunk.
 
 If the :blend-all-slots parameter is nil and the slot has an
 explicit value in the request then that explicit value will occur 
@@ -201,51 +203,59 @@ value requested with an equality test.  If a slot is requested with
 both equality and non-equal tests the explicit value from the 
 equality test will be used.
 
-If the :ignore-slots request parameter is provided all of the 
-slots in that list will have a value of nil in the resulting
-chunk.  For all other slots (including those with an explicit 
-value if the :blend-all-slots parameter is t) the following 
-process is performed to determine the value for that slot (referenced
-by the index k below) in the resulting chunk:
+If the :ignore-slots request parameter is provided any slots in
+that list which do not have an explicit value in the request will 
+not occur in the result.  A slot which is in the :ignore-slots list
+and also has an explicit value in the request will have that 
+explicit value if :blend-all-slots is nil, but will be skippped
+if :blend-all-slots is t.
+
+For all other slots (including those with an explicit value if 
+the :blend-all-slots parameter is t) the following process is 
+performed to determine the value for that slot (referenced by 
+the index k below) in the resulting chunk:
 
 A list of potential values is created by taking the value from slot
-k for each of the chunks in MS.  Those values will be referred to 
-as: v(k,i) - the value of the slot k in chunk i from from MS.
+k for each of the chunks in MS which has slot k.  Those values will 
+be referred to as: v(k,i) - the value of the slot k in chunk i from 
+MS.
 
 For each v(k,i) it calls the value->mag function of the module with
 v(k,i) as the only parameter.  The return value of that function
 is the magnitude to use for blending and will be referred to as: m(k,i).
 The default value->mag function is identity and thus v(k,i) = m(k,i)
-by default.
-
+by default.  An m(k,i) value of nil is ignored.  If all v(k,i) values
+result in nil magnitudes then the slot k will not occur in the 
+resulting chunk.
 
 Based on the set of m(k,i) values one of the following methods
 is used to create the blended result for slot k, called R(k):
 
 a) all the m(k,i) values are numbers: 
 
-  Then R(k) is the sum over all chunks i in MS of p(i)*m(k,i).
+  Then R(k) is the sum over all chunks i in MS which have slot k 
+  of p(i)*m(k,i).  
 
-b) all the m(k,i) values are nil:
-  
-  Then R(k) is nil.
+  Note that if not all chunks in MS contain slot k that the sum of 
+  the p(i) values used to compute this quantity will not be 1.0.  
+  This differs from the ACT-R 6.0 version which would have treated 
+  those missing slots as a value of "nil" and not averaged them.  It 
+  would have instead used method c (below) to compute the value.
 
-c) all the m(k,i) values are chunks or nil and the slot k is not 
+b) all the m(k,i) values are chunks and the slot k is not 
    in the :do-not-generalize list specified with the request
 
-  It determines a set of potential value chunks based on
-  the chunk-types of the non-nil m(k,i) values.  That set will be 
-  called PV(k) and created as follows:  
+  It determines a set of potential value chunks based on the slots 
+  which the m(k,i) chunks have.  That set will be called PV(k).  To
+  construct PV(k) consider the set of slots for each chunk i, called
+  s(i).
 
-  i) all of the non-nil m(k,i) values are of the same chunk-type or  
-     have a common parent chunk-type 
+  i) If the intersection of all the sets s(i) is non-null then PV(k) 
+     is the set of all of the chunks in the model's DM which contain 
+     that intersection of slots.
 
-    PV(k) is the set of all of the chunks of that common chunk-type 
-    in the model's DM.
-
-  ii) there is no common parent chunk-type
-
-    PV(k) is the set of all the chunks in the model's DM.
+  ii) If the intersection of all the sets s(i) is null then PV(k) is
+      the set of all the chunks in the model's DM.
 
   For each chunk j in PV(k) a value B(j) is computed as the
   sum over the chunks i in MS of p(i) times the square of the
@@ -253,7 +263,7 @@ c) all the m(k,i) values are chunks or nil and the slot k is not
 
   R(k) is then the chunk j for which the B(j) value is minimum.
 
-d) the m(k,i) values are neither all numbers nor all chunks, or
+c) the m(k,i) values are neither all numbers nor all chunks, or
    the slot k is in the :do-not-generalize list specified in the request
  
   A set of potential values, PV(k), is created which contains all 
@@ -265,8 +275,9 @@ d) the m(k,i) values are neither all numbers nor all chunks, or
  
   Note: Since the items in PV(k) may not be chunks this assumes that
   there is a similarity function set for the declarative module
-  otherwise all non-equal items will have maximum dissimilarity
-  values.
+  which will compute similarities between non-chunk items otherwise 
+  all non-equal non-chunk items will have the maximum dissimilarity 
+  value.
 
   R(k) is then the value j for which the B(j) value is minimum.
 
@@ -278,8 +289,8 @@ then the value for the slot k will be the value R(k).
 If there is a mag->value function and there exists an i such that
 m(k,i) != v(k,i) then the value for the slot k will be the result 
 of calling the mag->value function with two parameters.  The first
-will be the value R(k).  The second will be the common chunk-type
-from case c above if there is one, otherwise it will be nil.  
+will be the value R(k).  The second value will be the chunk-spec 
+of the request which was made to the module.
 
 ----------------------------------------------------------------
 

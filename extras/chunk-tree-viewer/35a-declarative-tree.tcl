@@ -138,7 +138,7 @@ proc make_declarative_tree_viewer {} {
     "create list-box-handler $drop_box $drop_box \
       (lambda (x) \
         (declare (ignore x)) \
-        (cons 'none (no-output (chunk-type)))) \
+        (all-dm-slot-lists)) \
       () [send_model_name]"
   
   # Make sure that when this window is closed that the Lisp side
@@ -198,21 +198,17 @@ proc make_declarative_tree_viewer {} {
 
   set save_button [button $win.save -text "Save" -font button_font -command "save_declarative_tree $win.frame.canvas"]
 
-  checkbutton $win.check -text "Show nil slots" -variable $win.hide_nil -onvalue nil -offvalue t -font checkbox_font -command "event generate $list_box <<ListboxSelect>>"
-
   place $filter_label -x 2 -y 5 -width 40 -height 20
   place $filter_button -x 42 -y 5 -relwidth 1.0 -width -140 -height 20
-  place $win.check -x 0 -y 25 -relwidth 1.0 -height 20
   place $save_button -relx 1.0 -x -92 -y 5 -width 90 -height 20
 
+  pack $win.frame.scrlx -side bottom -fill x
+  pack $win.frame.scrly -side right -fill y
+  place $win.frame.canvas -relx 0 -rely 0 -relwidth 1.0 -relheight 1.0
 
-    pack $win.frame.scrlx -side bottom -fill x
-    pack $win.frame.scrly -side right -fill y
-    place $win.frame.canvas -relx 0 -rely 0 -relwidth 1.0 -relheight 1.0
 
-
-  place $list_frame -relx 0.0 -y 50 -relheight 1.0 -height -50 -relwidth .4
-  place $win.frame -relx .4 -y 50 -relheight 1.0 -height -50 -relwidth .6
+  place $list_frame -relx 0.0 -y 30 -relheight 1.0 -height -30 -relwidth .4
+  place $win.frame -relx .4 -y 30 -relheight 1.0 -height -30 -relwidth .6
      
   pack $list_scroll_bar -side right -fill y 
   pack $list_box -side left -expand 1 -fill both
@@ -259,7 +255,6 @@ proc select_chunk_tree {listwin target_win win} {
       $target_win delete all
 
       global $win.show_nil
-      upvar $win.hide_nil hide_nil
 
       global $win.return
       set $win.return ""
@@ -267,7 +262,7 @@ proc select_chunk_tree {listwin target_win win} {
       send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (parse-chunk-tree-for-env '$chunk $hide_nil))"
+                (parse-chunk-tree-for-env '$chunk))"
        
        wait_for_non_null $win.return
 
@@ -469,7 +464,7 @@ proc declarative_tree_drop_list {but top drop_frame drop_box \
         send_environment_cmd \
           "update [get_handler_name $list_box] \
             (lambda (x) \
-               (declare (ignore x)) (no-output (sdm isa $new_filter)))"
+               (declare (ignore x)) (filter-dm-chunks (quote $new_filter)))"
       }
     }
   } 

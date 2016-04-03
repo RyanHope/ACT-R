@@ -15,13 +15,13 @@ proc make_parameter_viewer {} {
   
   # frame and list box for modules
 
-  set list_frame_1 [frame $win.list_frame_1 -borderwidth 0]  
+  set list_frame_1 [frame $win.list_frame_1 -borderwidth 2]  
   
   set list_box_1 [listbox $list_frame_1.list_box -listvar \
                         $list_frame_1.list_box.var \
                         -yscrollcommand "$list_frame_1.list_scrl set" \
                         -selectmode single \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   
   send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 \
@@ -35,13 +35,13 @@ proc make_parameter_viewer {} {
 
   # Frame and list box for parameters
 
-  set list_frame_2 [frame $win.list_frame -borderwidth 0]  
+  set list_frame_2 [frame $win.list_frame -borderwidth 2]  
   
   set list_box_2 [listbox $list_frame_2.list_box -listvar \
                         $list_frame_2.list_box.var \
                         -yscrollcommand "$list_frame_2.list_scrl set" \
                         -selectmode single \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   
   send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 \

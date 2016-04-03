@@ -28,11 +28,12 @@
     (setf *response* nil) 
     (setf *response-time* nil)
     
-    (proc-display)
-    (run 10)
+    
+    (run 10 :real-time t)
         
     (list task  (and (= (length *response*) 2)
                      (< time *response-time*)
+                     (string-equal (car (last *response*)) prompt)
                      (or (and (string-equal task "next") (search (reverse *response*) alphabet :test 'string-equal))
                          (and (string-equal task "previous") (search *response* alphabet :test 'string-equal)))
                      t))))
@@ -43,10 +44,6 @@
   (add-text-to-exp-window :text prompt :x 125 :y 150)
   (proc-display))
 
-(defun flash-letter (prompt)
-  (clear-exp-window)
-  (add-text-to-exp-window :text prompt :x 125 :y 150)
-  (proc-display))
 
 
 (clear-all)
@@ -54,7 +51,7 @@
 (define-model perceptual-motor-issues
 
     (sgp :seed (101 1))
-    (sgp :v t :needs-mouse nil :show-focus t :trace-detail medium :er t)
+    (sgp :v t :needs-mouse nil :show-focus t :trace-detail medium :er t :style-warnings nil)
 
 (chunk-type letter name next previous)
 (chunk-type task letter)
@@ -93,28 +90,22 @@
  (respond isa chunk) (done isa chunk))
 
 (p find-letter
-   
    =visual-location>
-     isa         visual-location
-   
    ?visual>
      state       free
  ==>
    +visual>
-     isa         move-attention
+     cmd         move-attention
      screen-pos  =visual-location
    +imaginal>
-     isa         task
-     letter      nil
 )
 
 (p encode-letter
-   
    =imaginal>
      isa         task
      letter      nil
    =visual>
-     isa         text
+     isa         visual-object
      value       =letter
  ==>
    =imaginal>
@@ -122,12 +113,11 @@
 )
 
 (p respond-next
-   
    =imaginal>
      isa         task
      letter      =letter
    =visual>
-     isa         text
+     isa         visual-object
      value       "next"
    ?manual>
      state       busy
@@ -136,19 +126,17 @@
      isa         letter
      previous    =letter
    +manual>
-     isa         press-key
+     cmd         press-key
      key         =letter
 )
 
 (p respond-previous
-   
    =imaginal>
      isa         task
      letter      =letter
    =visual>
      isa         text
      value       "previous"
-   
    ?manual>
      state       free
  ==>
@@ -156,17 +144,16 @@
      isa         letter
      next        =letter
    +manual>
-     isa         press-key
+     cmd         press-key
      key         =letter
 )
 
 (p respond-final
-   
    =retrieval>
      isa         letter
      name        =letter
- ==>
+   ==>
    +manual>
-     isa         press-key
+     cmd         press-key
      key         =letter
 ))

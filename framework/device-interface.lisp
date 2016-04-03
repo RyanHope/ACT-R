@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : device-interface.lisp
-;;; Version     : 1.3
+;;; Version     : 2.0
 ;;; 
 ;;; Description : File for managing the device interface.
 ;;; 
@@ -187,6 +187,49 @@
 ;;; 2012.09.07 Dan
 ;;;             : * Removed the test for :actr-env-alone in the pixels-per-inch
 ;;;             :   setting for ACL.
+;;; 2014.04.24 Dan
+;;;             : * Added commands to the press-key table so that all the keys
+;;;             :   in the "primary area" have a mapping, but it does assume that
+;;;             :   the model has a long right pinkie and can hit things 3+ keys
+;;;             :   away without moving the hand...
+;;;             : * Renamed some of the keys in the loc table because there were
+;;;             :   duplicates between the "primary area" and the keypad.  Now
+;;;             :   all of the keypad keys which appear in both areas are 
+;;;             :   prefixed with "keypad-".
+;;; 2014.05.21 Dan [2.0]
+;;;             : * Just now noticed that the pixels-to-angle code isn't quite 
+;;;             :   right given that we compute the location of something as
+;;;             :   it's center point.  It should be 2*(atan (/ (w/2) d) not
+;;;             :   just (atan (/ w d)) because that assumes a view from one
+;;;             :   end.  Of course, it's even odder than that because we also
+;;;             :   consider everything on the screen as the same distance, but
+;;;             :   really that's only true if the display is a spherical
+;;;             :   surface centered on the viewing position...
+;;;             :   The difference in values between those 2 calculations is
+;;;             :   generally negligible for the typical sizes and default 
+;;;             :   viewing distance.  However, since I'm adding in code to
+;;;             :   allow for distances other than the default I'm going to
+;;;             :   switch to the "better" calculation.
+;;; 2014.10.31 Dan
+;;;             : * Changed synch-mouse so that it has an optional parameter
+;;;             :   for indicating whether the action was "model generated"
+;;;             :   instead of treating all usage like it was.
+;;; 2015.05.20 Dan 
+;;;             : * Adding a new method for devices: vis-loc-coordinate-slots.
+;;;             :   It needs to return a list of three values which indicate the
+;;;             :   names of the slots used to hold the x, y, and z coordinates
+;;;             :   respectively for the visual location chunks created by the
+;;;             :   device.  The default is '(screen-x screen-y distance), but
+;;;             :   now one can use something else instead.
+;;;             :   It is only called when the device is installed thus it can't
+;;;             :   change dynamically and must be consistent for all features 
+;;;             :   in the device.
+;;; 2015.05.21 Dan
+;;;             : * Fixed the decalim for xy-loc.
+;;; 2015.09.01 Dan
+;;;             : * Added press-key shortcuts for the keypad assuming that the
+;;;             :   hand has been moved to it with hand-to-keypad or start-hand-
+;;;             :   at-keypad.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -195,8 +238,9 @@
 
 (declaim (ftype (function () t) unlock-tracking))
 (declaim (ftype (function (t) t) populate-loc-to-key-array))
-(declaim (ftype (function (t) t) xy-loc))
+(declaim (ftype (function (t t) t) xy-loc))
 (declaim (ftype (function (t) t) current-marker))
+(declaim (ftype (function (t t) t) record-vis-loc-slots))
 
 ;;; unless it's MCL define the pixels-per-inch
 #+(or (not :mcl) :openmcl)
@@ -233,7 +277,11 @@
            
       (when (show-focus-p devin)
         (device-update-attended-loc (device devin) nil))
-    
+      
+      (let ((vis-m (get-module :vision)))
+        (when vis-m
+          (record-vis-loc-slots vis-m (vis-loc-coordinate-slots device))))
+      
       (setf (device devin) device)))))
 
 (defun current-device ()
@@ -280,14 +328,14 @@
 ;;;; ---------------------------------------------------------------------- ;;;;
 ;;;; Move these here
 
-(defun pm-pixels-to-angle (pixels)
+(defun pm-pixels-to-angle (pixels &optional dist)
   "Convert <pixels> to degress of visual angle."
-  (pixels->angle-mth (current-device-interface) pixels))
+  (pixels->angle-mth (current-device-interface) pixels dist))
 
 
-(defun pm-angle-to-pixels (angle)
+(defun pm-angle-to-pixels (angle &optional dist)
   "Convert visual <angle> in degress to pixels."
-  (angle->pixels-mth (current-device-interface) angle))
+  (angle->pixels-mth (current-device-interface) angle dist))
 
 
 ;;;; ---------------------------------------------------------------------- ;;;;
@@ -326,28 +374,31 @@
 (defmethod my-name ((mod device-interface))
   :DEVICE)
 
-(defgeneric angle->pixels-mth (devin angle)
+(defgeneric angle->pixels-mth (devin angle &optional dist)
   (:documentation  "Determine the number of pixels subtending a visual angle."))
 
-(defmethod angle->pixels-mth ((devin device-interface) (angle number))
-  (round (* (* (viewing-distance devin) (tan (deg->rad angle))) 
-            (ppi devin))))
+(defmethod angle->pixels-mth ((devin device-interface) (angle number) &optional dist)
+  (if (numberp dist)
+      (round (* 2 dist (tan (deg->rad (/ angle 2)))))
+    (round (* 2 (viewing-distance devin) (ppi devin) (tan (deg->rad (/ angle 2)))))))
 
 
-(defgeneric pixels->angle-mth (devin pixels)
+(defgeneric pixels->angle-mth (devin pixels &optional dist)
   (:documentation  "Determine the amount of visual angle subtended by <pixels>."))
 
-(defmethod pixels->angle-mth ((devin device-interface) (pixels number))
-  (rad->deg (atan (/ (/ pixels (ppi devin)) (viewing-distance devin)))))
+(defmethod pixels->angle-mth ((devin device-interface) (pixels number) &optional dist)
+  (if (numberp dist)
+      (rad->deg (* 2 (atan (/ pixels 2) dist)))
+    (rad->deg (* 2 (atan (/ pixels 2) (* (ppi devin) (viewing-distance devin)))))))
 
 
-(defgeneric find-viewing-dist-mth (devin angle pixels)
+(defgeneric find-viewing-dist-mth (devin angle pixels &optional in-pixels)
   (:documentation  "Given the number of pixels an angle subtends, what's the viewing distance?"))
 
-(defmethod find-viewing-dist-mth ((devin device-interface) angle pixels)
-  (floor 
-   (/ pixels (* (tan (deg->rad angle)) (ppi devin)))))
-
+(defmethod find-viewing-dist-mth ((devin device-interface) angle pixels &optional in-pixels)
+  (if in-pixels
+      (floor (/ pixels 2) (tan (deg->rad (/ angle 2))))
+    (floor (/ pixels 2) (* (tan (deg->rad (/ angle 2))) (ppi devin)))))
 
 
 ;;;; Slot for device implementers to save a visual focus ring object
@@ -403,7 +454,7 @@
           
           (unless (and past-marker-exists (eq marker past-marker))
             (if marker
-                (device-update-attended-loc (device devin) (xy-loc marker))
+                (device-update-attended-loc (device devin) (xy-loc marker vis-m))
               (device-update-attended-loc (device devin) nil))
             (setf (last-visual-marker devin) (cons t marker)))))))
   (synch-mouse devin)
@@ -539,7 +590,7 @@
      :default-value t
      :warning "T or NIL"
      :documentation "Whether or not to record all mouse position data"))
-  :version "1.3"
+  :version "2.0"
   :documentation "The device interface for a model"
   :creation #'(lambda (x)
                 (declare (ignore x))
@@ -567,16 +618,18 @@
 (defgeneric process-display (devin vis-mod &optional clear)
   (:documentation  "Rebuild the Vision Module's icon based on the current display."))
 
-(defgeneric synch-mouse (devin)
+(defgeneric synch-mouse (devin &optional model-generated)
   (:documentation  "Make sure everyone agress on the current cursor position."))
 
-(defmethod synch-mouse ((devin device-interface))
+(defmethod synch-mouse ((devin device-interface) &optional model-generated)
   (when (and (device devin)
              (needs-mouse-p devin)
              (not (vpt= (true-cursor-loc devin)
                         (get-mouse-coordinates (device devin)))))
-    (indicate-model-generated 
-     (device-move-cursor-to (device devin) (true-cursor-loc devin))))
+    (if model-generated
+        (indicate-model-generated 
+         (device-move-cursor-to (device devin) (true-cursor-loc devin)))
+      (device-move-cursor-to (device devin) (true-cursor-loc devin))))
   (let ((vis-m (get-module :vision)))
     (when vis-m
       (update-cursor-feat devin vis-m))))
@@ -614,6 +667,21 @@
 (defmethod cursor-to-vis-loc (device)
   (error "No method definded for CURSOR-TO-VIS-LOC on object ~S." device))  
 
+(defgeneric vis-loc-coordinate-slots (device)
+  (:documentation "Return a list of the slots used to hold the x,y,z coordinates in a visual location chunk respectively."))
+
+(defmethod vis-loc-coordinate-slots (device)
+  (declare (ignorable device))
+  '(screen-x screen-y distance))
+
+(defmethod vis-loc-coordinate-slots :around (device)
+  (declare (ignorable device))
+  (let ((slots (call-next-method)))
+    (if (and (listp slots) (= (length slots) 3))
+        slots
+      (progn
+        (print-warning "Invalid vis-loc-coordinate-slots result. It must return a three element list; using default.")
+        '(screen-x screen-y distance)))))
 
 ;;;; ---------------------------------------------------------------------- ;;;;
 ;;;; Output functions:  mouse movements, keypress stuff.
@@ -654,7 +722,7 @@
   (indicate-model-generated 
    (device-move-cursor-to (device devin) xyloc))
   (setf (true-cursor-loc devin) xyloc)
-  (synch-mouse devin))
+  (synch-mouse devin t))
 
 
 (defgeneric move-cursor-polar (devin rtheta)
@@ -667,7 +735,7 @@
     (indicate-model-generated
      (device-move-cursor-to (device devin) newloc))
     (setf (true-cursor-loc devin) newloc))
-  (synch-mouse devin))
+  (synch-mouse devin t))
 
 
 (defun get-mouse-trace ()
@@ -767,98 +835,154 @@
 (defmethod populate-key-to-command-ht ((ht hash-table))
   (setf (gethash 'space ht) '(punch :hand left :finger thumb))
   (setf (gethash 'backquote ht) 
-        '(peck-recoil :hand left :finger pinkie :r 2.24 :theta -2.03))
+    '(peck-recoil :hand left :finger pinkie :r 2.24 :theta -2.03))
   (setf (gethash 'tab ht) 
-        '(peck-recoil :hand left :finger pinkie :r 1.41 :theta -2.36))
+    '(peck-recoil :hand left :finger pinkie :r 1.41 :theta -2.36))
   (setf (gethash '1 ht) 
-        '(peck-recoil :hand left :finger pinkie :r 2 :theta -1.57))
+    '(peck-recoil :hand left :finger pinkie :r 2 :theta -1.57))
   (setf (gethash 'Q ht) 
-        '(peck-recoil :hand left :finger pinkie :r 1 :theta -1.57))
+    '(peck-recoil :hand left :finger pinkie :r 1 :theta -1.57))
   (setf (gethash 'A ht) '(punch :hand left :finger pinkie))
   (setf (gethash 'Z ht) 
-        '(peck-recoil :hand left :finger pinkie :r 1 :theta 1.57))
+    '(peck-recoil :hand left :finger pinkie :r 1 :theta 1.57))
   (setf (gethash '2 ht) 
-        '(peck-recoil :hand left :finger ring :r 2 :theta -1.57))
+    '(peck-recoil :hand left :finger ring :r 2 :theta -1.57))
   (setf (gethash 'W ht) 
-        '(peck-recoil :hand left :finger ring :r 1 :theta -1.57))
+    '(peck-recoil :hand left :finger ring :r 1 :theta -1.57))
   (setf (gethash 'S ht) 
-        '(punch :hand left :finger ring))
+    '(punch :hand left :finger ring))
   (setf (gethash 'X ht) 
-        '(peck-recoil :hand left :finger ring :r 1 :theta 1.57))
+    '(peck-recoil :hand left :finger ring :r 1 :theta 1.57))
   (setf (gethash '3 ht) 
-        '(peck-recoil :hand left :finger middle :r 2 :theta -1.57))
+    '(peck-recoil :hand left :finger middle :r 2 :theta -1.57))
   (setf (gethash 'E ht) 
-        '(peck-recoil :hand left :finger middle :r 1 :theta -1.57))
+    '(peck-recoil :hand left :finger middle :r 1 :theta -1.57))
   (setf (gethash 'D ht) '(punch :hand left :finger middle))
   (setf (gethash 'C ht) 
-        '(peck-recoil :hand left :finger middle :r 1 :theta 1.57))
+    '(peck-recoil :hand left :finger middle :r 1 :theta 1.57))
   (setf (gethash '4 ht) 
-        '(peck-recoil :hand left :finger index :r 2 :theta -1.57))
+    '(peck-recoil :hand left :finger index :r 2 :theta -1.57))
   (setf (gethash 'R ht) 
-        '(peck-recoil :hand left :finger index :r 1 :theta -1.57))
+    '(peck-recoil :hand left :finger index :r 1 :theta -1.57))
   (setf (gethash 'F ht) '(punch :hand left :finger index))
   (setf (gethash 'V ht) 
-        '(peck-recoil :hand left :finger index :r 1 :theta 1.57))
+    '(peck-recoil :hand left :finger index :r 1 :theta 1.57))
   (setf (gethash '5 ht) 
-        '(peck-recoil :hand left :finger index :r 2.24 :theta -1.11))
+    '(peck-recoil :hand left :finger index :r 2.24 :theta -1.11))
   (setf (gethash 'T ht) 
-        '(peck-recoil :hand left :finger index :r 1.41 :theta -0.79))
+    '(peck-recoil :hand left :finger index :r 1.41 :theta -0.79))
   (setf (gethash 'G ht) 
-        '(peck-recoil :hand left :finger index :r 1 :theta 0))
+    '(peck-recoil :hand left :finger index :r 1 :theta 0))
   (setf (gethash 'B ht) 
-        '(peck-recoil :hand left :finger index :r 1.41 :theta 0.79))
+    '(peck-recoil :hand left :finger index :r 1.41 :theta 0.79))
   (setf (gethash '6 ht) 
-        '(peck-recoil :hand right :finger index :r 2.24 :theta -2.03))
+    '(peck-recoil :hand right :finger index :r 2.24 :theta -2.03))
   (setf (gethash 'Y ht) 
-        '(peck-recoil :hand right :finger index :r 1.41 :theta -2.36))
+    '(peck-recoil :hand right :finger index :r 1.41 :theta -2.36))
   (setf (gethash 'H ht) 
-        '(peck-recoil :hand right :finger index :r 1 :theta 3.14))
+    '(peck-recoil :hand right :finger index :r 1 :theta 3.14))
   (setf (gethash 'N ht) 
-        '(peck-recoil :hand right :finger index :r 1.41 :theta 2.36))
+    '(peck-recoil :hand right :finger index :r 1.41 :theta 2.36))
   (setf (gethash '7 ht) 
-        '(peck-recoil :hand right :finger index :r 2 :theta -1.57))
+    '(peck-recoil :hand right :finger index :r 2 :theta -1.57))
   (setf (gethash 'U ht) 
-        '(peck-recoil :hand right :finger index :r 1 :theta -1.57))
+    '(peck-recoil :hand right :finger index :r 1 :theta -1.57))
   (setf (gethash 'J ht) 
-        '(punch :hand right :finger index))
+    '(punch :hand right :finger index))
   (setf (gethash 'M ht) 
-        '(peck-recoil :hand right :finger index :r 1 :theta 1.57))
+    '(peck-recoil :hand right :finger index :r 1 :theta 1.57))
   (setf (gethash '8 ht) 
-        '(peck-recoil :hand right :finger middle :r 2 :theta -1.57))
+    '(peck-recoil :hand right :finger middle :r 2 :theta -1.57))
   (setf (gethash 'I ht) 
-        '(peck-recoil :hand right :finger middle :r 1 :theta -1.57))
+    '(peck-recoil :hand right :finger middle :r 1 :theta -1.57))
   (setf (gethash 'K ht) '(punch :hand right :finger middle))
   (setf (gethash 'comma ht) 
-        '(peck-recoil :hand right :finger middle :r 1 :theta 1.57))
+    '(peck-recoil :hand right :finger middle :r 1 :theta 1.57))
   (setf (gethash '9 ht) 
-        '(peck-recoil :hand right :finger ring :r 2 :theta -1.57))
+    '(peck-recoil :hand right :finger ring :r 2 :theta -1.57))
   (setf (gethash 'O ht) 
-        '(peck-recoil :hand right :finger ring :r 1 :theta -1.57))
+    '(peck-recoil :hand right :finger ring :r 1 :theta -1.57))
   (setf (gethash 'L ht) 
-        '(punch :hand right :finger ring))
+    '(punch :hand right :finger ring))
   (setf (gethash 'period ht) 
-        '(peck-recoil :hand right :finger ring :r 1 :theta 1.57))
+    '(peck-recoil :hand right :finger ring :r 1 :theta 1.57))
+  (setf (gethash 'dot ht) 
+    '(peck-recoil :hand right :finger ring :r 1 :theta 1.57))
   (setf (gethash '0 ht) 
-        '(peck-recoil :hand right :finger pinkie :r 2 :theta -1.57))
+    '(peck-recoil :hand right :finger pinkie :r 2 :theta -1.57))
   (setf (gethash 'P ht) 
-        '(peck-recoil :hand right :finger pinkie :r 1 :theta -1.57))
+    '(peck-recoil :hand right :finger pinkie :r 1 :theta -1.57))
   (setf (gethash 'semicolon ht) '(punch :hand right :finger pinkie))
   (setf (gethash 'slash ht) 
-        '(peck-recoil :hand right :finger pinkie :r 1 :theta 1.57))
+    '(peck-recoil :hand right :finger pinkie :r 1 :theta 1.57))
+  (setf (gethash '/ ht) 
+    '(peck-recoil :hand right :finger pinkie :r 1 :theta 1.57))
   (setf (gethash 'hyphen ht) 
-        '(peck-recoil :hand right :finger pinkie :r 2.24 :theta -1.11))
-  
+    '(peck-recoil :hand right :finger pinkie :r 2.24 :theta -1.11))
   (setf (gethash '- ht) 
-        '(peck-recoil :hand right :finger pinkie :r 2.24 :theta -1.11))
-  
+    '(peck-recoil :hand right :finger pinkie :r 2.24 :theta -1.11))
   (setf (gethash '[ ht) 
-        '(peck-recoil :hand right :finger pinkie :r 1.41 :theta -0.78))
+    '(peck-recoil :hand right :finger pinkie :r 1.41 :theta -0.78))
   (setf (gethash 'quote ht) 
-        '(peck-recoil :hand right :finger pinkie :r 1 :theta 0))
+    '(peck-recoil :hand right :finger pinkie :r 1 :theta 0))
   (setf (gethash 'return ht) 
-        '(peck-recoil :hand right :finger pinkie :r 2 :theta 0))
-  ht
-  )
+    '(peck-recoil :hand right :finger pinkie :r 2 :theta 0))
+  
+  ;; some of these are stretching the pinkies to fill in the primary area...
+  (setf (gethash 'backslash ht)
+    '(peck-recoil :hand right :finger pinkie :r 3.16 :theta -0.32))
+  (setf (gethash '= ht)
+    '(peck-recoil :hand right :finger pinkie :r 2.83 :theta -0.78))
+  (setf (gethash '] ht)
+    '(peck-recoil :hand right :finger pinkie :r 2.24 :theta -0.46))
+  (setf (gethash 'delete ht)
+    '(peck-recoil :hand right :finger pinkie :r 3.6 :theta -0.59))
+  (setf (gethash 'right-shift ht)
+    '(peck-recoil :hand right :finger pinkie :r 1.41 :theta 0.78))
+  (setf (gethash 'right-control ht)
+    '(peck-recoil :hand right :finger pinkie :r 3.6 :theta 0.59))
+  (setf (gethash 'right-option ht)
+    '(peck-recoil :hand right :finger pinkie :r 2.83 :theta 0.78))
+  (setf (gethash 'right-command ht)
+    '(peck-recoil :hand right :finger pinkie :r 2.24 :theta 1.11))
+  
+  (setf (gethash 'shift ht)
+    '(peck-recoil :hand left :finger pinkie :r 1.41 :theta 2.36))
+  (setf (gethash 'left-shift ht)
+    '(peck-recoil :hand left :finger pinkie :r 1.41 :theta 2.36))
+  (setf (gethash 'left-control ht)
+    '(peck-recoil :hand left :finger pinkie :r 2.24 :theta 2.03))
+  (setf (gethash 'left-option ht)
+    '(peck-recoil :hand left :finger pinkie :r 2.0 :theta 1.57))
+  (setf (gethash 'left-command ht)
+    '(peck-recoil :hand left :finger ring :r 2.0 :theta 1.57))
+  (setf (gethash 'caps-lock ht)
+    '(peck-recoil :hand left :finger pinkie :r 1.0 :theta 3.14))
+  
+  ;; The keypad commands -- assume hand moved to keypad
+  
+  (setf (gethash 'clear ht) '(peck-recoil :hand right :finger index :r 2 :theta -1.57))
+  (setf (gethash 'keypad-= ht) '(peck-recoil :hand right :finger middle :r 2 :theta -1.57))
+  (setf (gethash 'keypad-/ ht) '(peck-recoil :hand right :finger ring :r 2 :theta -1.57))
+  (setf (gethash 'keypad-* ht) '(peck-recoil :hand right :finger pinkie :r 3 :theta -1.57))
+  (setf (gethash 'keypad-7 ht) '(peck-recoil :hand right :finger index :r 1 :theta -1.57))
+  (setf (gethash 'keypad-8 ht) '(peck-recoil :hand right :finger middle :r 1 :theta -1.57))
+  (setf (gethash 'keypad-9 ht) '(peck-recoil :hand right :finger ring :r 1 :theta -1.57))
+  (setf (gethash 'keypad-minus ht) '(peck-recoil :hand right :finger pinkie :r 2 :theta -1.57))
+  (setf (gethash 'keypad-4 ht) '(punch :hand right :finger index))
+  (setf (gethash 'keypad-5 ht) '(punch :hand right :finger middle))
+  (setf (gethash 'keypad-6 ht) '(punch :hand right :finger ring))
+  (setf (gethash 'keypad-plus ht) '(peck-recoil :hand right :finger pinkie :r 1 :theta -1.57))
+  (setf (gethash 'keypad-1 ht) '(peck-recoil :hand right :finger index :r 1 :theta 1.57))
+  (setf (gethash 'keypad-2 ht) '(peck-recoil :hand right :finger middle :r 1 :theta 1.57))
+  (setf (gethash 'keypad-3 ht) '(peck-recoil :hand right :finger ring :r 1 :theta 1.57))
+  (setf (gethash 'keypad-0 ht) '(punch :hand right :finger thumb))
+  (setf (gethash 'keypad-period ht) '(peck-recoil :hand right :finger ring :r 2 :theta 1.57))
+  (setf (gethash 'enter ht) '(punch :hand right :finger pinkie))
+  
+  
+  
+  ht)
 
 (defgeneric populate-key-to-loc-ht (ht)
   (:documentation  "Build a hash table mapping keys to locations."))
@@ -901,9 +1025,9 @@
   (setf (gethash 'home ht) #(16 2))
   (setf (gethash 'pageup ht) #(17 2))
   (setf (gethash 'clear ht) #(19 2))
-  (setf (gethash '= ht) #(20 2))
-  (setf (gethash '/ ht) #(21 2))
-  (setf (gethash '* ht) #(22 2))
+  (setf (gethash 'keypad-= ht) #(20 2))
+  (setf (gethash 'keypad-/ ht) #(21 2))
+  (setf (gethash 'keypad-* ht) #(22 2))
   ;; QWERTY row
   (setf (gethash 'tab ht) #(0 3))
   (setf (gethash 'Q ht) #(1 3))
@@ -944,8 +1068,10 @@
   (setf (gethash 'keypad-5 ht) #(20 4))
   (setf (gethash 'keypad-6 ht) #(21 4))
   (setf (gethash 'keypad-plus ht) #(22 4))
+  (setf (gethash 'keypad-+ ht) #(22 4))
   ;; "Z" row
   (setf (gethash 'shift ht) #(0 5))
+  (setf (gethash 'left-shift ht) #(0 5))
   (setf (gethash 'Z ht) #(1 5))
   (setf (gethash 'X ht) #(2 5))
   (setf (gethash 'C ht) #(3 5))
@@ -1011,7 +1137,7 @@
   
   
   (when (and (zerop (locks devin)) (pending-procs devin))
-    (proc-display  :clear (some #'identity (pending-procs devin)))
+    (proc-display :clear (some 'identity (pending-procs devin)))
     (setf (pending-procs devin) nil)))
 
 

@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : chunk-tree.lisp
-;;; Version     : 1.0
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Code to support an Environment tool that displays chunks
 ;;;               in a tree structure based on the work by Andrea Heiberg,
@@ -34,7 +34,8 @@
 ;;; ----- History -----
 ;;; 2007.07.20 Dan
 ;;;             : * Initial creation.
-;;;
+;;; 2014.06.16 Dan [2.0]
+;;;             : * Make it work correctly with the typeless chunk mechanism.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -59,8 +60,8 @@
 ;;; You can redefine the valid-parse-slot-for-tree function if you want more
 ;;; control over how the chunks get displayed.
 ;;; 
-;;; It will be passed a chunk-type name and a slot name.  If it returns t then
-;;; that slot will be shown if it returns nil it will not.
+;;; It will be passed a list of the filled slots in the chunk and a slot name.  
+;;; If it returns t then that slot will be shown if it returns nil it will not.
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -93,28 +94,25 @@
         (t
          10)))
 
-(defun valid-parse-slot-for-tree (chunk-type slot)
+(defun valid-parse-slot-for-tree (slot-list slot)
   ;; return t if you want to use the given slot in the chunk-type
   ;; during the graph-trace.
   ;; Some sort of look-up or other table reference needs to be
   ;; built for this.
   ;; default assumes all slots valid.
-  
+  (declare (ignore slot-list slot))
   t)
 
-(defun parse-chunk-tree (chunk slot used &optional (exclude-nil nil))
+(defun parse-chunk-tree (chunk slot used)
   (let ((node (make-chunk-tree-node :chunk chunk :slot slot :width (+ 2 (max (chunk-slot-value-size slot) (chunk-slot-value-size chunk))))))
     (when (chunk-p-fct chunk)
       (if (find chunk used)
           (setf (ctn-children node) :circle)
-        (let ((children nil))
-          (dolist (slot (chunk-type-slot-names-fct (chunk-chunk-type-fct chunk)))
-            (when (or (and (not exclude-nil)
-                           (valid-parse-slot-for-tree (chunk-chunk-type-fct chunk) slot))
-                      (and exclude-nil
-                           (chunk-slot-value-fct chunk slot)
-                           (valid-parse-slot-for-tree (chunk-chunk-type-fct chunk) slot)))
-              (push (parse-chunk-tree (chunk-slot-value-fct chunk slot) slot (cons chunk used) exclude-nil) children)))
+        (let ((children nil)
+              (slot-list (chunk-filled-slots-list-fct chunk)))
+          (dolist (slot slot-list)
+            (when (valid-parse-slot-for-tree slot-list slot)
+              (push (parse-chunk-tree (chunk-slot-value-fct chunk slot) slot (cons chunk used)) children)))
           (setf (ctn-children node) (reverse children))
           (setf (ctn-width node) (max (ctn-width node) (apply #'+ (mapcar #'ctn-width children)))))))
     node))
@@ -134,8 +132,8 @@
     points))
 
 
-(defun sorted-parse-tree-points (chunk show-nil)
-  (sort (draw-tree (parse-chunk-tree chunk nil nil show-nil) nil)
+(defun sorted-parse-tree-points (chunk)
+  (sort (draw-tree (parse-chunk-tree chunk nil nil) nil)
         (lambda (a b) (let ((x1 (first (second a))) (x2 (first (second b))) (y1 (second (second a))) (y2 (second (second b))))
                         (if (< y1 y2)
                             t
@@ -175,8 +173,8 @@
 
 |#
 
-(defun parse-chunk-tree-for-env (chunk show-nil)
-  (let* ((data (sorted-parse-tree-points chunk show-nil))
+(defun parse-chunk-tree-for-env (chunk)
+  (let* ((data (sorted-parse-tree-points chunk))
          (list nil)
          (result))
     (push (list 'size  (* *graph-char-width* (* 2 (first (second (first data)))))

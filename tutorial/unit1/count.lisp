@@ -14,8 +14,9 @@
  (d ISA count-order first 3 second 4)
  (e ISA count-order first 4 second 5)
  (f ISA count-order first 5 second 6)
- (first-goal ISA count-from start 2 end 4)
- )
+ (first-goal ISA count-from start 2 end 4))
+
+(goal-focus first-goal)
 
 (p start
    =goal>
@@ -24,6 +25,7 @@
       count       nil
  ==>
    =goal>
+      ISA         count-from
       count       =num1
    +retrieval>
       ISA         count-order
@@ -41,6 +43,7 @@
       second      =num2
  ==>
    =goal>
+      ISA         count-from
       count       =num2
    +retrieval>
       ISA         count-order
@@ -56,8 +59,5 @@
  ==>
    -goal>
    !output!       (=num)
-
 )
-
-(goal-focus first-goal)
 )

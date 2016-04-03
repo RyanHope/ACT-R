@@ -76,7 +76,7 @@
   nil)
 
 (defun save-reference-time (chunk)
-  (when (eq (chunk-chunk-type-fct chunk) 'memory)
+  (when (numberp (chunk-slot-value-fct chunk 'index))
     (push (mp-time) (cdar *retrieval-log*))))
 
 

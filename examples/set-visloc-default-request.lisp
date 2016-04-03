@@ -56,9 +56,9 @@
   
   (let* ((visual-location-chunks (define-chunks 
                                      (isa visual-location screen-x 12 screen-y 20 kind oval value oval height 10 width 40 color blue)
-                                     (isa polygon-feature screen-x 50 screen-y 50 kind polygon value polygon height 50 width 40 color blue regular nil)
-                                     (isa polygon-feature screen-x 10 screen-y 50 kind square value square height 30 width 30 color red regular t)
-                                     (isa polygon-feature screen-x 5 screen-y 70 kind polygon value polygon height 50 width 45 color green regular nil)))
+                                     (isa polygon-feature screen-x 50 screen-y 50 kind polygon value polygon height 50 width 40 color blue regular false)
+                                     (isa polygon-feature screen-x 10 screen-y 50 kind square value square height 30 width 30 color red regular true)
+                                     (isa polygon-feature screen-x 5 screen-y 70 kind polygon value polygon height 50 width 45 color green regular false)))
          
          
          (visual-object-chunks (define-chunks
@@ -81,7 +81,7 @@
     
     (schedule-periodic-event 1.0 (lambda () (proc-display) (print-visicon)) :initial-delay .75)
     
-    (run 10)))
+    (run 2)))
 
 ;;; The model is very simple in that it just repeatedly changes the
 ;;; defaults for buffer stuffing and then prints out the chunk that
@@ -90,13 +90,13 @@
 
 (define-model set-visloc-default-request-test
     
-    (sgp :v t :trace-detail medium :save-buffer-trace t :bold-inc .1)
+    (sgp :v t :trace-detail medium)
   
   (chunk-type (polygon-feature (:include visual-location)) regular)
   (chunk-type (polygon (:include visual-object)) sides)
-  (chunk-type (square (:include polygon)) (sides 4))
-  (chunk-type goal step)
-  (chunk-type wait step)
+  (chunk-type (square (:include polygon)) (sides 4) (square t))
+  (chunk-type goal step (state task))
+  (chunk-type wait step (state wait))
   
   ;; Define a subtype of the set-visloc-default chunk-type that
   ;; adds the slot regular so that it can be used in setting the
@@ -105,7 +105,8 @@
   (chunk-type (polygon-visloc-spec (:include set-visloc-default)) regular)
   
   ;; Just do this to avoid the warning when the visual-locations are created
-  (define-chunks (square isa chunk) (polygon isa chunk))
+  (define-chunks (square isa chunk) (polygon isa chunk)
+    (true isa chunk) (false isa chunk))
   
   
   (p print-and-advance
@@ -169,7 +170,7 @@
      +visual-location>
        isa polygon-visloc-spec
        type polygon-feature
-       regular t
+       regular true
      
      !output! (The specification is now for a regular polygon feature))
 
@@ -210,7 +211,7 @@
        screen-x lowest
        :attended new
          
-     !output! (The specification is now back to default - screen-x lowest :attended new which will fail since nothing is new anymore))
+     !output! (The specification is now back to default - screen-x lowest :attended new))
   )
 
   

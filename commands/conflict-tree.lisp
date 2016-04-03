@@ -43,6 +43,19 @@
 ;;;            :   the same (doesn't affect the matching itself).
 ;;; 2011.04.28 Dan
 ;;;            : * Added some declares to quite compliation warnings.
+;;; 2013.10.18 Dan
+;;;            : * Added a few more stats to conflict-tree-stats. 
+;;; 2014.03.17 Dan [2.0]
+;;;            : * Changed the query-buffer call to be consistent with the new
+;;;            :   internal code.
+;;; 2014.04.03 Dan
+;;;            : * Ignore the isa tests for now and instead use all the implicit
+;;;            :   tests which were being ignored previously...
+;;; 2014.05.19 Dan
+;;;            : * To avoid warnings at load time commenting out the code from
+;;;            :   the isa-node processing methods.
+;;; 2014.05.30 Dan
+;;;            : * Also commented out the isa condition in split-productions-with-condition.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -83,9 +96,12 @@
 ;;;                  are valid
 ;;;     :sets - the number of different sets of productions found at in the
 ;;;             non-empty leaf nodes
+;;;     :average-set - the mean size of non-empty sets
+;;;     :largest-set - the size of the largest set
 ;;;
 ;;; > (conflict-tree-stats )
-;;; ((:DEPTH . 24) (:MIN-DEPTH . 3) (:TOTAL-NODES . 4670) (:TERMINAL . 3422) (:NON-EMPTY . 3373) (:SETS . 1073))
+;;; ((:DEPTH . 24) (:MIN-DEPTH . 3) (:TOTAL-NODES . 4670) (:TERMINAL . 3422) (:NON-EMPTY . 3373) (:SETS . 1073) 
+;;;  (:AVERAGE-SET . 4.746098) (:LARGEST-SET . 187))
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -164,15 +180,18 @@
   (root-node-child node))
 
 (defmethod select-child ((node isa-node) prod)
+  (declare (ignorable node prod))
+  #|
   (let ((type (aif (cr-buffer-read prod (isa-node-buffer node) (isa-node-buffer-index node))
                    (chunk-chunk-type-fct it)
                    nil)))
     (if (and type (chunk-type-subtype-p-fct type (isa-node-value node)))
         (isa-node-true node)
       (isa-node-false node))))
+|#)
 
 (defmethod select-child ((node test-slot-node) prod)
-  (let ((buffer-val (cr-buffer-slot-read prod (test-slot-node-buffer node) (test-slot-node-buffer-index node) (test-slot-node-slot-index node))))
+  (let ((buffer-val (cr-buffer-slot-read prod (test-slot-node-buffer node) (test-slot-node-buffer-index node) (test-slot-node-slot-index node) (test-slot-node-slot node))))
     (if (funcall (test-slot-node-test node) buffer-val (test-slot-node-value node))
         (test-slot-node-true node)
       (test-slot-node-false node))))
@@ -180,12 +199,12 @@
 
 (defmethod select-child ((node query-node) prod)
   (declare (ignore prod))
-  (if (query-buffer (query-node-buffer node) (list (cons (query-node-query node) (query-node-value node))))
+  (if (query-buffer (query-node-buffer node) (list (query-node-query node) (query-node-value node)))
       (binary-test-node-true node)
     (binary-test-node-false node)))
 
 (defmethod select-child ((node slot-node) prod)
-  (let ((buffer-val (cr-buffer-slot-read prod (slot-node-buffer node) (slot-node-buffer-index node) (slot-node-slot-index node))))
+  (let ((buffer-val (cr-buffer-slot-read prod (slot-node-buffer node) (slot-node-buffer-index node) (slot-node-slot-index node) (slot-node-slot node))))
     (aif (gethash buffer-val (slot-node-children node))
          it
          (gethash :other (slot-node-children node)))))
@@ -233,10 +252,14 @@
 
 (defun conflict-tree-stats ()
   (setf *tree-data* nil)
-  (mapcar #'cons '(:depth :min-depth :total-nodes :terminal :non-empty :sets) 
+  (mapcar #'cons '(:depth :min-depth :total-nodes :terminal :non-empty :sets :average-set :largest-set) 
     (append (multiple-value-list (get-tree-stats (procedural-conflict-tree (get-module procedural))))
             (list (length *tree-data*)) (list (length (remove nil *tree-data*)))
-            (list (length (remove-duplicates *tree-data* :test 'equalp))))))
+            (list (length (remove-duplicates *tree-data* :test 'equalp)))
+            (list (let ((nodes (remove nil *tree-data*)))
+                    (unless (null nodes)
+                      (* 1.0 (/ (reduce '+ (mapcar 'length nodes)) (length nodes))))))
+            (list (reduce 'max (mapcar 'length *tree-data*))))))
 
 (defmethod get-tree-stats ((node binary-test-node))
   (let ((max-depth 0)
@@ -347,8 +370,8 @@
   
 
 (defmethod add-to-tree ((node isa-node) conditions production)
-         
-  (aif (find (isa-node-condition node) conditions :test 'cr-condition-equal)
+  (declare (ignorable node conditions production))       
+  #|(aif (find (isa-node-condition node) conditions :test 'cr-condition-equal)
        ;; then it's a true test
        (add-to-tree (isa-node-true node) (remove it conditions) production)
        ;; check if there's some other test of the type on this buffer
@@ -367,7 +390,9 @@
            ;; otherwise add it to both branches - if there's any possibility it could match
            (progn
              (add-to-tree (isa-node-true node) conditions production)
-             (add-to-tree (isa-node-false node) conditions production))))))
+             (add-to-tree (isa-node-false node) conditions production)))))
+|#
+  )
 
 
 (defmethod add-to-tree ((node binary-test-node) conditions production) ;; query and test-slot
@@ -543,7 +568,7 @@
                       (push-last x (second y)))))
              results))
           ((eq 'isa (cr-condition-type c))
-           (let ((results (list (list t nil) (list nil nil))))
+           #|(let ((results (list (list t nil) (list nil nil))))
              (dolist (x conditions)
                (aif (find c (append (second x) (third x)) :test 'cr-condition-equal)
                     ;; then it's a true test
@@ -560,7 +585,7 @@
                         (progn
                           (push-last x (second (first results)))
                           (push-last x (second (second results))))))))
-             results))
+             results)|#)
           
           (t ; slot-test and queries are easier
            
@@ -597,6 +622,7 @@
            (all-same t)
            (last nil))
        (dolist (x valid-conditions)
+         (unless (eq (cr-condition-type x) 'isa)
          (multiple-value-bind (v g) (split-productions-with-condition x conditions)
            
            ;(format t "~S: ~S~%" v x)
@@ -610,12 +636,12 @@
                      (> v val))
              (setf val v)
              (setf groups g)
-             (setf best x))))
+             (setf best x)))))
        
-       ; (format t "Best(~3s): ~S ~S ~%~%" all-same val best)
+     ;   (format t "Best(~3s): ~S ~S ~%~%" all-same val best)
        
        
-       (if (or (and negative (minusp val) (> negative 3)) ;; Only make a few negative splits
+       (if (or (and negative (<= val 0.0) (> negative 3)) ;; Only make a few negative or zero splits
                (and all-same (<= val 0.0))) ;; doesn't seem like any improvements left
            
            (make-leaf-node :parent parent :branch branch :valid (mapcar #'first conditions))
@@ -657,18 +683,18 @@
          (if (binary-test-node-p new-node)
              (progn
                (setf (binary-test-node-true new-node) 
-                 (build-tree-from-productions t new-node (second (first groups)) (if (minusp val) 
+                 (build-tree-from-productions t new-node (second (first groups)) (if (<= val 0.0) 
                                                                                      (if negative (1+ negative) 0)
                                                                                    0)))
                
                
-               (setf (binary-test-node-false new-node) (build-tree-from-productions nil new-node (second (second groups)) (if (minusp val) 
+               (setf (binary-test-node-false new-node) (build-tree-from-productions nil new-node (second (second groups)) (if (<= val 0.0) 
                                                                                                                           (if negative (1+ negative) 0)
                                                                                                                         0))))
            (progn
              (dolist (x groups)
                (setf (gethash (first x) (wide-test-node-children new-node))
-                 (build-tree-from-productions (first x) new-node (second x) (if (minusp val) 
+                 (build-tree-from-productions (first x) new-node (second x) (if (<= val 0.0) 
                                                                                 (if negative (1+ negative) 0)
                                                                               0))))))
          new-node))))))
@@ -698,7 +724,7 @@
   (setf (root-node-valid (procedural-conflict-tree procedural)) (mapcar #'production-name (productions-list procedural)))
   (setf (root-node-child (procedural-conflict-tree procedural))
     (build-tree-from-productions t (procedural-conflict-tree procedural) 
-                                 (mapcar (lambda (x) (list (production-name x) (copy-list (production-constants x)) (copy-list (production-implicit x))))
+                                 (mapcar (lambda (x) (list (production-name x) (append (copy-list (production-constants x)) (copy-list (production-implicit x)))))
                                    (productions-list procedural))
                                  nil))
   )

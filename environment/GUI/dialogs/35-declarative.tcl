@@ -48,7 +48,7 @@ proc make_declarative_viewer {} {
     # (Mac terminology) with the item to be scrolled, so I've got to do that
     # for everything I want to scroll...
   
-    set list_frame [frame $win.list_frame -borderwidth 0]  
+    set list_frame [frame $win.list_frame -borderwidth 2]  
     
     # create the listbox that uses a special variable <name>.var for its list
     # so that the list-box-handler can ensure that the selection remains the
@@ -61,7 +61,7 @@ proc make_declarative_viewer {} {
                           $list_frame.list_box.var \
                           -yscrollcommand "$list_frame.list_scrl set" \
                           -selectmode single \
-                          -exportselection 0 -font list_font]
+                          -exportselection 0 -font list_font -bd 0]
   
     # tell the Lisp system to create a handler for sending a list 
     # that will set the list variable to the results of eval on 
@@ -125,7 +125,9 @@ proc make_declarative_viewer {} {
     set text_scroll_bar [scrollbar $text_frame.text_scrl \
                                    -command "$text_box yview"]
 
-  
+    set why_not [button $win.whynot_button -text "Why not?" -font button_font \
+                            -command "show_why_not_dm $list_box [send_model_name]"]
+
     # Here is where I create my own drop-down (combobox, whatever you want to 
     # call it) widget for the filter.  This one is actually going to be a button
     # that when pressed displays the list of items to choose from.  I guess 
@@ -158,7 +160,7 @@ proc make_declarative_viewer {} {
     set drop_box [listbox $drop_frame.drop_box \
                           -listvar $drop_frame.drop_box.var \
                           -yscrollcommand "$drop_frame.drop_scrl set" \
-                          -exportselection 0 -font list_font] 
+                          -exportselection 0 -font list_font -bd 0] 
 
   
     # tell the Lisp system to create a handler for sending a list 
@@ -171,7 +173,7 @@ proc make_declarative_viewer {} {
       "create list-box-handler $drop_box $drop_box \
         (lambda (x) \
           (declare (ignore x)) \
-          (cons 'none (sort (mapcan (lambda (x) (copy-list (chunk-type-supertypes-fct x))) (hash-table-keys (dm-chunks (get-module-fct 'declarative)))) #'string< :key 'symbol-name))) \
+          (all-dm-slot-lists)) \
         () [send_model_name]"
   
     # Make sure that when this window is closed that the Lisp side
@@ -221,36 +223,19 @@ proc make_declarative_viewer {} {
                                                     $drop_scroll_bar \
                                                     $list_box"]
 
-    # Add a checkbox to allow specifying which chunk-types to filter on
-
-    set cbox [checkbutton $win.check \
-                -text "Current types only" \
-                -font checkbox_font \
-                -variable $drop_box.check \
-                -onvalue 1 -offvalue 0]
-
-
-
-    # just for completeness, create the add-to-graph button
-    # that doesn't do anything yet
-
-    #  set add_button [button $win.add_to_graph -text "Add to Graph" \
-    #                         -font button_font]
-
     # here the items are placed into the window using the relative
     # options for those items that need to resize if the window gets resized 
     # could get this from the Visual Tcl/tk GUI builder, or just work it out
     # sizes are based on the default fonts, so if you change that it could
     # look a little "off"
 
-    place $filter_label -x 2 -y 5 -width 40 -height 20
-    place $filter_button -x 42 -y 5 -relwidth 1.0 -width -190 -height 20
-    place $cbox -relx 1.0 -x -150 -y 5 -width 150 -height 20
+    place $filter_label -x 80 -y 5 -width 40 -height 20
+    place $filter_button -x 124 -y 5 -relwidth 1.0 -width -130 -height 24
 
-#  place $add_button -relx 1.0 -x -92 -y 5 -width 90 -height 20
-  
-    place $list_frame -relx 0.0 -y 30 -relheight 1.0 -height -30 -relwidth .4
-    place $text_frame -relx .4 -y 30 -relheight 1.0 -height -30 -relwidth .6
+    place $why_not  -x 2 -y 5 -width 75 -height 24
+
+    place $list_frame -relx 0.0 -y 35 -relheight 1.0 -height -35 -relwidth .4
+    place $text_frame -relx .4 -y 35 -relheight 1.0 -height -35 -relwidth .6
      
     pack $list_scroll_bar -side right -fill y 
     pack $list_box -side left -expand 1 -fill both
@@ -312,11 +297,10 @@ proc select_chunk {listwin target_win} {
 # It displays the selection listbox below the button and waits for either a 
 # selection or the dismissal of the selection box. If there is a selection 
 # different from the current one it updates the button to reflect the new 
-# choice and issues an update request for the chunk list for chunks of only 
-# the requested type.
+# choice and issues an update request for the chunk list for chunks with the
+# specified slots.
 
-proc declarative_drop_list {but top drop_frame drop_box \
-                            drop_scroll_bar list_box} {
+proc declarative_drop_list {but top drop_frame drop_box drop_scroll_bar list_box} {
  
   # record the current filter
 
@@ -330,19 +314,11 @@ proc declarative_drop_list {but top drop_frame drop_box \
   #  but now be sensitive to the check box setting
   #  and I don't think I need the validity check
 
-  upvar $drop_box.check check
 
-  if {$check == 1} {
     send_environment_cmd "update [get_handler_name $drop_box] \
        (lambda (x) \
           (declare (ignore x)) \
-          (cons 'none (sort (mapcan (lambda (x) (copy-list (chunk-type-supertypes-fct x))) (hash-table-keys (dm-chunks (get-module-fct 'declarative)))) #'string< :key 'symbol-name)))"
-  } else {
-    send_environment_cmd "update [get_handler_name $drop_box] \
-       (lambda (x) \
-          (declare (ignore x)) \
-          (cons 'none (sort (no-output (chunk-type)) #'string< :key 'symbol-name)))"
-  }
+          (all-dm-slot-lists))"
 
 
   # get a pointer to the list of chunk_types
@@ -419,7 +395,7 @@ proc declarative_drop_list {but top drop_frame drop_box \
         send_environment_cmd \
           "update [get_handler_name $list_box] \
             (lambda (x) \
-               (declare (ignore x)) (no-output (sdm isa $new_filter)))"
+               (declare (ignore x)) (filter-dm-chunks (quote $new_filter)))"
       }
     }
   } 
@@ -427,6 +403,57 @@ proc declarative_drop_list {but top drop_frame drop_box \
   # hide the selection window
 
   wm withdraw $top   
+}
+
+
+
+proc show_why_not_dm {chunks model} {
+  # get the current selection - knowing it's a single selection list box
+  set selection [$chunks curselection]
+
+  if {$selection != "" } {
+      
+    # get the chunk name
+    set chunk [$chunks get $selection]
+    
+    # make a new window 
+    set top [toplevel [new_variable_name ".whynotdm"]]
+
+    wm geometry $top [get_configuration .whynotdm $top]
+
+    record_new_window $top "Whynot-dm $chunk"
+    
+    # create a text_box to hold the output and put it in the window
+    # also need a frame to hold it and the scroll bar
+
+    frame $top.frame -borderwidth 0  
+    
+    set text_box [text $top.frame.text -font text_font -state disabled \
+                                       -yscrollcommand "$top.frame.scrl set" ]
+
+    set scrl_bar [scrollbar $top.frame.scrl -command "$top.frame.text yview"]
+   
+    place $top.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0
+        
+    pack $scrl_bar -side right -fill y 
+    pack $text_box -side left -expand 1 -fill both
+ 
+ 
+    # create a handler for this window to generate an update 
+    # but won't need to ever request another update
+    send_environment_cmd \
+      "create text-output-handler $text_box $text_box \
+        (lambda (x) \
+           (declare (ignore x)) \
+           (whynot-dm $chunk)) \
+        nil $model"
+
+    # make sure that when the window is closed the Lisp handler gets removed
+
+    bind $text_box <Destroy> {
+      remove_handler %W
+    }
+  }
 }
 
 

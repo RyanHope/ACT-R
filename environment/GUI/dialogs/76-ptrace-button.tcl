@@ -99,18 +99,19 @@ proc select_ptrace {} {
     pack $win.frame.canvas1 -side left -fill y
     pack $win.frame.canvas -side left -fill both
  
-    place $win.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0 -height -40
+    place $win.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0 -height -50
     
-    place $win.notes -x 180 -rely 1.0 -y -40 -relwidth 1.0 -height 20
-    place $win.text -x 0 -rely 1.0 -y -20 -width 75 -height 20
 
-    place $win.update -x 0 -rely 1.0 -y -40 -width 75 -height 20
-    place $win.grid -x 75 -rely 1.0 -y -40 -width 40 -height 20
-    place $win.zoom_in -x 75 -rely 1.0 -y -20 -width 20 -height 20
-    place $win.zoom_out -x 95 -rely 1.0 -y -20 -width 20 -height 20
-    place $win.save -x 115 -rely 1.0 -y -40 -width 65 -height 20
-    place $win.save2 -x 115 -rely 1.0 -y -20 -width 65 -height 20
-    place $win.check -x 185 -rely 1.0 -y -20 -width 175 -height 20
+    place $win.update -x 0 -rely 1.0 -y -50 -width 85 -height 24
+    place $win.grid -x 85 -rely 1.0 -y -50 -width 60 -height 24
+    place $win.save -x 145 -rely 1.0 -y -50 -width 85 -height 24
+    place $win.notes -x 240 -rely 1.0 -y -50 -relwidth 1.0 -height 25
+
+    place $win.text -x 0 -rely 1.0 -y -25 -width 85 -height 25
+    place $win.zoom_in -x 85 -rely 1.0 -y -25 -width 30 -height 24
+    place $win.zoom_out -x 115 -rely 1.0 -y -25 -width 30 -height 24
+    place $win.save2 -x 145 -rely 1.0 -y -25 -width 85 -height 24
+    place $win.check -x 230 -rely 1.0 -y -25 -width 175 -height 24
 
     wm deiconify $win
   }

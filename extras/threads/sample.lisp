@@ -18,61 +18,56 @@
 
 
 (defun m ()
+  (reset)
   (let ((window (open-exp-window "window" :visible nil)))
     (install-device window)
-    (reset)
     (run 2.0)))
 
 
 (clear-all)
 
-
 (define-model sample
 
 (sgp :v t :esc t)
 
-(chunk-type do-concurrent-tasks)
-(chunk-type type)
-;(chunk-type speak)
-
-(add-dm
- (goal isa do-concurrent-tasks))
+(chunk-type type key)
+(chunk-type speak-word word)
 
 
 (p start-concurrent-tasks
-   =goal>
-      isa do-concurrent-tasks
+   ?goal>
+     buffer empty
 ==>
    +goal>
-      isa type
+     isa type
+     key "a"
    +goal>
-      isa speak
+     isa speak-word
+     word "hello"
 )
 
 
 (p type-letter
    =goal>
-      isa type
+     isa type
+     key =key
    ?manual>
       state free
 ==>
    +manual>
       isa press-key
-      key a
+      key =key
 )
 
 
 (p speak-word
    =goal>
-      isa speak
+     isa speak-word
+     word =word
    ?vocal>
       state free
 ==>
    +vocal>
       isa speak
-      string "hello"
-)
-
-
-(goal-focus goal)
-)
+      string =word
+))

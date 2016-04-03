@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : modules.lisp
-;;; Version     : 1.0
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Code for defining and using the modules.
 ;;; 
@@ -149,6 +149,15 @@
 ;;; 2011.04.27 Dan
 ;;;             : * Added some declaims to avoid compiler warnings about 
 ;;;             :   undefined functions.
+;;; 2014.03.17 Dan [2.0]
+;;;             : * Changed warn-module because now it's called with a chunk-spec
+;;;             :   instead of just the type.
+;;; 2014.09.26 Dan
+;;;             : * All-module-names now returns a list sorted by module name
+;;;             :   which should be used anywhere the current maphashing is done.
+;;; 2014.11.11 Dan
+;;;             : * Fixed a bug in define-module with the check for multiple
+;;;             :   meta-processes.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -332,7 +341,7 @@
 
 
 (defun all-module-names ()
-  (hash-table-keys (global-modules-table)))
+  (act-r-modules-sorted-names *modules-lookup*))
 
 (defun notified-modules ()
   (act-r-modules-notify *modules-lookup*))
@@ -378,7 +387,7 @@
   (unless (and version? docs?)
     (print-warning "Modules should always provide a version and documentation string."))
   
-  (cond ((or (> 1 (length (meta-process-names)))
+  (cond ((or (> (length (meta-process-names)) 1)
              (not (eq (car (meta-process-names)) 'default)))
          (print-warning "Cannot create a new module when there is a meta-process other than the default defined."))
         
@@ -423,7 +432,7 @@
            (unless (fctornil (car items))
              (print-warning "Parameter: ~s is not a function, function name, or nil" (car names))))
          (print-warning "Module ~s not defined" module-name))
-        ((notevery #'act-r-parameter-p params-list)
+        ((notevery 'act-r-parameter-p params-list)
          (print-warning "Invalid params-list ~s.~%Module ~s not defined." params-list module-name))
         ((and params-list (null params))
          (print-warning "Must specify a param function because parameters are used.~%Module ~s not defined." module-name))
@@ -461,8 +470,15 @@
                                                     :offset offset
                                                     :run-notify run-start
                                                     :run-over-notify run-end)))
-                    (setf (gethash module-name (act-r-modules-table *modules-lookup*))
-                      new-mod)
+                    (setf (gethash module-name (act-r-modules-table *modules-lookup*)) new-mod)
+                    (setf (act-r-modules-sorted-names *modules-lookup*)
+                      (splice-into-list (act-r-modules-sorted-names *modules-lookup*) 
+                                        (aif (position-if (lambda (x)
+                                                            (string< (symbol-name module-name) (symbol-name x)))
+                                                          (act-r-modules-sorted-names *modules-lookup*))
+                                             it
+                                             (length (act-r-modules-sorted-names *modules-lookup*)))
+                                        module-name))
                     (incf (act-r-modules-count *modules-lookup*))
                     (when (> (length (format nil "~S" module-name)) (act-r-modules-name-len *modules-lookup*))
                       (setf (act-r-modules-name-len *modules-lookup*) (length (format nil "~S" module-name))))
@@ -511,6 +527,8 @@
          ;; take it out of the table
          
          (remhash module-name (act-r-modules-table *modules-lookup*))
+         
+         (setf (act-r-modules-sorted-names *modules-lookup*) (remove module-name (act-r-modules-sorted-names *modules-lookup*)))
          
          (decf (act-r-modules-count *modules-lookup*))
          
@@ -569,9 +587,7 @@
     (if module
         (when (act-r-module-params module) ;; should be guranteed
           (funcall (act-r-module-params module) instance param))
-      (print-warning 
-       "There is no module named ~S. Cannot process parameters for it." 
-       module-name))))
+      (print-warning "There is no module named ~S. Cannot process parameters for it." module-name))))
 
 
 (defun instantiate-module (module-name model-name)
@@ -579,8 +595,7 @@
     (if module
         (when (act-r-module-creation module)
           (funcall (act-r-module-creation module) model-name))
-      (print-warning "There is no module named ~S. Cannot instantiate it." 
-                     module-name))))
+      (print-warning "There is no module named ~S. Cannot instantiate it." module-name))))
 
 
 (defun reset-module (module-name)
@@ -653,14 +668,14 @@
         (if (act-r-module-warn module) t nil)
       (print-warning "There is no module named ~S. Cannot determine if it needs warnings." module-name))))
 
-(defun warn-module (module-name buffer-name chunk-type)
+(defun warn-module (module-name buffer-name chunk-spec)
   (let ((module (get-abstract-module module-name)))
     (if module
         (multiple-value-bind (instance exists)
             (get-module-fct module-name)
           (if exists
               (if (act-r-module-warn module)
-                  (funcall (act-r-module-warn module) instance buffer-name chunk-type)
+                  (funcall (act-r-module-warn module) instance buffer-name chunk-spec)
                 (print-warning "Module ~s does not require warnings." module-name))
             (print-warning "There is no module named ~S in the current model. Cannot warn it." module-name)))
       (print-warning "There is no module named ~S. Cannot warn it." module-name))))
@@ -694,15 +709,9 @@
                   (progn
                     (funcall (act-r-module-buffer-mod module) instance buffer-name chunk-mods)
                     t)
-                (print-warning "Module ~s does not support buffer modification requests." 
-                               module-name))
-            (print-warning "There is no module named ~S in the current model. Cannot make a buffer modification request using it." 
-                           module-name))) 
-      
-      
-      (print-warning 
-       "There is no module named ~S. Cannot make a buffer modification using it." 
-       module-name))))
+                (print-warning "Module ~s does not support buffer modification requests." module-name))
+            (print-warning "There is no module named ~S in the current model. Cannot make a buffer modification request using it." module-name))) 
+      (print-warning "There is no module named ~S. Cannot make a buffer modification using it." module-name))))
 
 
 (defun delete-module (module-name)

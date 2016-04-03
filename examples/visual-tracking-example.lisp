@@ -3,11 +3,16 @@
 ;;; device that uses a chunk based visicon (without having explicit
 ;;; objects set for the items).
 ;;;
-;;; Note that for object-tracking the x on the display won't
-;;; actually move because the environment doesn't know when the
-;;; underlying virtual object is manipulated directly but the
-;;; model will see the change since the model processes the
-;;; underlying representation and not the actual GUI window.
+;;; Note that for the object-tracking function to actually move the x 
+;;; on the visible virtual experiment window it must be removed from
+;;; the display and then added back after modifying the x coordinate.
+;;; That may not be required for some native window systems which
+;;; will automatically move the item when the underlying object is
+;;; modified.  That is also not necessary for the model to notice
+;;; the change since the vision module is processing the underlying
+;;; representation i.e. even if the x didn't look like it was moving
+;;; to the modeler as long as the x-pos is being changed the model
+;;; sees it as moving.
 
 (defun object-tracking () ;; old style with a screen object
   
@@ -23,11 +28,17 @@
         (proc-display)
         (schedule-periodic-event .5 #'(lambda () 
                                          
+                                        ;; This and the add-... are only necessary for the
+                                        ;; modeler to see the x move in a visible virtual window.
+                                        (remove-items-from-exp-window letter)
+                                        
                                         ;; Virtual dialog item specific coordinate moving
                                         ;; code.  Code for real windows is different for each
                                         ;; Lisp since the x position accessor will differ.
                                         
                                         (setf (x-pos letter) (+ 10 (x-pos letter)))
+                                        
+                                        (add-items-to-exp-window letter)
                                         
                                         (proc-display))
                                  :details "moving object"

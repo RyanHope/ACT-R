@@ -60,7 +60,6 @@
       state       start
  ==>
    +visual-location>
-      ISA         visual-location
       :attended    nil
    =goal>
       state       find-location
@@ -71,14 +70,11 @@
       ISA         read-letters
       state       find-location
    =visual-location>
-      ISA         visual-location
-   
    ?visual>
       state       free
-   
 ==>
    +visual>
-      ISA         move-attention
+      cmd         move-attention
       screen-pos  =visual-location
    =goal>
       state       attend
@@ -89,8 +85,9 @@
       ISA         read-letters
       state       attend
    =visual>
-      ISA         text
       value       =letter
+   ?imaginal>
+      state       free
 ==>
    =goal>
       state       respond
@@ -113,7 +110,7 @@
    =goal>
       state       done
    +manual>
-      ISA         press-key
+      cmd         press-key
       key         =letter
 )
 

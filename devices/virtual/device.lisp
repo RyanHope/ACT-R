@@ -138,6 +138,33 @@
 ;;;             :   be viewing the same item and they need to keep their chunks
 ;;;             :   separate.  Now the chunks are stored as the values of the
 ;;;             :   table for the appropriate mp and model and always in a list.
+;;; 2014.01.24 Dan
+;;;             : * Updated the build-vis-locs-for methods for text and button
+;;;             :   items so that they use the updated build-string-feats to
+;;;             :   deal with newlines in the text.
+;;;             : * The spacing for lines in virtual items is the max of 
+;;;             :   (* (text-height item) 1.25) (1+ (text-height item)).
+;;; 2014.02.07 Dan
+;;;             : * Why have virtual static text items always assumed a centered
+;;;             :   y justification when all the other devices assume top?  It
+;;;             :   now assumes top justification like everything else for 
+;;;             :   consistency which will probably break lots of models...
+;;; 2014.02.11 Dan
+;;;             : * Removed the lines variable from the text build-vis-locs-for
+;;;             :   to avoid a warning since it's not needed.
+;;; 2014.05.19 Dan
+;;;             : * Fixed the use of chunk-type-slot-names by using chunk-filled-
+;;;             :   slots-list instead.
+;;; 2014.08.29 Dan
+;;;             : * Changed vv-click-event-handler for buttons so that the action 
+;;;             :   can be either a function or a symbol naming a function.
+;;; 2015.05.20 Dan
+;;;             : * The approach-width call in the buttons build-vis-locs-for
+;;;             :   method needs to pass the vision module in too.
+;;; 2015.12.17 Dan
+;;;             : * Changed the name of the key at 19,2 from esc to clear to
+;;;             :   actually match the reference image since the model now has
+;;;             :   keypad actions.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -465,12 +492,14 @@
 
 (defmethod build-vis-locs-for ((self static-text-vdi) (vis-mod vision-module))
   
-  (let ((feats (build-string-feats vis-mod :text (dialog-item-text self)
-                                   :start-x (1+ (x-pos self))
-                                   :y-pos (py (view-loc self))
-                                   :width-fct (str-width-fct self)
-                                   :height (text-height self)
-                                   :obj self))
+  (let* ((line-height (max (round (text-height self) .8) (+ (text-height self) 1)))
+         (feats (build-string-feats vis-mod :text (dialog-item-text self)
+                                    :start-x (1+ (x-pos self))
+                                    :y-pos (+ (y-pos self) (round line-height 2)) ;;(round (- (py (view-loc self)) (* 1/2 line-height (1- lines))))
+                                    :width-fct (str-width-fct self)
+                                    :height (text-height self)
+                                    :obj self
+                                    :line-height line-height))
         (c (gethash (cons (current-mp) (current-model)) (loc-chunks self))))
     (when feats
       (cond ((> (length feats) 1)
@@ -489,7 +518,7 @@
             (c ;; there are current features
              (cond ((and (= (length c) 1) (chunk-p-fct (car c))) ;; if only one and it's a chunk reuse it
                     (setf c (car c))
-                    (mod-chunk-fct c (mapcan (lambda (x) (list x (chunk-slot-value-fct (car feats) x))) (chunk-type-slot-names visual-location)))
+                    (mod-chunk-fct c (mapcan (lambda (x) (list x (chunk-slot-value-fct (car feats) x))) (chunk-filled-slots-list-fct c)))
                     (setf (chunk-real-visual-value c) (chunk-real-visual-value (car feats)))
                     (set-chunk-slot-value-fct c 'color (color self))
                     (setf (chunk-visual-object c) self)
@@ -516,7 +545,8 @@
 
 (defmethod vv-click-event-handler ((btn button-vdi) where)
   (declare (ignore where))
-  (when (functionp (action-function btn))
+  (when (or (functionp (action-function btn))
+            (and (symbolp (action-function btn)) (fboundp (action-function btn))))
     (funcall (action-function btn) btn)))
 
 
@@ -524,20 +554,20 @@
   (format t "~%Button '~S' clicked at time ~S." 
           (dialog-item-text btn) (mp-time)))
 
-
-
 (defmethod build-vis-locs-for ((self button-vdi) (vis-mod vision-module))
   
-  (let ((text-feats (build-string-feats vis-mod :text (dialog-item-text self)
-                                        :start-x 
-                                        (- (px (view-loc self))
-                                           (round 
-                                            (funcall (str-width-fct self) (dialog-item-text self))
-                                            2))
-                                        :y-pos (py (view-loc self))
-                                        :width-fct (str-width-fct self)
-                                        :height (text-height self)
-                                        :obj self))
+  (let* ((line-height (max (round (text-height self) .8) (+ (text-height self) 1)))
+         (lines (1+ (count #\newline (dialog-item-text self))))
+         (text-feats (build-string-feats vis-mod :text (dialog-item-text self)
+                                         :start-x (px (view-loc self))
+                                         :x-fct (lambda (string startx obj)
+                                                  (- startx
+                                                       (round (funcall (str-width-fct obj) string) 2)))
+                                         :y-pos (round (- (py (view-loc self)) (* 1/2 line-height (1- lines))))
+                                         :width-fct (str-width-fct self)
+                                         :height (text-height self)
+                                         :obj self
+                                         :line-height line-height))
         (feats nil)
         (c (gethash (cons (current-mp) (current-model)) (loc-chunks self))))
     
@@ -567,7 +597,7 @@
                   (mod-chunk-fct (second c)
                                  (mapcan (lambda (x) 
                                            (list x (chunk-slot-value-fct (car text-feats) x)))
-                                   (chunk-type-slot-names visual-location)))
+                                   (chunk-filled-slots-list-fct (second c))))
                   
                   (setf (chunk-real-visual-value (second c)) (chunk-real-visual-value (car text-feats)))
                   (setf feats c)
@@ -609,7 +639,7 @@
                                                           color ,(color self))))))))))
            
                                  
-    (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y))))
+    (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y vis-mod))))
       (mapcar #'(lambda (f)
                   (setf (chunk-visual-approach-width-fn f) fun)
                   (set-chunk-slot-value-fct f 'color 'black))
@@ -706,7 +736,7 @@
   (setf (aref ar 15 2) 'help)
   (setf (aref ar 16 2) 'home)
   (setf (aref ar 17 2) 'pageup)
-  (setf (aref ar 19 2) 'ESC)
+  (setf (aref ar 19 2) 'clear)
   (setf (aref ar 20 2) #\=)
   (setf (aref ar 21 2) #\/)
   (setf (aref ar 22 2) #\*)

@@ -26,7 +26,7 @@ proc make_buffer_viewer {} {
   # (Mac terminology) with the item to be scrolled, so I've got to do that
   # for everything I want to scroll...
 
-  set list_frame [frame $win.list_frame -borderwidth 0]  
+  set list_frame [frame $win.list_frame -borderwidth 2]  
   
   # create the listbox that uses a special variable <name>.var for its list
   # so that the list-box-handler can ensure that the selection remains the
@@ -39,7 +39,7 @@ proc make_buffer_viewer {} {
                         -listvar $list_frame.list_box.var \
                         -yscrollcommand "$list_frame.list_scrl set" \
                         -selectmode single \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   # tell the Lisp system to create a handler for sending a list 
   # that will set the list variable for the available buffers

@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : goal-compilation.lisp
-;;; Version     : 1.1
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Production compilation GOAL style definition.
 ;;; 
@@ -42,6 +42,17 @@
 ;;;             : * Added some declares to avoid compiler warnings.
 ;;; 2012.04.04 Dan [1.1]
 ;;;             : * Added the whynot reason function.
+;;; 2014.05.07 Dan [2.0]
+;;;             : * Start of conversion to typeless chunks.
+;;;             : * Pass the module to constant-value-p.
+;;;             : * References to compilation-module-previous are now using a
+;;;             :   structure instead of list.
+;;; 2014.05.27 Dan
+;;;             : * Fixed a bug in compose-goal-buffer with the (4 12 13 44) 
+;;;             :   case not wrapping c1 in a list.
+;;; 2015.08.17 Dan
+;;;             : * The last update actually broke things for the case where
+;;;             :   there is no condition in c1 and this fixes that.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -67,54 +78,42 @@
          (p2-style (cdr (assoc buffer (production-buffer-indices p2))))
          (ppm (compilation-module-ppm module))
          (bindings (when ppm 
-                     (append (second (compilation-module-previous module))
+                     (append (previous-production-bindings (compilation-module-previous module))
                              (production-compilation-instan (production-name p2))))))
     
     ;(pprint p1)
     ;(pprint p2)
     
-    (cond (;; The RHS + to LHS = case
-           (and (find p1-style '(4 12 13))
+    (cond (;; The RHS + to LHS = case -- also overrides when there's a RHS * in p1
+           (and (find p1-style '(4 12 13 44))
                 (find p2-style '(8 9 12 13 40 44)))
            
            ;; Map the RHS +'s with the LHS ='s
-           
-           
-           ;; here the slots of interest are just the intersection 
-           ;; of the two sets
-           ;;
+           ;; here the slots of interest are just the intersection of the two sets
            
            (let* ((mappings nil)
-                  (p1-slots (cadr (find (intern (concatenate 'string "+" (symbol-name buffer) ">")) (second p1-s) :key #'car)))
-                  (p2-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key #'car)))
-                  (interesting-slots (intersection (mapcan #'(lambda (x)
-                                                               (when (eq (car x) '=)
-                                                                 (list (second x))))
+                  (p1-slots (second (find (intern (concatenate 'string "+" (symbol-name buffer) ">")) (second p1-s) :key 'car)))
+                  (p2-slots (second (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key 'car)))
+                  (interesting-slots (intersection (mapcan (lambda (x)
+                                                             (when (eq (spec-slot-op x) '=)
+                                                               (list (spec-slot-name x))))
                                                      p1-slots)
-                                                   (mapcan #'(lambda (x)
-                                                               (when (eq (car x) '=)
-                                                                 (list (second x))))
+                                                   (mapcan (lambda (x)
+                                                               (when (eq (spec-slot-op x) '=)
+                                                                 (list (spec-slot-name x))))
                                                      p2-slots))))
              
-             
-             ;(format t "P1-slots ~S~%p2-slots ~S~%Interesting slots ~S~%"
-             ;  p1-slots
-             ;  p2-slots 
-             ;  interesting-slots)
-             
              (dolist (slot (remove-duplicates interesting-slots))
-               (dolist (p1slots (remove-if-not #'(lambda (x) (and (eq (first x) '=) (eq (second x) slot))) p1-slots))
-                 (dolist (p2slots (remove-if-not #'(lambda (x) (and (eq (first x) '=) (eq (second x) slot))) p2-slots))
-                   (if (constant-value-p (third p2slots))
+               (dolist (p1slots (remove-if-not (lambda (x) (and (eq (spec-slot-op x) '=) (eq (spec-slot-name x) slot))) p1-slots))
+                 (dolist (p2slots (remove-if-not (lambda (x) (and (eq (spec-slot-op x) '=) (eq (spec-slot-name x) slot))) p2-slots))
+                   (if (constant-value-p (spec-slot-value p2slots) module)
                        (if ppm
-                           (if (constant-value-p (third p1slots))
-                               (push (cons (third p1slots) (third p2slots)) mappings)
-                             (push (find (third p1slots) bindings :key 'car) mappings))
+                           (if (constant-value-p (spec-slot-value p1slots) module)
+                               (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings)
+                             (push (find (spec-slot-value p1slots) bindings :key 'car) mappings))
                          
-                         (push (cons (third p1slots) (third p2slots)) mappings))
-                     (push (cons (third p2slots) (third p1slots)) mappings)))))
-            
-                                
+                         (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings))
+                     (push (cons (spec-slot-value p2slots) (spec-slot-value p1slots)) mappings)))))
              mappings))
           
           (;; The RHS = to a LHS = case
@@ -130,59 +129,38 @@
            
            
            (let* ((mappings nil)
-                  (p1-slotsa (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p1-s) :key #'car)))
-                  (p1-slotsb (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (second p1-s) :key #'car)))
-                  (p2-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key #'car)))
+                  (p1-slotsa (second (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p1-s) :key 'car)))
+                  (p1-slotsb (second (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (second p1-s) :key 'car)))
+                  (p2-slots (second (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key 'car)))
                   
-                  (p1-slots (append (remove-if #'(lambda (x)
-                                                   (or (not (eq (car x) '=))
-                                                       (find (second x) p1-slotsb :key #'car)))
+                  (p1-slots (append (remove-if (lambda (x)
+                                                   (or (not (eq (spec-slot-op x) '=))
+                                                       (find (spec-slot-name x) p1-slotsb :key 'spec-slot-name)))
                                                p1-slotsa)
-                                    (mapcar #'(lambda (x)
-                                                (append (list '=) x))
-                                      p1-slotsb)))
-                  (interesting-slots  (intersection (mapcan #'(lambda (x) (list (second  x)))
+                                    p1-slotsb))
+                  (interesting-slots  (intersection (mapcan (lambda (x) 
+                                                              (list (spec-slot-name x)))
                                                       p1-slots)
-                                                    (mapcan #'(lambda (x)
-                                                                (when (eq (car x) '=)
-                                                                  (list (second x))))
+                                                    (mapcan (lambda (x)
+                                                                (when (eq (spec-slot-op x) '=)
+                                                                  (list (spec-slot-name x))))
                                                       p2-slots))))
              
-             
-             ; (format t "P1-slotsa ~S~%P1-slotsb ~S~%P1-slots  ~S~%p2-slots ~S~%Interesting slots ~S~%"
-             ;   p1-slotsa
-             ;   p1-slotsb
-             ;   p1-slots
-             ;   p2-slots 
-             ;   interesting-slots)
-             
+                                     
              (dolist (slot (remove-duplicates interesting-slots))
-               (dolist (p1slots (remove-if-not #'(lambda (x) (eq (second x) slot)) p1-slots))
-                 (dolist (p2slots (remove-if-not #'(lambda (x) (eq (second x) slot)) p2-slots))
+               (dolist (p1slots (remove-if-not (lambda (x) (eq (spec-slot-name x) slot)) p1-slots))
+                 (dolist (p2slots (remove-if-not (lambda (x) (eq (spec-slot-name x) slot)) p2-slots))
                    
-                   ;(pprint slot)
-                   ;(pprint p1slots)
-                   ;(pprint p2slots)
-                           
-                   
-                   (if (constant-value-p (third p2slots))
+                   (if (constant-value-p (spec-slot-value p2slots) module)
                        (if ppm
-                           (if (constant-value-p (third p1slots))
-                               (push (cons (third p1slots) (third p2slots)) mappings)
-                             (push (find (third p1slots) bindings :key 'car) mappings))
+                           (if (constant-value-p (spec-slot-value p1slots) module)
+                               (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings)
+                             (push (find (spec-slot-value p1slots) bindings :key 'car) mappings))
                          
-                         (push (cons (third p1slots) (third p2slots)) mappings))
-                     (push (cons (third p2slots) (third p1slots)) mappings))
-                   
-                   ;(pprint mappings)
-                   ;(pprint '----)
-                   )))
+                         (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings))
+                     (push (cons (spec-slot-value p2slots) (spec-slot-value p1slots)) mappings)))))
              
-             ;(format t "~%mappings ~S~%" mappings)
-             mappings)
-           
-           
-           )
+             mappings))
           
           (;; The RHS * to a LHS = case
            (and (find p1-style '(40))
@@ -197,46 +175,36 @@
            
            
            (let* ((mappings nil)
+                  (p1-slotsa (second (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p1-s) :key 'car)))
+                  (p1-slotsb (second (find (intern (concatenate 'string "*" (symbol-name buffer) ">")) (second p1-s) :key 'car)))
+                  (p2-slots (second (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key 'car)))
                   
-                  (request (intern (concatenate 'string "+" (symbol-name buffer) ">")))
-                  
-                  (p1-slotsa (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p1-s) :key #'car)))
-                  (p1-slotsb (cadr (find-if (lambda (x) (and (eq (car x) request) (neq (caaadr x) 'isa)))  (second p1-s))))
-                  (p2-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key #'car)))
-                  
-                  (p1-slots (append (remove-if #'(lambda (x)
-                                                   (or (not (eq (car x) '=))
-                                                       (find (second x) p1-slotsb :key #'car)))
+                  (p1-slots (append (remove-if (lambda (x)
+                                                   (or (not (eq (spec-slot-op x) '=))
+                                                       (find (spec-slot-name x) p1-slotsb :key 'spec-slot-name)))
                                                p1-slotsa)
-                                    (mapcar #'(lambda (x)
-                                                (append (list '=) x))
-                                      p1-slotsb)))
-                  (interesting-slots  (intersection (mapcan #'(lambda (x) (list (second  x)))
+                                    p1-slotsb))
+                  (interesting-slots  (intersection (mapcan (lambda (x) 
+                                                              (list (spec-slot-name x)))
                                                       p1-slots)
-                                                    (mapcan #'(lambda (x)
-                                                                (when (eq (car x) '=)
-                                                                  (list (second x))))
+                                                    (mapcan (lambda (x)
+                                                                (when (eq (spec-slot-op x) '=)
+                                                                  (list (spec-slot-name x))))
                                                       p2-slots))))
              
-             
-             ; (format t "P1-slotsa ~S~%P1-slotsb ~S~%P1-slots  ~S~%p2-slots ~S~%Interesting slots ~S~%"
-             ;   p1-slotsa
-             ;   p1-slotsb
-             ;   p1-slots
-             ;   p2-slots 
-             ;   interesting-slots)
-             
+                                     
              (dolist (slot (remove-duplicates interesting-slots))
-               (dolist (p1slots (remove-if-not #'(lambda (x) (eq (second x) slot)) p1-slots))
-                 (dolist (p2slots (remove-if-not #'(lambda (x) (eq (second x) slot)) p2-slots))
-                   (if (constant-value-p (third p2slots))
+               (dolist (p1slots (remove-if-not (lambda (x) (eq (spec-slot-name x) slot)) p1-slots))
+                 (dolist (p2slots (remove-if-not (lambda (x) (eq (spec-slot-name x) slot)) p2-slots))
+                   
+                   (if (constant-value-p (spec-slot-value p2slots) module)
                        (if ppm
-                           (if (constant-value-p (third p1slots))
-                               (push (cons (third p1slots) (third p2slots)) mappings)
-                             (push (find (third p1slots) bindings :key 'car) mappings))
+                           (if (constant-value-p (spec-slot-value p1slots) module)
+                               (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings)
+                             (push (find (spec-slot-value p1slots) bindings :key 'car) mappings))
                          
-                         (push (cons (third p1slots) (third p2slots)) mappings))
-                     (push (cons (third p2slots) (third p1slots)) mappings)))))
+                         (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings))
+                     (push (cons (spec-slot-value p2slots) (spec-slot-value p1slots)) mappings)))))
              
              mappings))
                     
@@ -262,82 +230,28 @@
            
            
            (let* ((mappings nil)
-                  (p1-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p1-s) :key #'car)))
-                  (p2-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key #'car)))
-                  (interesting-slots (intersection (mapcan #'(lambda (x)
-                                                               (when (eq (car x) '=)
-                                                                 (list (second x))))
+                  (p1-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p1-s) :key 'car)))
+                  (p2-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key 'car)))
+                  (interesting-slots (intersection (mapcan (lambda (x)
+                                                               (when (eq (spec-slot-op x) '=)
+                                                                  (list (spec-slot-name x))))
                                                      p1-slots)
-                                                   (mapcan #'(lambda (x)
-                                                               (when (eq (car x) '=)
-                                                                 (list (second x))))
+                                                   (mapcan (lambda (x)
+                                                               (when (eq (spec-slot-op x) '=)
+                                                                  (list (spec-slot-name x))))
                                                      p2-slots))))
              
-             
-             ;(format t "P1-slots ~S~%p2-slots ~S~%Interesting slots ~S~%"
-             ;  p1-slots
-             ;  p2-slots 
-             ;  interesting-slots)
-             
              (dolist (slot (remove-duplicates interesting-slots))
-               (dolist (p1slots (remove-if-not #'(lambda (x) (and (eq (first x) '=) (eq (second x) slot))) p1-slots))
-                 (dolist (p2slots (remove-if-not #'(lambda (x) (and (eq (first x) '=) (eq (second x) slot))) p2-slots))
-                   (if (constant-value-p (third p2slots))
+               (dolist (p1slots (remove-if-not (lambda (x) (and (eq (spec-slot-op x) '=) (eq (spec-slot-name x) slot))) p1-slots))
+                 (dolist (p2slots (remove-if-not (lambda (x) (and (eq (spec-slot-op x) '=) (eq (spec-slot-name x) slot))) p2-slots))
+                   (if (constant-value-p (spec-slot-value p2slots) module)
                        (if ppm
-                           (if (constant-value-p (third p1slots))
-                               (push (cons (third p1slots) (third p2slots)) mappings)
-                             (push (find (third p1slots) bindings :key 'car) mappings))
+                           (if (constant-value-p (spec-slot-value p1slots) module)
+                               (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings)
+                             (push (find (spec-slot-value p1slots) bindings :key 'car) mappings))
                          
-                         (push (cons (third p1slots) (third p2slots)) mappings))
-                     (push (cons (third p2slots) (third p1slots)) mappings)))))
-             
-             mappings
-             
-             ))
-          
-          
-          (;; The RHS + to LHS = case when there's also a RHS * so need to differentiate those
-           (and (find p1-style '(44))
-                (find p2-style '(8 40))) ;; assume only currently valid options
-           
-           ;; Map the RHS +'s with the LHS ='s
-           
-           
-           ;; here the slots of interest are just the intersection 
-           ;; of the two sets
-           ;;
-           
-           (let* ((mappings nil)
-                  (request (intern (concatenate 'string "+" (symbol-name buffer) ">")))
-                  (p1-slots (cadr (find-if (lambda (x) (and (eq (car x) request) (neq (caaadr x) 'isa)))  (second p1-s))))
-                  (p2-slots (cadr (find (intern (concatenate 'string "=" (symbol-name buffer) ">")) (first p2-s) :key #'car)))
-                  (interesting-slots (intersection (mapcan #'(lambda (x)
-                                                               (when (eq (car x) '=)
-                                                                 (list (second x))))
-                                                     p1-slots)
-                                                   (mapcan #'(lambda (x)
-                                                               (when (eq (car x) '=)
-                                                                 (list (second x))))
-                                                     p2-slots))))
-             
-             
-             ;(format t "P1-slots ~S~%p2-slots ~S~%Interesting slots ~S~%"
-             ;  p1-slots
-             ;  p2-slots 
-             ;  interesting-slots)
-             
-             (dolist (slot (remove-duplicates interesting-slots))
-               (dolist (p1slots (remove-if-not #'(lambda (x) (and (eq (first x) '=) (eq (second x) slot))) p1-slots))
-                 (dolist (p2slots (remove-if-not #'(lambda (x) (and (eq (first x) '=) (eq (second x) slot))) p2-slots))
-                   (if (constant-value-p (third p2slots))
-                       (if ppm
-                           (if (constant-value-p (third p1slots))
-                               (push (cons (third p1slots) (third p2slots)) mappings)
-                             (push (find (third p1slots) bindings :key 'car) mappings))
-                         
-                         (push (cons (third p1slots) (third p2slots)) mappings))
-                     (push (cons (third p2slots) (third p1slots)) mappings)))))
-             
+                         (push (cons (spec-slot-value p1slots) (spec-slot-value p2slots)) mappings))
+                     (push (cons (spec-slot-value p2slots) (spec-slot-value p1slots)) mappings)))))
              mappings))
           
           (t
@@ -371,85 +285,108 @@
   (let* ((bn (intern (concatenate 'string (symbol-name buffer) ">")))
          (b= (intern (concatenate 'string "=" (symbol-name bn))))
          (b+ (intern (concatenate 'string "+" (symbol-name bn))))
+         (b* (intern (concatenate 'string "*" (symbol-name bn))))
          
-         (c1 (copy-tree (find b= (first p1-s) :key #'car)))
-         (c2 (copy-tree (find b= (first p2-s) :key #'car)))
-         (a1= (copy-tree (find b= (second p1-s) :key #'car)))
-         (a2= (copy-tree (find b= (second p2-s) :key #'car)))
+         (c1 (copy-tree (find b= (first p1-s) :key 'car)))
+         (c2 (copy-tree (find b= (first p2-s) :key 'car)))
+         (a1= (copy-tree (find b= (second p1-s) :key 'car)))
+         (a2= (copy-tree (find b= (second p2-s) :key 'car)))
          
-         (a1+ (copy-tree (find-if (lambda (x) (and (eq (car x) b+) (eq (caaadr x) 'isa))) (second p1-s))))
-         (a2+ (copy-tree (find-if (lambda (x) (and (eq (car x) b+) (eq (caaadr x) 'isa))) (second p2-s))))
-         (a1* (copy-tree (find-if (lambda (x) (and (eq (car x) b+) (neq (caaadr x) 'isa))) (second p1-s))))
-         (a2* (copy-tree (find-if (lambda (x) (and (eq (car x) b+) (neq (caaadr x) 'isa))) (second p2-s)))))
-         
-         
-    ;(format t "~%~{~S~%~}" (list bn b= b+ c1 c2 a1= a2= a1+ a2+ a1* a2*))
-    
+         (a1+ (copy-tree (find b+ (second p1-s) :key 'car)))
+         (a2+ (copy-tree (find b+ (second p2-s) :key 'car)))
+         (a1* (copy-tree (find b* (second p1-s) :key 'car)))
+         (a2* (copy-tree (find b* (second p2-s) :key 'car))))
     
     (case (aif (cdr (assoc buffer (production-buffer-indices p1))) it 0)
       ((4 12 13 44)
-       ;(pprint (list 4 12 13 44))
-       (list (when c1 (list c1))
-             (append (when (or a1= a1*) (if a1= (list a1=) (list a1*))) ;; can't have both with current description
+       (list (if c1 (list c1) nil)
+             (append (when (or a1= a1*) ;; can't have both with current description
+                       (if a1= 
+                           (list a1=) 
+                         (list a1*))) 
                      (cond ((and a1+ a2=)
-                            (awhen (buffer+-union a1+ a2=) (list it)))
+                            (awhen (buffer+-union a1+ a2=) 
+                                   (list it)))
                            ((and a1+ a2*)
-                            (awhen (buffer+-union a1+ a2*) (list it)))
+                            (awhen (buffer+-union a1+ a2*) 
+                                   (list it)))
                            (a1+
                             (list a1+))
-                           (t nil)))))
+                           (t 
+                            nil)))))
       ((0 8)
-       ;(pprint (list 0 8))
-       (list (awhen (buffer-condition-union c1 c2 a1=) (list it))  ;; a1= is always nil, though  so why use it?
-             (append (when a2= (list a2=)) (when a2* (list a2*)) (when a2+ (list a2+)))))
+       (list (awhen (buffer-condition-union c1 c2 a1=) ;; a1= is always nil, though  so why use it?
+                    (list it))  
+             (append (when a2= 
+                       (list a2=)) 
+                     (when a2* 
+                       (list a2*)) 
+                     (when a2+ 
+                       (list a2+)))))
       ((9 40)
-       ;(pprint (list 9 40))
-       
-       (list (awhen (buffer-condition-union c1 c2 (if a1= a1= a1*)) (list it))
+       (list (awhen (buffer-condition-union c1 c2 (if a1= a1= a1*)) 
+                    (list it))
              (append (cond ((or a1= a2=) ;; if there's at least one = union those                             
-                            (awhen (buffer=-union a1= a2=) (list it)))
+                            (awhen (buffer=-union a1= a2=) 
+                                   (list it)))
                            ((or a1* a2*) ;; if there's at least one * union those
-                            (awhen (buffer=-union a1* a2*) (list it)))
-                           (t nil)) ;; can't have a mix of = and * so just ignore otherwise
-                           (when a2+ (list a2+))))))))
+                            (awhen (buffer=-union a1* a2*) 
+                                   (list it)))
+                           (t ;; can't have a mix of = and * so just ignore otherwise
+                            nil)) 
+                     (when a2+ 
+                       (list a2+))))))))
 
 
 (defun CHECK-GOAL-CONSISTENCY (buffer module p1 p2)
   (case (get-buffer-index p1 buffer)
     ((4 12 13) ;; a RHS +
-     (check-consistency module (find (cons #\+ buffer) (production-rhs p1) :key #'car :test #'equal)
-                        (second (compilation-module-previous module))
-                        (find (cons #\= buffer) (production-lhs p2) :key #'car :test #'equal)
-                        (production-bindings p2)
-                        :allow-subtypes t))
+     (check-consistency module (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\+)
+                                               (eq (production-statement-target x) buffer)))
+                                        (production-rhs p1))
+                        (previous-production-bindings (compilation-module-previous module))
+                        (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\=)
+                                               (eq (production-statement-target x) buffer)))
+                                 (production-lhs p2))
+                        (production-bindings p2)))
     ((44) ;; a RHS + with a * that's not considered
-     (check-consistency module (find-if (lambda (x) (and (equal (cons #\+ buffer) (car x)) (eql 'isa (caadr x)))) (production-rhs p1))
-                        (second (compilation-module-previous module))
-                        (find (cons #\= buffer) (production-lhs p2) :key #'car :test #'equal)
-                        (production-bindings p2)
-                        :allow-subtypes t))
+     (check-consistency module (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\+)
+                                               (eq (production-statement-target x) buffer)))
+                                        (production-rhs p1))
+                        (previous-production-bindings (compilation-module-previous module))
+                        (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\=)
+                                               (eq (production-statement-target x) buffer)))
+                                 (production-lhs p2))
+                        (production-bindings p2)))
     
     ((9) ;; a RHS =
-     (check-consistency module (cons (chunk-spec-chunk-type (third (find (cons #\= buffer) (production-lhs p1) :key #'car :test #'equal)))
-                                     (find (cons #\= buffer) (production-rhs p1) :key #'car :test #'equal))
-                        (second (compilation-module-previous module))
-                        (find (cons #\= buffer) (production-lhs p2) :key #'car :test #'equal)
-                        (production-bindings p2)
-                        :allow-subtypes t))
-    
-    
+     (check-consistency module (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\=)
+                                               (eq (production-statement-target x) buffer)))
+                                        (production-rhs p1))
+                        (previous-production-bindings (compilation-module-previous module))
+                        (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\=)
+                                               (eq (production-statement-target x) buffer)))
+                                 (production-lhs p2))
+                        (production-bindings p2)))
     ((40) ;; a RHS *
-     (check-consistency module (cons (chunk-spec-chunk-type (third (find (cons #\= buffer) (production-lhs p1) :key #'car :test #'equal)))
-                                     (find-if (lambda (x) (and (equal (cons #\+ buffer) (car x)) (neq 'isa (caadr x)))) (production-rhs p1)))
-                        (second (compilation-module-previous module))
-                        (find (cons #\= buffer) (production-lhs p2) :key #'car :test #'equal)
-                        (production-bindings p2)
-                        :allow-subtypes t))
-    
-    
+     (check-consistency module (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\*)
+                                               (eq (production-statement-target x) buffer)))
+                                        (production-rhs p1))
+                        (previous-production-bindings (compilation-module-previous module))
+                        (find-if (lambda (x)
+                                          (and (eq (production-statement-op x) #\=)
+                                               (eq (production-statement-target x) buffer)))
+                                 (production-lhs p2))
+                        (production-bindings p2)))
     (t
-     t
-     )))
+     t)))
 
 (defun PRE-INSTANTIATE-GOAL (buffer-and-index p2)
   (declare (ignore p2 buffer-and-index))
@@ -508,9 +445,8 @@
                                (4 8 NO-RHS-GOAL-REF) (4 0 T) (0 44 T)
                                (0 40 T) (0 13 T) (0 12 T) (0 9 T)
                                (0 8 T)
-                               (0
-                                4
-                                T)) (GOAL) MAP-GOAL-BUFFER COMPOSE-GOAL-BUFFER CHECK-GOAL-CONSISTENCY PRE-INSTANTIATE-GOAL NIL goal-reason)
+                               (0 4 T))
+  (GOAL) MAP-GOAL-BUFFER COMPOSE-GOAL-BUFFER CHECK-GOAL-CONSISTENCY PRE-INSTANTIATE-GOAL NIL goal-reason)
 
 #|
 This library is free software; you can redistribute it and/or

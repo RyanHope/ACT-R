@@ -24,6 +24,8 @@
 ;;; ----- History -----
 ;;; 2008.09.26 Dan
 ;;;             : * Put it into the standard code file template.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -56,7 +58,7 @@
 ;;; goal-style-query or goal-style-request functions to ensure
 ;;; that they are available.
 
-(require-compiled "GOAL-STYLE-MODULE" "ACT-R6:support;goal-style-module")
+(require-compiled "GOAL-STYLE-MODULE" "ACT-R-support:goal-style-module")
 
 
 (define-module new-goal  ;; the module is named new-goal

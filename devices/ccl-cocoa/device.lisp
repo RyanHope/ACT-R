@@ -3,7 +3,7 @@
 ; ----------------------------------------------------------------------
 
 
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Mike Byrne
@@ -27,15 +27,15 @@
 ;;; Bugs        : 
 ;;; 
 ;;; --- History ---
-;;; 01.09.21 mdb [b2]
-;;;             : Fixed an infinte recursion bug in APPROACH-WIDTH.
+;;; 01.09.21   mdb [b2]
+;;;             : Fixed an infinite recursion bug in APPROACH-WIDTH.
 ;;; 2002.04.16 mdb [b6]
-;;;             : * Rolled in color text stuff.
-;;;             : * Added BUILD-FEATURES-FOR methods for radio buttons and
-;;;             : check boxes.
-;;; 2002.04.18  mdb
+;;;             : Rolled in color text stuff.
+;;;             : Added BUILD-FEATURES-FOR methods for radio buttons and
+;;;               check boxes.
+;;; 2002.04.18 mdb
 ;;;             : Fixed minor glitch created by color text stuff--if the part
-;;;             : color was not set, that passed NIL to the color parser.  No.
+;;;               color was not set, that passed NIL to the color parser.  No.
 ;;; 2002.05.17 mdb
 ;;;             : Moved COLOR-SYMBOL->MAC-COLOR here.
 ;;; 2002.06.05 mdb
@@ -43,14 +43,14 @@
 ;;; 
 ;;; 2002.06.21 Dan [b7]
 ;;;             : Changed the rpm-window class to rpm-real-window and
-;;;             : updated the methods accordingly.
+;;;               updated the methods accordingly.
 ;;; 2002.06.30 Dan
 ;;;             : Changed the COLOR-SYMBOL->MAC-COLOR and MAC-COLOR->SYMBOL
-;;;             : function names by replacing MAC with SYSTEM to be a little
-;;;             : more consistent (that way there aren't as many 'different'
-;;;             : function names floating around in these files).
+;;;               function names by replacing MAC with SYSTEM to be a little
+;;;               more consistent (that way there aren't as many 'different'
+;;;               function names floating around in these files).
 ;;;             : Moved the view-line stuff in here from the separate file and
-;;;             : documented it better.
+;;;               documented it better.
 ;;;             : Removed all of the UWI code from this file.
 ;;; 2002.07.03 mdb
 ;;;             : Makes sure that SPEECH-AVAILABLE-P is defined.
@@ -60,84 +60,128 @@
 ;;;             : Per DB's suggestion, cut back on EVENT-DISPATCHing. 
 ;;; 2003.06.18 mdb
 ;;;             : Turns out static text dialog items support multiple kinds
-;;;             : of justifications, though it's hard to get at it.  Now
-;;;             : handled properly. 
+;;;               of justifications, though it's hard to get at it.  Now
+;;;               handled properly. 
 ;;; 2003.06.23 mdb [2.1.3]
 ;;;             : Under-the-hood addition of RPM-OVERLAY class. 
 ;;; 2004.03.11 mdb [2.2]
 ;;;             : Added a VIEW-KEY-EVENT-HANDLER method for editable text dialog
-;;;             : items, which used to break.
+;;;               items, which used to break.
 ;;;
-;;; 04.10.19 Dan [Moved into ACT-R 6]
+;;; 04.10.19   Dan [Moved into ACT-R 6]
 ;;;             : Reset the version to 1.0a1
 ;;;             : added the packaging switches
-;;;             : changed the name to device to be placed in a folder called mcl
+;;;             : changed the name to device to be placed in a folder called MCL 
 ;;;             : removed references to *mp* and other minor
 ;;;             : ACT-R 6 updates
 ;;; 2006.09.07 Dan
-;;;             : * Removed the fill-default-dimensions method because it's
-;;;             :   now defined in the vision file.
+;;;             : Removed the fill-default-dimensions method because it's
+;;;               now defined in the vision file.
 ;;; 2007.07.02 Dan
-;;;             : * Converted things over for the new vision module.
+;;;             : Converted things over for the new vision module.
 ;;; 2007.07.05 Dan
-;;;             : * Rolled in the multi-line fix Mike made to the old MCL device.
+;;;             : Rolled in the multi-line fix Mike made to the old MCL device.
 ;;; 2010.03.11 mdb
 ;;;             : Fixed DEVICE-MOVE-CURSOR-TO for (R)MCL 5.2 under OS X.
 ;;; 2010.06.03 mdb
 ;;;             : Fixed XSTART for (R)MCL 5.2 under OS X, which uses NIL for 
-;;;             : left-justified text as a default (rather than :left).
+;;;               left-justified text as a default (rather than :left).
 ;;; 2011.11.21 Dan
-;;;             : * Using model-generated-action instead of *actr-enabled-p*
-;;;             :   in view-key-event-handler  for editable-text-dialog-items
-;;;             :   to determine when to hack the output.
+;;;             : Using model-generated-action instead of *actr-enabled-p*
+;;;               in view-key-event-handler  for editable-text-dialog-items
+;;;               to determine when to hack the output.
 ;;; 2012.08.07 cts
 ;;;             : Tweaked original MCL device.lisp code, and used it to build a
 ;;;               device for CCL that leverages ccl-simple-view.lisp.
-;;;               Note that for any code that is left in this file and is
-;;;               commented out, I did not fully understand exactly what is
-;;;               was meant for. But all tests are passing without adding the
-;;;               code back in. So I'm keeping it commented out. If someone
+;;;               Note that for any commented-out code that is left in this file,
+;;;               I do not fully understand exactly what it
+;;;               is meant for. But all tests are passing without adding the
+;;;               code back in. So I'm keeping it commented out for now. If someone
 ;;;               fully understands how these pieces should
 ;;;               work, and sees that the code isn't needed, feel free to
 ;;;               remove. Or if it is needed, please add it back in.
 ;;; 2012.08.27 Dan
-;;;             : * The device-handle-keypress method now selects the window
-;;;             :   before generating the events so that it goes to the right
-;;;             :   window.
-;;;             : * In the device-handle-keypress method it now waits on a 
-;;;             :   semaphore to be set by the view-key-evet-handler method
-;;;             :   before returning to guarantee the press gets processed.
-;;;             :   It doesn't need to delay in the keypress action because of
-;;;             :   that so it passes nil for the delay.
+;;;             : The device-handle-keypress method now selects the window
+;;;               before generating the events so that it goes to the right
+;;;               window.
+;;;             : In the device-handle-keypress method it now waits on a 
+;;;               semaphore to be set by the view-key-event-handler method
+;;;               before returning to guarantee the press gets processed.
+;;;               It doesn't need to delay in the keypress action because of
+;;;               that so it passes nil for the delay.
 ;;; 2012.08.29 Dan
-;;;             : * Added a timeout to device-handle-keypress so that it doesn't
-;;;             :   hang if the semaphore never gets set.  If it's not set in
-;;;             :   500ms it prints a warning and just gives up.
+;;;             : Added a timeout to device-handle-keypress so that it doesn't
+;;;               hang if the semaphore never gets set.  If it's not set in
+;;;               500ms it prints a warning and just gives up.
 ;;; 2012.08.30 cts
-;;;             : * Added the semaphor method for mouse clicks. Wrapped the 
-;;;             :   timeout code into a function and using it for key presses
-;;;             :   and mouse clicks. 
-;;;             : * Calling event-dispatch one final time after semaphor is triggered,
-;;;             :   so that any events created during the keypress/mouseclick
-;;;             :   that were queued to run on the nsrunloop are run before the
-;;;             :   keypress/mouseclick method returns.
-;;;             :  
+;;;             : Added the semaphore method for mouse clicks. Wrapped the 
+;;;               timeout code into a function and using it for key presses
+;;;               and mouse clicks. 
+;;;             : Calling event-dispatch one final time after semaphore is triggered,
+;;;               so that any events created during the keypress/mouseclick
+;;;               that were queued to run on the NSRunLoop are run before the
+;;;               keypress/mouseclick method returns.
+;;; 2013.01.03 Dan
+;;;             : Clipped the rpm-view-line function (which was already commented out)
+;;;               to avoid confusion since it isn't needed and contained outdated code.
+;;; 2013.02.01 cts 
+;;;             : Streamlined the device-move-cursor-to call.
+;;;               The function no longer pauses for a set time to ensure that the move
+;;;               is registered. Instead, it polls and checks that the move is registered
+;;;               and exits immediately after success.
+;;; 2013.04.10 cts
+;;;             : Feature was added in ccl device to change text color for buttons.
+;;;               Visicon representation for buttons now shows text in appropriate color
+;;; 2013.04.20 cts
+;;;             : Removed stray commented out code that is no longer necessary.
+;;;             : Now spell checking comments and strings in the code.
+;;; 2013.04.27 cts
+;;;             : Removed unnecessary code duplication when building visual objects for lines
+;;; 2014.01.24 Dan
+;;;             : Updated the build-vis-locs-for methods for text and button
+;;;               items so that they use the updated build-string-feats to
+;;;               deal with newlines in the text.
+;;;             : Added an optional parameter to startx to provide a string to
+;;;               use instead of the whole dialog-item-text so that when there
+;;;               are multiple lines each gets justified appropriately.
+;;; 2014.01.27 Dan
+;;;             : Fixed some bugs with the last update.
+;;;             : Round all the string-width and ascent/descent values because
+;;;               they return floats.
+;;;             : Fix the y-coordinate for button text because it shifted when
+;;;               I updated build-string-feats.
+;;; 2014.02.10 Dan
+;;;             : Read a button's color out of the background slot.
+;;; 2014.02.08 cts
+;;;             : Removed the fixmum declaration in loc-avg since it's not needed b/c the function rounds
+;;;               to the nearest whole number anyways. It was also causing ccl to crash when a
+;;;               double type floating point was passed to it that function, which kept happening in
+;;;               some of the more complicated, closer-to-real-world regression tests.
+;;;             : Visicon positions now correct for nested views.
+;;; 2014.11.25 cts
+;;;             : Ensured that device-move-cursor-to works properly when a non-integer value is passed in
+;;;               the new mouse position argument. This does not commonly occur when the positions of all
+;;;               of the views in the window are static, since those positions were most likely specified 
+;;;               as integers when the views were placed in the window. However, for dynamic views
+;;;               (e.g., a scroll-bar-dialog-item) the position of items contained within that view may
+;;;               be represented as non-integers. Moving a mouse to a non-integer location does not make sense,
+;;;               since the pointer must be placed on a pixel. So the fix is to simply round non-integer values
+;;;               to their nearest integer when determining the pixel location to move the mouse to.
+;;; 2015.05.20 Dan
+;;;             : * The approach-width call in the buttons build-vis-locs-for
+;;;             :   method needs to pass the vision module in too.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :allegro-ide) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :allegro-ide) (in-package :cl-user)
 
-(require-compiled "CCL-SIMPLE-VIEW" "ACT-R6:support;ccl-simple-view")
-
-#|(defparameter *crosshair-cursor* 
-    (#_getcursor #$crosscursor) "Crosshair cursor")|#
-
-;(defparameter *last-update* (get-internal-real-time))
+(require-compiled "CCL-SIMPLE-VIEW" "ACT-R-support:ccl-simple-view")
 
 (defun loc-avg (x y)
   "Return the 'location' (integer) average of <x> and <y>."
-  (declare (fixnum x) (fixnum y))
   (floor (/ (+ x y) 2)))
 
 
@@ -151,8 +195,6 @@
   (let ((base-ls (flatten
                    (mapcar #'(lambda (obj) (build-vis-locs-for obj vis-mod))
                            (get-sub-objects self)))))
-    ; (dolist (feat base-ls)
-    ;   (fill-default-dimensions feat))
     base-ls))
 
 (defmethod vis-loc-to-obj ((device window) loc)
@@ -189,38 +231,34 @@
   (let ((text (dialog-item-text self)))
     (unless (equal text "")
       (let* ((font-spec (view-font self))
-             (start-y nil)
              (accum nil)
-             (textlines (string-to-lines text))
-             (width-fct #'(lambda (str) (string-width str font-spec)))
+             (width-fct #'(lambda (str) (round (string-width str font-spec))))
              (color (system-color->symbol (aif (part-color self :text)
                                             it
                                             *black-color*))))
-        (multiple-value-bind (ascent descent) (font-info font-spec)
-          (setf start-y (point-v (view-position self)))
-          (dolist (item textlines)
-            (push
-              (build-string-feats vis-mod :text item
-                                  :start-x (xstart self)                               
-                                  :y-pos 
-                                  (+ start-y (round (+ ascent descent) 2))
-                                  :width-fct width-fct 
-                                  :height ascent
-                                  :obj self)
-              accum)
-            (incf start-y (+ ascent descent))))
 
-        (setf accum (flatten (nreverse accum)))
+        (multiple-value-bind (ascent descent) (font-info font-spec)
+          (setf accum (build-string-feats vis-mod :text text
+                                          :start-x 0
+                                          :x-fct (lambda (string startx obj)
+                                                   (+ startx (xstart obj string)))
+                                          :y-pos 
+                                          (+ (point-v (view-global-position self)) (round (+ ascent descent) 2))
+                                          :width-fct width-fct 
+                                          :height (round ascent)
+                                          :obj self
+                                          :line-height (round (+ ascent descent)))))
+
+
         (dolist (x accum accum)
           (set-chunk-slot-value-fct x 'color color)
           (setf (chunk-visual-object x) self))))))
 
-(defmethod xstart ((self static-text-dialog-item))
-  (let ((left-x (point-h (view-position self)))
-        (text-width (string-width (dialog-item-text self)
-                                  (view-font self)))
-        (text-justification (text-just self))
-        )
+(defmethod xstart ((self static-text-dialog-item) &optional string)
+  (let* ((left-x (point-h (view-global-position self)))
+         (text (if (stringp string) string (dialog-item-text self)))
+         (text-width (round (string-width text (view-font self))))
+         (text-justification (text-just self)))
     (ecase text-justification
       (#.#$tejustleft (1+ left-x))
       (#.#$tejustcenter (+ 1 left-x (round (/ (- (width self) text-width) 2))))
@@ -239,7 +277,7 @@
                                                   (t 'pointer)))))))))
 
 (defgeneric cursor-in-window-p (wind)
-            (:documentation  "Returns T if the cursor is over <wind>, NIL otherwise."))
+  (:documentation  "Returns T if the cursor is over <wind>, NIL otherwise."))
 
 (defmethod cursor-in-window-p ((tw window))
   (when (window-shown-p tw)
@@ -251,14 +289,14 @@
            (<= (point-v cpos) (point-v size))))))
 
 (defmethod view-loc ((self view))
-  (let ((pos (view-position self))
+  (let ((pos (view-global-position self))
         (size (view-size self)))
     (vector (round (+ (point-h pos) (/ (point-h size) 2)))
             (round (+ (point-v pos) (/ (point-v size) 2))))))
 
 
 (defmethod view-loc ((self simple-view))
-  (let ((pos (view-position self))
+  (let ((pos (view-global-position self))
         (size (view-size self)))
     (vector (round (+ (point-h pos) (/ (point-h size) 2)))
             (round (+ (point-v pos) (/ (point-v size) 2))))))
@@ -272,107 +310,42 @@
 
 
 ;;; VIEW-DRAW-CONTENTS [Method]
-;;; Description : A td-liner is just a line-feature located "at" it's mid-point.
+;;; Description : A liner is just a line feature located at its mid-point
 
-(defmethod build-vis-locs-for ((lnr td-liner) (vis-mod vision-module))
+(defun 1-not<0 (val)
+  (guard ((>= val 0) "subtracting one from an already negative value"))
+  (max (1- val) 0))
+
+(defun subtract-point-1-not<0 (point)
+  (make-point
+    (1-not<0 (point-h point))
+    (1-not<0 (point-v point))))
+
+(defmethod build-vis-locs-for ((lnr liner) (vis-mod vision-module))
   "Convert the view to a feature to be placed into the visual icon"
-  (let* ((start-pt (view-position lnr))
-         (end-pt (subtract-points (add-points (view-position lnr) (view-size lnr)) 
-                                  (make-point 1 1)))
-         (f (car (define-chunks-fct `((isa visual-location
-                                           color ,(system-color->symbol (color lnr))
-                                           value line
-                                           kind line
-                                           screen-x ,(loc-avg (point-h start-pt) (point-h end-pt))
-                                           screen-y ,(loc-avg (point-v start-pt) (point-v end-pt))
-                                           width ,(abs (- (point-h start-pt) (point-h end-pt)))
-                                           height ,(abs (- (point-v start-pt) (point-v end-pt)))))))))
+  (let ((start-pt (local-to-global lnr (subtract-point-1-not<0 (get-start lnr))))
+        (end-pt (local-to-global lnr (subtract-point-1-not<0 (get-end lnr)))))
+    (let ((f (car (define-chunks-fct
+                    `((isa visual-location
+                           color ,(system-color->symbol (color lnr))
+                           value line
+                           kind line
+                           screen-x ,(loc-avg (point-h start-pt) (point-h end-pt))
+                           screen-y ,(loc-avg (point-v start-pt) (point-v end-pt))
+                           width ,(abs (- (point-h start-pt) (point-h end-pt)))
+                           height ,(abs (- (point-v start-pt) (point-v end-pt)))))))))
+      (setf (chunk-visual-object f) lnr)
+      f)))
 
-    (setf (chunk-visual-object f) lnr)
-    f))
-
-(defmethod vis-loc-to-obj ((lnr td-liner) loc)
-    (let ((start-pt (view-position lnr))
-          (end-pt (subtract-points (add-points (view-position lnr) (view-size lnr)) 
-                                   (make-point 1 1)))
-          (v-o (fill-default-vis-obj-slots (car (define-chunks (isa line))) loc)))
-      (set-chunk-slot-value-fct v-o 'end1-x (point-h start-pt))
-      (set-chunk-slot-value-fct v-o 'end1-y (point-v start-pt))
-      (set-chunk-slot-value-fct v-o 'end2-x (point-h end-pt))
-      (set-chunk-slot-value-fct v-o 'end2-y (point-v end-pt))
-      v-o))
-
-;;; VIEW-DRAW-CONTENTS [Method]
-;;; Description : A bu-liner is just a line-feature located "at" it's mid-point.
-
-(defmethod build-vis-locs-for ((lnr bu-liner) (vis-mod vision-module))
-  "Convert the view to a feature to be placed into the visual icon"
-  (let* ((start-pt (add-points (view-position lnr)
-                               (make-point 0 (1- (point-v (view-size lnr))))))
-         (end-pt (add-points (view-position lnr) 
-                             (make-point (1- (point-h (view-size lnr))) 0)))
-         (f (car (define-chunks-fct `((isa visual-location
-                                           color ,(system-color->symbol (color lnr))
-                                           value line
-                                           kind line
-                                           screen-x ,(loc-avg (point-h start-pt) (point-h end-pt))
-                                           screen-y ,(loc-avg (point-v start-pt) (point-v end-pt))
-                                           width ,(abs (- (point-h start-pt) (point-h end-pt)))
-                                           height ,(abs (- (point-v start-pt) (point-v end-pt)))))))))
-
-    (setf (chunk-visual-object f) lnr)
-    f))
-
-(defmethod vis-loc-to-obj ((lnr bu-liner) loc)
-    (let ((start-pt (add-points (view-position lnr)
-                                (make-point 0 (1- (point-v (view-size lnr))))))
-          (end-pt (add-points (view-position lnr) 
-                              (make-point (1- (point-h (view-size lnr))) 0)))
-          (v-o (fill-default-vis-obj-slots (car (define-chunks (isa line))) loc)))
-      (set-chunk-slot-value-fct v-o 'end1-x (point-h start-pt))
-      (set-chunk-slot-value-fct v-o 'end1-y (point-v start-pt))
-      (set-chunk-slot-value-fct v-o 'end2-x (point-h end-pt))
-      (set-chunk-slot-value-fct v-o 'end2-y (point-v end-pt))
-      v-o))
-
-#|
-
-;;; RPM-VIEW-LINE [Function]
-;;; Description : Add a view to the window that displays a line defined by
-;;;             : the start and end points in the color supplied (an MCL
-;;;             : system style color).
-
-(defun rpm-view-line (wind start-pt end-pt &optional (color *black-color*))
-  "Adds a view in the specified window which draws a line from the start-pt to the end-pt
-  using the optional color specified (defaulting to black).  This view will add features 
-  to the icon on PM-PROC-DISPLAY."
-  (let* ((gx (> (point-h end-pt) (point-h start-pt)))
-         (gy (> (point-v end-pt) (point-v start-pt)))
-         (vs (subtract-points start-pt end-pt)))
-    (setf vs (make-point (+ 1 (abs (point-h vs)))
-                         (+ 1 (abs (point-v vs)))))
-    (add-subviews wind (cond ((and gx gy)
-                              (make-instance 'td-liner
-                                             :color color
-                                             :view-position start-pt 
-                                             :view-size vs))
-                             ((and (not gx) (not gy))
-                              (make-instance 'td-liner
-                                             :color color
-                                             :view-position end-pt 
-                                             :view-size vs))
-                             ((and gx (not gy))
-                              (make-instance 'bu-liner
-                                             :color color
-                                             :view-position (make-point (point-h start-pt) (point-v end-pt))
-                                             :view-size vs))
-                             (t
-                               (make-instance 'bu-liner
-                                              :color color
-                                              :view-position (make-point (point-h end-pt) (point-v start-pt))
-                                              :view-size vs))))))
-
-|#
+(defmethod vis-loc-to-obj ((lnr liner) loc)
+  (let ((start-pt (local-to-global lnr (subtract-point-1-not<0 (get-start lnr))))
+        (end-pt (local-to-global lnr (subtract-point-1-not<0 (get-end lnr))))
+        (v-o (fill-default-vis-obj-slots (car (define-chunks (isa line))) loc)))
+    (set-chunk-slot-value-fct v-o 'end1-x (point-h start-pt))
+    (set-chunk-slot-value-fct v-o 'end1-y (point-v start-pt))
+    (set-chunk-slot-value-fct v-o 'end2-x (point-h end-pt))
+    (set-chunk-slot-value-fct v-o 'end2-y (point-v end-pt))
+    v-o))
 
 ;;;; ---------------------------------------------------------------------- ;;;;
 ;;;; Utilities
@@ -382,7 +355,7 @@
 ;;; Description : Converts an (X Y) list into an MCL/Quickdraw point.
 
 (defun xy->point (xy)
-  "(x y) to point converstion function. Deprecated, use vpt2p instead."
+  "(x y) to point conversion function. Deprecated, use vpt2p instead."
   (declare (list xy))
   (make-point (first xy) (second xy)))
 
@@ -421,13 +394,21 @@
 
 (defvar *keypress-wait* (make-semaphore))
 
-(defun wait-n-times-on-semaphore (sema n timeout)
+(defun wait-n-times (fun n delay-secs)
   (let ((count -1)
         (max-count n))
-    (while (and (null (timed-wait-on-semaphore sema timeout))
+    (while (and (null (funcall fun))
                 (< (incf count) max-count))
-           (event-dispatch))
+      (event-dispatch)
+      (awhen delay-secs 
+        (spin-for-fct (* 1000 it))))
     (not (= count max-count))))
+
+(defun wait-n-times-on-semaphore (sema n delay-secs)
+  (wait-n-times
+    (lambda () (timed-wait-on-semaphore sema delay-secs))
+    n
+    nil))
 
 ;;; DEVICE-HANDLE-KEYPRESS      [Method]
 ;;; Description : Generate a real keypress and then wait for VIEW-KEY-EVENT-HANDLER 
@@ -462,24 +443,30 @@
   (sv-log-n 1 "ending device-handle-click"))
 
 ;;; DEVICE-MOVE-CURSOR-TO      [Method]
-;;; Date        : 97.02.18 [revised 98.10.29]
-;;; Description : Since moving the mouse is considered a Bad Thing by 
-;;;             : Apple's HI police, you can't just make a simple call
-;;;             : to do it.  First, there's moving the cursor, which
-;;;             : involves blasting into low memory.  Then, if the cursor
-;;;             : is being tracked by the system, we have to make sure that 
-;;;             : the cursor move has really been registered (#$CrsrNew 
-;;;             : changes from -1 to 255 when this happens) by the OS.  Then 
-;;;             : make sure it's been registered by MCL with UPDATE-CURSOR.
+;;; Date        : 2014-11-03
+;;; Description : Uses the Quartz framework to move the cursor across the screen.
+;;;             : Polls after the cursor moves to confirm that the cursor has moved
+;;;               to the new location. If it has, return quickly. If it hasn't, keep
+;;;               polling for 500 ms and bail if it hasn't within 500 ms.
+;;;             : Since the cursor can only move to integer positions, make sure that the
+;;;               xyloc passed to the method specifies an integer location, and round if not.
+;;;               Otherwise, the check to ensure that the cursor moved to the specified position
+;;;               will not work, since the cursor will move to an integer location, and xyloc will
+;;;               be expecting a non-integer location
 
 (defmethod device-move-cursor-to ((device window) (xyloc vector))
-  (easygui::running-on-main-thread ()
+  (let ((xyloc (map 'vector #'round xyloc)))
+    (window-select device)
     (sv-log-n 1 "moving cursor to ~a" xyloc)
-    (setf xyloc (local-to-global device (vpt2p xyloc)))
-    (#_CGWarpMouseCursorPosition (ns:make-ns-point (point-h xyloc)
-                                                   (point-v xyloc))))
-  (spin-for-fct 50)
-  (event-dispatch))
+    (easygui::running-on-main-thread ()
+      (let ((xyloc (local-to-global device (vpt2p xyloc))))
+        (#_CGWarpMouseCursorPosition   
+         (ns:make-ns-point (point-h xyloc) (point-v xyloc)))))
+    (unless (wait-n-times (lambda ()
+                            (vpt= xyloc (p2vpt (view-mouse-position device)))) 10 .05)
+      (print-warning "Model cursor movement was not handled correctly within 500ms."))
+    (event-dispatch)
+    (sv-log-n 1 "ending move cursor")))
 
 ;;; DEVICE-SPEAK-STRING      [Method]
 ;;; Description : If the Mac Speech Manager is installed, actually speak the
@@ -500,7 +487,7 @@
 
 
 ;;; GET-MOUSE-COORDINATES      [Method]
-;;; Description : Return the current mouse loc in #(x y) format.
+;;; Description : Return the current mouse location in #(x y) format.
 
 (defmethod get-mouse-coordinates ((device window))
   (p2vpt (view-mouse-position device)))
@@ -619,7 +606,7 @@
   (when (wptr wind)
     (update-me (visual-fixation-marker) wind xyloc)))
 
-; When called with nil xyloc, remove the current visual-fication-marker.
+; When called with nil xyloc, remove the current visual-fixation-marker.
 ; Note that this is called in cases where the current marker is not a subview in wind.
 ; For instance, at the start of a model run after a previous model has been run,
 ; the vis location marker might still be non-nil, but there is not a focus ring
@@ -650,8 +637,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 
 
-
-
 ; ----------------------------------------------------------------------
 ; End file: actr6/devices/ccl/device.lisp
 ; ----------------------------------------------------------------------
@@ -667,11 +652,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 (defmethod build-vis-locs-for ((self dialog-item) (vis-mod vision-module))
   (declare (ignore vis-mod))
   (let ((f (car (define-chunks-fct `((isa visual-location
-                                 screen-x ,(px (view-loc self))
-                                 screen-y ,(py (view-loc self))
-                                 kind visual-object
-                                 color ,(system-color->symbol (part-color self :text))
-                                 value unknown))))))
+                                          screen-x ,(px (view-loc self))
+                                          screen-y ,(py (view-loc self))
+                                          kind visual-object
+                                          color ,(system-color->symbol (part-color self :text))
+                                          value unknown))))))
     (setf (chunk-visual-object f) self)
     f))
 
@@ -691,12 +676,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
                (multiple-value-bind (ascent descent) (font-info font-spec)
                  (set-color-of-feats (system-color->symbol (part-color self :text))
                                      (build-string-feats vis-mod :text text
-                                                         :start-x (1+ (point-h (view-position self)))
-                                                         :y-pos (+ (point-v (view-position self))
-                                                                   descent (round ascent 2))
+                                                         :start-x (1+ (point-h (view-global-position self)))
+                                                         :y-pos (round (+ (point-v (view-global-position self))
+                                                                          descent (round ascent 2)))
                                                          :width-fct #'(lambda (str)
-                                                                        (string-width str font-spec))
-                                                         :height ascent :obj self)))))))
+                                                                        (round (string-width str font-spec)))
+                                                         :height ascent :obj self
+                                                         :line-height (round (+ ascent descent)))))))))
     (dolist (x feats)
       (setf (chunk-visual-object x) self))
     feats))
@@ -713,40 +699,36 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
                                                  value oval
                                                  height ,(point-v (view-size self))
                                                  width ,(point-h (view-size self))
-                                                 color light-gray))))
+                                                 color ,(system-color->symbol (get-back-color self))))))
                   (unless (equal text "")
                     (let* ((font-spec (view-font self))
                            (start-y nil)
-                           (accum nil)
-                           (textlines (string-to-lines text))
-                           (width-fct #'(lambda (str) (string-width str font-spec))))
+                           (lines (count #\newline text))
+                           (width-fct #'(lambda (str) (round (string-width str font-spec)))))
                       (multiple-value-bind (ascent descent) (font-info font-spec)
-                        (setf start-y (+ (point-v (view-position self))
-                                         (round (- btn-height (* (length textlines)
+                        (setf start-y (+ (point-v (view-global-position self))
+                                         (round (- btn-height (* lines
                                                                  (+ ascent descent))) 2)))
-                        (dolist (item textlines (flatten (nreverse accum)))
-                          (push
-                            (set-color-of-feats (system-color->symbol (part-color self :text))
-                                                (build-string-feats vis-mod :text item
-                                                                    :start-x 
-                                                                    (+ (point-h (view-position self))
-                                                                       (round 
-                                                                         (- btn-width (funcall width-fct item))
-                                                                         2))
-                                                                    :y-pos 
-                                                                    (+ start-y (round (+ ascent descent) 2))
-                                                                    :width-fct width-fct 
-                                                                    :height (min ascent btn-height)
-                                                                    :obj self))
-                            accum)
-                          (incf start-y (+ ascent descent)))))))))
-    (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y))))
+                        (set-color-of-feats (system-color->symbol (part-color self :text))
+                                            (build-string-feats vis-mod :text text
+                                                                :start-x 
+                                                                (+ (point-h (view-global-position self))
+                                                                   (round  btn-width 2))
+                                                                :x-fct (lambda (string startx obj)
+                                                                         (declare (ignore obj))
+                                                                         (- startx
+                                                                            (round (funcall width-fct string) 2))) 
+                                                                :y-pos start-y
+                                                                :width-fct width-fct 
+                                                                :height (round (min ascent btn-height))
+                                                                :obj self
+                                                                :line-height (round (+ ascent descent))))))))))
+    (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y vis-mod))))
       (dolist (x (cdr feats))
-        (setf (chunk-visual-approach-width-fn x) fun)
-        (set-chunk-slot-value-fct x 'color 'black)))
-  (dolist (x feats)
-    (setf (chunk-visual-object x) self))
-  feats))
+        (setf (chunk-visual-approach-width-fn x) fun)))
+    (dolist (x feats)
+      (setf (chunk-visual-object x) self))
+    feats))
 
 
 

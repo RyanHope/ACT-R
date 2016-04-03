@@ -27,7 +27,7 @@ proc make_bold_multi_graphs {} {
                         $list_frame.list_box.var \
                         -yscrollcommand "$list_frame.list_scrl set" \
                         -selectmode multiple \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   send_environment_cmd "create list-box-handler $list_box $list_box \
                         (lambda (x) (declare (ignore x)) (no-output (buffers))) () [send_model_name]"
@@ -159,7 +159,7 @@ proc kill_bold_multi_window {win} {
 
   send_environment_cmd "update [get_handler_name $win.frame.canvas] \
     (lambda (x) (declare (ignore x)) \
-        (uncache-bold-data '$win.frame.canvas))" 
+        (uncache-bold-data (cons '[get_handler_name $win.frame.canvas] '$win.frame.canvas)))" 
    
    # Don't want to wait for the update since that's problematic
    # if the model is no longer defined, and it shouldn't matter
@@ -187,24 +187,70 @@ proc select_multi_buffer_graph {listwin target_win win} {
       upvar $win.start_time start
       upvar $win.stop_time stop
 
+      set starts [scan $start "%f" st]
+      set ends [scan $stop "%f" et]
+
+      if {$starts == 0 || $starts == -1} {set st -1}
+      if {$ends == 0 || $ends == -1} {set et -1}
+
+
+      send_environment_cmd "update [get_handler_name $target_win] \
+             (lambda (x) (declare (ignore x))\
+                 (parse-bold-predictions-for-graph (cons '[get_handler_name $target_win] '$target_win) nil $local $st $et))"
+
+      $target_win configure -state disabled
+
+      global $win.return
+      set $win.return ""
+
+      wait_for_non_null $win.return
+
+      $target_win configure -state normal
+
+      upvar $win.return result
+
+      foreach x $result {
+        switch [lindex $x 0] {
+          size { 
+            $target_win configure -width [lindex $x 1]
+            $target_win configure -height [lindex $x 2]
+            $target_win configure -scrollregion "0 0 [lindex $x 1] [lindex $x 2]"
+          }
+          line {
+            $target_win create line [lindex $x 1] [lindex $x 2] \
+                        [lindex $x 3] [lindex $x 4] \
+                        -fill [lindex $x 5] -width 2 
+          }
+          text {
+            $target_win create text [lindex $x 2] [lindex $x 3] \
+                        -font env_window_font -fill [lindex $x 4] \
+                        -text [lindex $x 1] -anchor nw 
+          }
+          text_x {
+            $target_win create text [lindex $x 2] [lindex $x 3] \
+                        -font env_window_font -fill [lindex $x 4] \
+                        -text [lindex $x 1] -anchor n 
+          }
+          text_y {
+            $target_win create text [lindex $x 2] [lindex $x 3] \
+                        -font env_window_font -fill [lindex $x 4] \
+                        -text [lindex $x 1] -anchor se
+          }
+        }
+      }
+
+
       foreach index $selections {
 
         set chunk [$listwin get $index]
-       
-        set starts [scan $start "%f" st]
-        set ends [scan $stop "%f" et]
-
-        if {$starts == 0 || $starts == -1} {set st -1}
-        if {$ends == 0 || $ends == -1} {set et -1}
 
         $target_win configure -state disabled
 
-        global $win.return
         set $win.return ""
       
         send_environment_cmd "update [get_handler_name $target_win] \
              (lambda (x) (declare (ignore x))\
-                 (parse-bold-predictions-for-graph '$target_win '$chunk $local $st $et))"
+                 (parse-bold-predictions-for-graph (cons '[get_handler_name $target_win] '$target_win) '$chunk $local $st $et))"
        
         wait_for_non_null $win.return
 
@@ -217,11 +263,6 @@ proc select_multi_buffer_graph {listwin target_win win} {
             color {
               $listwin itemconfigure $index -selectbackground [lindex $x 1]
             }
-            size { 
-              $target_win configure -width [lindex $x 1]
-              $target_win configure -height [lindex $x 2]
-              $target_win configure -scrollregion "0 0 [lindex $x 1] [lindex $x 2]"
-            }
             line {
               $target_win create line [lindex $x 1] [lindex $x 2] \
                           [lindex $x 3] [lindex $x 4] \
@@ -231,16 +272,6 @@ proc select_multi_buffer_graph {listwin target_win win} {
               $target_win create text [lindex $x 2] [lindex $x 3] \
                           -font env_window_font -fill [lindex $x 4] \
                           -text [lindex $x 1] -anchor nw 
-            }
-            text_x {
-              $target_win create text [lindex $x 2] [lindex $x 3] \
-                          -font env_window_font -fill [lindex $x 4] \
-                          -text [lindex $x 1] -anchor n 
-            }
-            text_y {
-              $target_win create text [lindex $x 2] [lindex $x 3] \
-                          -font env_window_font -fill [lindex $x 4] \
-                          -text [lindex $x 1] -anchor se
             }
           }
         } 

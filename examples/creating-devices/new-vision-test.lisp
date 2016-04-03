@@ -5,11 +5,9 @@
 ;;;
 ;;; - That any sub-type of visual-location chunks compose the visicon
 ;;;   which allows the user to extend things as needed.
-;;;   Note: the visual-location chunk-type has been slightly redefined
-;;;   to remove the nearest slot (which is now a request parameter),
-;;;   to add in the height and width slots, and to remove the userprop
-;;;   slots (since the user can now extend it with meaningful slot names
-;;;   as desired).
+;;;   Changed for ACT-R 6.1: any chunk with screen-x and screen-y slot 
+;;;   values (by default: see new-vision-test4 for an alternative)
+;;;   is valid as a visicon chunk since chunks no longer have a type.
 ;;;
 ;;; - That the requests of the visual-location buffer are now more 
 ;;;   flexible and even allow for variablized matching and the
@@ -111,12 +109,15 @@
   ;; if not provided.
   ;; Note that the polygon-feature chunk-type is defined in the model
   ;; as a sub-type of visual-location.
+  ;; Values of true and false are used for the regular slot of the
+  ;; polygon-features instead of t/nil because nil isn't a value
+  ;; for a slot anymore -- nil means that the slot doesn't exist.
   
   (let* ((visual-location-chunks (define-chunks 
                                      (isa visual-location screen-x 10 screen-y 20 kind oval value oval height 10 width 40 color blue)
-                                     (isa polygon-feature screen-x 50 screen-y 50 kind polygon value polygon height 50 width 40 color blue regular nil)
-                                     (isa polygon-feature screen-x 10 screen-y 50 kind square value square height 30 width 30 color red regular t)
-                                     (isa polygon-feature screen-x 90 screen-y 70 kind polygon value polygon height 50 width 45 color green regular nil)))
+                                     (isa polygon-feature screen-x 50 screen-y 50 kind polygon value polygon height 50 width 40 color blue regular false)
+                                     (isa polygon-feature screen-x 10 screen-y 50 kind square value square height 30 width 30 color red regular true)
+                                     (isa polygon-feature screen-x 90 screen-y 70 kind polygon value polygon height 50 width 45 color green regular false)))
          
          ;;; Now we define the visual-object chunks that
          ;;; correspond to the visual-locations.
@@ -167,15 +168,16 @@
 
 (define-model new-visual-test-1
     
-    (sgp :v t :trace-detail low :save-buffer-trace t :bold-inc .1)
+    (sgp :v t :trace-detail low)
   
   (chunk-type (polygon-feature (:include visual-location)) regular)
   (chunk-type (polygon (:include visual-object)) sides)
-  (chunk-type (square (:include polygon)) (sides 4))
+  (chunk-type (square (:include polygon)) (sides 4) (square t))
   (chunk-type goal step)
   
   ;; Just do this to avoid the warning when the visual-locations are created
-  (define-chunks (square isa chunk) (polygon isa chunk))
+  (define-chunks (true isa chunk) (false isa chunk) 
+    (square isa chunk) (polygon isa chunk))
   
   ;; Define this chunk for use in a nearest request
   
@@ -183,281 +185,272 @@
   
   (p find-oval
      ?goal>
-     buffer empty
+      buffer empty
      ==>
      +goal>
-     isa goal
-     step 0
+      isa goal
+      step 0
      
      ;; This visual-location request is 
      ;; just like the old vision module
      ;; allowed - nothing new going on here.
+     ;; The isa could be omitted and get the
+     ;; same result for all of these.
      
      +visual-location>
-     isa visual-location
-     kind oval
-     )
+      isa visual-location
+      kind oval)
   
   
-     (p find-regular
-        =goal>
-        isa goal
-        step 1
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This request shows that one can use
-        ;;; any sub-type of visual-location as the
-        ;;; chunk-type for the request, and then
-        ;;; any valid slot for that chunk-type
-        ;;; is valid for the request.
-        
-        +visual-location>
-        isa polygon-feature
-        regular t
-        )
+  (p find-regular
+     =goal>
+      isa goal
+      step 1
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This request shows that one can use
+     ;;; any sub-type of visual-location as the
+     ;;; chunk-type for the request, and then
+     ;;; any valid slot for that chunk-type
+     ;;; is valid for the request.
+     
+     +visual-location>
+      isa polygon-feature
+      regular true)
     
-     (p find-on-diagonal
-        =goal>
-        isa goal
-        step 2
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This request shows the use of a request variable.
-        ;;; The visual-location requets consider any value 
-        ;;; which starts with an & to be a variable in the
-        ;;; same way that a production uses = in the LHS matching.
-        ;;; Thus, this tests that the screen-x and screen-y values
-        ;;; are the same.
-        ;;;
-        ;;; It's important to note that this is only the case
-        ;;; for +visual-location requests - not a general feature
-        ;;; of RHS requests.  Other modules could use other variable
-        ;;; indicators if they wanted (or none at all as all the
-        ;;; other buffers' do currently do currently).
-        
-        +visual-location>
-        isa visual-location
-        screen-x &x
-        screen-y &x
-        )
+  (p find-on-diagonal
+     =goal>
+      isa goal
+      step 2
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This request shows the use of a request variable.
+     ;;; The visual-location requets consider any value 
+     ;;; which starts with an & to be a variable in the
+     ;;; same way that a production uses = in the LHS matching.
+     ;;; Thus, this tests that the screen-x and screen-y values
+     ;;; are the same.
+     ;;;
+     ;;; It's important to note that this is only the case
+     ;;; for +visual-location requests - not a general feature
+     ;;; of RHS requests.  Other modules could use other variable
+     ;;; indicators if they wanted (or none at all).
+     
+     +visual-location>
+      isa visual-location
+      screen-x &x
+      screen-y &x)
   
-     (p find-wider-than-current
-        =goal>
-        isa goal
-        step 3
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This request shows the special marker current
-        ;;; which can be used in any slot, and is compatible with the
-        ;;; slot modifiers.  It substitues the corresponding value of the
-        ;;; currently attended item (the most recently attended) into
-        ;;; to do the matching.
-        
-        +visual-location>
-        isa visual-location
-        > width current
-        )
+  (p find-wider-than-current
+     =goal>
+      isa goal
+      step 3
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This request shows the special marker current
+     ;;; which can be used in any slot, and is compatible with the
+     ;;; slot modifiers.  It substitues the corresponding value of the
+     ;;; currently attended item (the most recently attended) into
+     ;;; to do the matching.
+     
+     +visual-location>
+      isa visual-location
+      > width current)
   
   
-       (p find-thinnest
-        =goal>
-        isa goal
-        step 4
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This request shows the special marker lowest which
-          ;;; can be used in any slot specified in the request.
-          ;;; If there is a feature chunk which doesn't have a numerical
-          ;;; value for the test then that test is ignored.
-        
-        +visual-location>
-        isa visual-location
-         width lowest
-        )
+  (p find-thinnest
+     =goal>
+      isa goal
+      step 4
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This request shows the special marker lowest which
+     ;;; can be used in any slot specified in the request.
+     ;;; If there is a feature chunk which doesn't have a numerical
+     ;;; value for the test then that test is ignored.
+     
+     +visual-location>
+      isa visual-location
+      width lowest)
   
   (p find-left-most-of-the-tallest-items
      =goal>
-        isa goal
-        step 5
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This request shows the special marker highest which
-      ;;; can be used in any slot specified in the request
+      isa goal
+      step 5
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This request shows the special marker highest which
+     ;;; can be used in any slot specified in the request
      ;;; and indicates that the ordering when multiple such 
      ;;; constraints is given is as specified by
-      ;;; the request (see the next one for the other example).
+     ;;; the request (see the next one for the other example).
      ;;; Thus, in this case first it will find the chunks which
      ;;; have the highest height and then from those find the
      ;;; one with the lowest screen-x coordinate.
      
      
-        +visual-location>
-        isa visual-location
-     height highest
-     screen-x lowest
-        )
+     +visual-location>
+      isa visual-location
+      height highest
+      screen-x lowest)
   
-    (p find-tallest-of-the-left-most-items
+  (p find-tallest-of-the-left-most-items
      =goal>
-        isa goal
-        step 6
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-       ;;; The same request as the last one, but with the opposite
-       ;;; ordering.
-       ;;; So, here first it will find the locations with the lowest
-       ;;; screen-x coordinate and then find the one with the highest
-       ;;; height among those.
-        
-        +visual-location>
-        isa visual-location
-     screen-x lowest
-     height highest
-        )
+      isa goal
+      step 6
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; The same request as the last one, but with the opposite
+     ;;; ordering.
+     ;;; So, here first it will find the locations with the lowest
+     ;;; screen-x coordinate and then find the one with the highest
+     ;;; height among those.
+     
+     +visual-location>
+      isa visual-location
+      screen-x lowest
+      height highest)
   
   
-     (p find-not-red-or-blue
-        =goal>
-        isa goal
-        step 7
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        
-        ;;; This request shows that now the same slot may be
-        ;;; specified more than once in the request (any number
-        ;;; of occurences are allowed).
-        
-        +visual-location>
-        isa visual-location
-        - color red
-        - color blue
-        )
+  (p find-not-red-or-blue
+     =goal>
+      isa goal
+      step 7
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     
+     ;;; This request shows that now the same slot may be
+     ;;; specified more than once in the request (any number
+     ;;; of occurences are allowed).
+     
+     +visual-location>
+      isa visual-location
+      - color red
+      - color blue)
   
   
-     (p find-largest-x-less-than-current-x
-        =goal>
-        isa goal
-        step 8
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This shows that not only can a slot be specifed
-        ;;; more than once, but that you can use multiple special
-        ;;; markers in a given slot.
-        
-        +visual-location>
-        isa visual-location
-        < screen-x current
-        screen-x highest
-        )
+  (p find-largest-x-less-than-current-x
+     =goal>
+      isa goal
+      step 8
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This shows that not only can a slot be specifed
+     ;;; more than once, but that you can use multiple special
+     ;;; markers in a given slot.
+     
+     +visual-location>
+      isa visual-location
+      < screen-x current
+      screen-x highest)
   
   
-     (p find-wider-than-tall
-        =goal>
-        isa goal
-        step 9
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This shows the use of variables in the request again,
-        ;;; this time showing that they don't have to be used only
-        ;;; for = tests.
-        
-        +visual-location>
-        isa visual-location
-        height &height
-        > width &height
-        )
+  (p find-wider-than-tall
+     =goal>
+      isa goal
+      step 9
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This shows the use of variables in the request again,
+     ;;; this time showing that they don't have to be used only
+     ;;; for = tests.
+     
+     +visual-location>
+      isa visual-location
+      height &height
+      > width &height)
   
-       (p find-closest-to-100-100
-        =goal>
-        isa goal
-        step 10
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        ;;; This shows that nearest is now a requst parameter.
-          ;;; In this case taking a specific location chunk to use.
-          
-        +visual-location>
-        isa visual-location
-          :nearest loc-100x100
-        )
-
+  (p find-closest-to-100-100
+     =goal>
+      isa goal
+      step 10
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     
+     ;;; This shows that nearest is now a requst parameter.
+     ;;; In this case taking a specific location chunk to use.
+     
+     +visual-location>
+      isa visual-location
+      :nearest loc-100x100)
+  
   
   
   (p shift-attention
      =goal>
-     isa goal
+      isa goal
      =visual-location>
-     isa visual-location
+      isa visual-location
+     ?visual>
+      state free
      ==>
      +visual>
-     isa move-attention
-     screen-pos =visual-location
+      isa move-attention
+      screen-pos =visual-location
      !output! (Here is the chunk in the visual-location buffer)
      !eval! (pprint-chunks-fct (list =visual-location)))
   
   (p attend-item
      =goal>
-     isa goal
-     step =step
+      isa goal
+      step =step
      =visual>
-     isa visual-object
+      isa visual-object
      ==>
      !output! (Here is the chunk in the visual buffer)
      !eval! (pprint-chunks-fct (list =visual))
      !bind! =next-step (1+ =step)
      =goal>
-     step =next-step
-  )   
+      step =next-step)   
   )
 
   

@@ -21,7 +21,7 @@ proc make_declarative_history_viewer {} {
                         $list_frame_1.list_box.var \
                         -yscrollcommand "$list_frame_1.list_scrl set" \
                         -selectmode single \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   
   send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 \
@@ -42,7 +42,7 @@ proc make_declarative_history_viewer {} {
                         $list_frame_2.list_box.var \
                         -yscrollcommand "$list_frame_2.list_scrl set" \
                         -selectmode single \
-                        -exportselection 0 -font list_font]
+                        -exportselection 0 -font list_font -bd 0]
 
   
   send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 \
@@ -249,7 +249,7 @@ proc select_dm_history_chunk {chunkwin timewin target_win} {
         send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-chunk-display $time '$chunk))"
+                (dm-history-chunk-display \"$time\" '$chunk))"
       } else {
         send_environment_cmd \
           "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
@@ -276,7 +276,7 @@ proc select_dm_history_trace {chunkwin timewin target_win} {
         send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-trace-display $time '$chunk))"
+                (dm-history-trace-display \"$time\" '$chunk))"
       } else {
         send_environment_cmd \
           "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
@@ -298,12 +298,12 @@ proc select_dm_history_time {timewin chunklist request} {
       send_environment_cmd "update [get_handler_name $chunklist] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-chunk-list $time))"
+                (dm-history-chunk-list \"$time\"))"
 
       send_environment_cmd "update [get_handler_name $request] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-request-text $time))"
+                (dm-history-request-text \"$time\")))"
 
     } else {
         send_environment_cmd \

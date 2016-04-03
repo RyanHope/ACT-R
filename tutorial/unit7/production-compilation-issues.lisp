@@ -21,6 +21,10 @@
     ((#\f #\F) 2)
     (t 3)))
 
+;; This is only safe for virtual and Environment windows
+;; because present-next-trial calls ACT-R commands.  See
+;; docs/device-interaction-issues.doc for more details.
+
 (defmethod rpm-window-key-event-handler ((win rpm-window) key)
   (unless *task-over*
     (if (eq key #\space)
@@ -112,11 +116,12 @@
 
 
 (define-model compilation-test
-   (sgp :esc t :lf .5 :bll .5 :mp 18 :rt -3 :ans .25)
+  (sgp :esc t :lf .5 :bll .5 :mp 18 :rt -3 :ans .25)
+  (sgp :style-warnings nil)
   
   (chunk-type task state)
   (chunk-type number visual-rep)
-  (chunk-type response key)
+  (chunk-type response key (is-response t))
   (chunk-type trial num1 num2 result response)
          
   (define-chunks (win isa chunk)
@@ -162,13 +167,15 @@
        isa visual-location
      ?visual>
        state free
+     ?imaginal>
+       state free
      ==>
      =goal>
        state attend-num-1
      +imaginal>
        isa trial
      +visual>
-       isa move-attention
+       cmd move-attention
        screen-pos =visual-location)
   
   (p attend-num-1
@@ -209,11 +216,13 @@
        state find-num-2
      =visual-location>
        isa visual-location
+     ?visual>
+       state free
      ==>
      =goal>
        state attend-num-2
      +visual>
-       isa move-attention
+       cmd move-attention
        screen-pos =visual-location)
   
   (p attend-num-2
@@ -268,7 +277,7 @@
        isa task 
        state process-past-trial
      ?retrieval>
-       state error
+       buffer failure
      ==>
      +retrieval>
        isa response
@@ -330,7 +339,7 @@
      =imaginal>
        response =retrieval
      +manual>
-       isa press-key
+       cmd press-key
        key =key
      =goal>
        state detect-feedback)
@@ -340,7 +349,7 @@
        isa task
        state respond
      ?retrieval>
-       state error
+       buffer failure
      ?manual>
        state free
      =imaginal>
@@ -349,7 +358,7 @@
      =imaginal>
        response response-2
      +manual>
-       isa press-key
+       cmd press-key
        key "d"
      =goal>
        state detect-feedback)
@@ -364,7 +373,7 @@
        state free
      ==>
      +visual>
-       isa move-attention
+       cmd move-attention
        screen-pos =visual-location
      =goal>
        state encode-feedback)
@@ -384,7 +393,7 @@
      =imaginal>
        result win
      +manual>
-       isa press-key
+       cmd press-key
        key space
      +goal>
        isa task)
@@ -404,7 +413,7 @@
      =imaginal>
        result lose
      +manual>
-       isa press-key
+       cmd press-key
        key space
      +goal>
        isa task)    
@@ -424,7 +433,7 @@
      =imaginal>
        result draw
      +manual>
-       isa press-key
+       cmd press-key
        key space
      +goal>
        isa task)

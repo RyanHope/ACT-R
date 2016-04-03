@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : central-parameters.lisp
-;;; Version     : 1.1
+;;; Version     : 1.2
 ;;; 
 ;;; Description : A module to hold parameters that could be used by more than
 ;;;               one module.
@@ -35,6 +35,20 @@
 ;;;             :   necessary changes to the module to record and verify that.
 ;;; 2008.07.24 [1.1]
 ;;;             : * Updated the version number because of the change.
+;;; 2013.07.16 Dan [1.2]
+;;;             : * Adding a system parameter :custom-defaults and changing the
+;;;             :   reset to secondary.  Setting :custom-defaults to a list of 
+;;;             :   parameter-value pairs as acceptable for sgp causes those 
+;;;             :   to be set at the start of every model.
+;;; 2013.08.06 Dan
+;;;             : * Renaming custom-defaults to starting-parameters since it 
+;;;             :   doesn't actually change the default values and this name
+;;;             :   feels like a better description.
+;;; 2014.09.03 Dan
+;;;             : * When testing the :starting-parameters param names need to
+;;;             :   make sure there is a current meta-process.
+;;; 2015.06.05 Dan
+;;;             : * Use schedule-event-now for initial check.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -46,12 +60,13 @@
 ;;; :ol  Optimized Learning
 ;;; :er  Enable Randomness
 ;;;
-;;; 
+;;; Also sets the model parameters to the values provided in the :starting-parameters
+;;; system parameter for every model during the secondary reset.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Public API:
 ;;;
-;;; The three parameters :esc :ol and :er.
+;;; The three parameters :esc, :ol, and :er and also the system parameter :starting-parameters.
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -70,12 +85,43 @@
 
 (defvar *subsymbolic-parameter-values* nil)
 
+(defvar *user-default-parameter-list* nil)
+
+
+(defun test-user-defaults-parameter (params)
+  (and (listp params)
+       (evenp (length params))
+       (let ((names (let ((i -1)) (mapcan (lambda (x) (incf i) (when (evenp i) (list x))) params))))
+         (and
+          (every 'keywordp names)
+          (if (current-model)
+              (notany (lambda (y)
+                        (eq :bad-parameter-name (car (no-output (sgp-fct (list y))))))
+                      names)
+            (with-meta-process default
+              (let ((name (define-model-fct (gensym) nil))
+                    (res nil))
+                (with-model-eval name
+                  (setf res (notany (lambda (y)
+                                      (eq :bad-parameter-name (car (no-output (sgp-fct (list y))))))
+                                    names)))
+                (delete-model-fct name)
+                res)))))))
+
+(create-system-parameter :starting-parameters :handler (simple-system-param-handler *user-default-parameter-list*)
+                         :documentation "Parameter settings to apply at the start of every model."
+                         :valid-test 'test-user-defaults-parameter
+                         :warning "A list that is valid for passing to sgp-fct."
+                         :default-value nil)
+
 (defstruct central-parameters
   esc ol er)
 
 (defun central-parameters-reset (instance)
-  (schedule-event-relative 0 'check-for-esc-nil :maintenance t :output nil 
-                           :priority :max :params (list instance)))
+  (schedule-event-now 'check-for-esc-nil :maintenance t :output nil 
+                           :priority :max :params (list instance))
+  (when *user-default-parameter-list*
+    (sgp-fct *user-default-parameter-list*)))
 
 (defun check-for-esc-nil (instance)
   (when (and (null (central-parameters-esc instance))
@@ -117,11 +163,11 @@
    (define-parameter :ol :owner t :valid-test #'(lambda (x) (or (tornil x) (posnum x)))
      :default-value t :warning "either t, nil, or a positive number"
      :documentation "Optimized Learning"))
-  :version "1.1"
+  :version "1.2"
   :documentation "a module that maintains parameters used by other modules"
   :creation #'create-central-params
   :params #'central-parameters-params
-  :reset #'central-parameters-reset)
+  :reset (list nil 'central-parameters-reset))
 
 
 (provide "CENTRAL-PARAMETERS")

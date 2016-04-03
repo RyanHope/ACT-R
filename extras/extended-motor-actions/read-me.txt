@@ -1,0 +1,328 @@
+
+This directory contains an extension for the motor module.  To use this
+extension load the motor-extension.lisp file after loading the main ACT-R
+load file, or place that file into the modules directory of the actr6 
+hierarchy so that it gets compiled and loaded automatically.
+
+This extension combines a few extensions which have been written for the
+motor module together in one file.  It replaces the default motor module
+with an updated version which has more capabilities, but the default 
+operation of the extended module should not change how existing models
+work.  However, there will be some differences in the trace output with 
+how the manual request trace events are displayed and the addition of a
+new release-key event following every output-key.
+
+Here are the changes introduced with the extensions:
+
+- The model now generates actions for both pressing and releasing keys which 
+can be detected by the modeler.  The actions from the existing module 
+(punch, peck, peck-recall, and press-key) all now result in both a press 
+and release of the key/button.  The presses still call the user handlers:
+
+rpm-window-key-event-handler and rpm-window-click-event-handler 
+
+and now when a key or button is released these handlers will be called:
+
+rpm-window-key-release-event-handler and rpm-window-click-release-event-handler.
+
+Those new handlers are only called for model actions at this point however
+and are not tied into the real devices for detecting user key/button releasing.
+
+
+- The model is now able to hold keys down and new requests related to holding 
+and releasing keys are described below.  If the model requests an action
+which uses a finger which is currently being held down then there's an extra 
+burst-time cost to execute the release of that key before performing the
+requested action. 
+
+
+- The motor module now has the option of using separate execution and/or 
+processor stages for the two hands which allows motor actions on different 
+hands to potentially operate in parallel.  There is still only one preparation
+stage however.  The default operation of the new module is for one execution
+stage and one processor stage (like the default motor module), but that can 
+be changed with parameters as described below.
+
+
+- The trace of the motor actions for preparing, initiating, and finishing an
+action now indicate which action and hand it corresponds to since there may
+be parallel actions ongoing. 
+
+
+- There are more high-level actions like press-key which perform operations
+based on specifying a key.  Details on the new actions are found below.
+
+
+- There is a new module created, named motor-extension, which adds two new
+buffers, manual-left and manual-right.  These can be used for tracking the 
+operation of the model's hands separately and also allows for querying 
+whether individual fingers are currently busy i.e. holding down a key.
+These can be used to track separate hand activity for BOLD activation
+traces, but when doing so two processor and two execution stages will 
+need to be enabled to avoid seeing preparation shared between them (since
+preparation engages the processor stage).
+
+
+
+Here are more details on new parameters, buffers, interface methods, and
+requests available.
+ 
+
+There are two new methods available for detecting model actions:
+
+rpm-window-key-release-event-handler (device key)
+
+This method can be defined on a device by the modeler to detect when the 
+model releases a key.  It will be called with the name of the key released
+just like the rpm-window-key-event-handler does when a key is pressed.
+The call to the rpm-window-key-release-event-handler method will always
+be proceeded by a call to the rpm-window-key-event-handler for the key,
+however there may not always be a call to rpm-window-key-release-event-handler
+for every rpm-window-key-event-handler call because the model may be reset or
+otherwise stopped or cleared before the release event occurs.
+
+rpm-window-click-release-event-handler (device position)
+
+This method can be defined on a device by the modeler to detect when the 
+model releases the mouse button.  It is passed the position of the mouse
+at the time of the button release.  Like the key-release-event-handler,
+there will always be a preceding rpm-window-click-event-handler call, but 
+every rpm-window-click-event-handler may not have a corresponding call to
+the rpm-window-click-release-event-handler.
+
+
+New model parameters available:
+
+:key-closure-time (default value .01)
+
+The time in seconds between when a key is contacted (the corresponding movement 
+action has started pressing it) and when it registers as being hit.  By default
+only used for the timing of punch actions, but see the :peck-strike-distance
+parameter below for how it may affect peck/peck-recoil actions as well.  Note,
+this value has always existed within the device interface, but was not previously
+made directly available to the modeler.
+
+:key-release-time (default value .04)
+
+The time in seconds between when the action which is releasing a key is started
+and when that key actually registers as being released.  Used in the timing of
+all the actions which include a releasing of a key.  The assumption is that there
+is some distance over which the finger must be moved before the key stops being
+pressed.  All of the release actions are based on a burst-time cost, thus this
+parameter should be set to a value no greater than the value of the :motor-burst-time
+parameter.  
+
+NOTE: Those two parameters should really be modeled as a distance instead of a time
+cost, but since the motor movement code isn't modeled at that fine grain of detail
+(exact finger positions in 3-space) a simple cost assumption is used.
+
+:dual-processor-stages (default value nil)
+
+A boolean indicating whether the motor module should use separate processor
+stages for each hand.
+
+:dual-execution-stages (default value nil)
+
+A boolean indicating whether the motor module should use separate execution
+stages for each hand.
+
+:peck-strike-distance (default 0.0)
+
+The distance from the center of a key at which a peck action is considered
+to make contact with the key and start depressing it.  The value can be
+from 0 to .5 (the width of a key is 1.0 and movement is computed from 
+center of key to center of key thus the finger movement crosses half of
+the target key when striking it).  This affects when the output-key
+action (and the call to rpm-window-key-event handler) occurs.  The default
+motor module assumes that the action occurs after the entire movement
+occurs and ignores the key closure time which is what will still happen if 
+the value is set to 0.  
+If it is set to a non-zero value then the peck and peck-recoil actions
+will generate the output-key action at the time: ct + (ft*(d-ps)/d) where
+ct is the key-closure-time, ft is the movement time computed from Fitts's 
+Law as usual, d is the distance of the movement, and ps is the value of
+the peck-strike-distance parameter.  Basically, it's a very rough 
+calculation that assumes once the finger is part way across the target 
+key it starts to depress and then registers after the closure-time passes.
+The assumption is that the travel time is linear (which isn't right) and 
+thus the peck-strike-distance is subtracted from the distance across the 
+key to determine the proportion of the time which passes before contact
+is made.
+
+
+New Buffers for tracking hands: 
+
+manual-left and manual-right
+
+These buffers allow for the same queries as the manual buffer except for
+the preparation query which they do not provide.  The processor and execution
+queries of these buffers are busy if that stage of the specified hand is busy
+(or if either hand is when there aren't separate stages).  The state is busy
+if either the processor or execution stage is busy.
+
+Each also adds additional queries for the fingers on that hand.  A finger
+query is busy if the finger is holding a key down or performing an action
+which affects the state of a key being held down, and free otherwise.
+
+Here is the output of the buffer-status call for the manual-left buffer for
+reference:
+
+MANUAL-LEFT:
+  buffer empty          : T
+  buffer full           : NIL
+  buffer requested      : NIL
+  buffer unrequested    : NIL
+  state free            : T
+  state busy            : NIL
+  state error           : NIL
+  processor free        : T
+  processor busy        : NIL
+  execution free        : T
+  execution busy        : NIL
+  last-command          : NONE
+  index  free           : T
+  middle free           : T
+  ring   free           : T
+  pinkie free           : T
+  thumb  free           : T
+
+Neither buffer does anything with requests which it receives nor are there any 
+chunks placed into either one.
+
+
+
+New request actions for the manual buffer.
+
+Here are low-level actions for directly manipulating the fingers:
+
+isa hold-punch
+ hand [left | right]
+ finger [index | middle | ring | pinkie | thumb]
+
+Press and hold down the key under the indicated finger.  If the finger
+is already holding a key release it and depress it again.
+
+
+isa hold-peck
+ hand [left | right]
+ finger [index | middle | ring | pinkie | thumb]
+ r distance
+ theta direction
+
+Move the finger based on the distance and direction and hold down the
+key located there.  If the finger is currently holding a key release that
+key before performing this movement.
+
+
+isa release
+ hand [left | right]
+ finger [index | middle | ring | pinkie | thumb]
+
+Release the key held by the indicated finger and leave the finger
+over that key.  If the finger is not holding a key do nothing and
+output a warning.
+
+
+isa release-recoil
+ hand [left | right]
+ finger [index | middle | ring | pinkie | thumb]
+ r distance
+ theta direction
+
+Release the key held by the indicated finger and then move it the
+indicated distance and direction without striking the key at that
+location.  If the finger is not holding a key do nothing and output
+a warning.
+
+
+isa point-finger
+ hand [left | right]
+ finger [index | middle | ring | pinkie | thumb]
+ r distance
+ theta direction
+
+Move the finger based on the distance and direction without striking
+the key at that location.  If the finger is currently holding a key release that
+key before performing this movement.
+
+
+Here are the new high-level actions that generate the corresponding low-level
+movement necessary.
+
+
+isa type-key
+ key key
+
+Move the appropriate finger to the key and press and release it.  The
+finger is moved from where it currently is (unlike press-key which assumes
+it's on the home position) and returns to where it was after striking the key
+(which may not be the home row position).
+
+
+isa hit-key
+ key key
+
+Move the appropriate finger to the key and press and release it.  The
+finger is moved from where it currently is and stays over the key which is hit.
+
+
+isa hold-key
+ key key
+
+Move the appropriate finger to the key and press it keeping it held down.  The
+finger is moved from where it currently is.
+
+
+isa release-key
+ key key
+
+If the appropriate finger for that key is currently holding it down release it
+and leave the finger at that position.  If the finger is not holding down that
+key print a warning and do nothing.
+
+
+isa release-key-to-home
+ key key
+
+If the appropriate finger for that key is currently holding it down release it
+and move the finger back to its home position without striking the corresponding
+home key.  If the finger is not holding down that key print a warning and do nothing.
+
+
+isa move-to-key
+ key key
+
+Move the appropriate finger to that key without pressing it.  The finger is moved
+from where it currently is.
+
+
+isa move-finger-to-home
+ hand [left | right]
+ finger [index | middle | ring | pinkie | thumb]
+
+Move the specified finger to its home position without pressing it.  If the finger
+is currently holding a key down release it before moving.  If the finger is already
+at the home position do nothing and print a warning.
+
+
+isa all-fingers-to-home
+ {hand [left | right]}
+
+Move all fingers on the specified hand, or both hands if no hand specified,
+to their home positions.  Like move-finger-to-home any finger which is holding
+a key will be released first.  If all the fingers are on the home positions
+do nothing and print a warning.  This action has a fixed cost of 200ms for
+execution.
+
+
+isa hold-mouse
+
+Execute a hold-punch with the right index finger to depress the mouse button.
+If the hand is not located on the mouse print a warning and do nothing.
+
+
+isa release-mouse
+
+Release the right index finger to release the mouse button.  If the 
+finger is not holding the button down or the hand is not located on the
+mouse do nothing and print a warning.

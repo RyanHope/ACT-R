@@ -22,7 +22,6 @@ proc select_stepper {} {
   global stop_type
   global instan_parsed
   global tutor_temp
-  global options_array
   global initial_wait
 
   global stepper_tutor
@@ -193,7 +192,7 @@ proc select_stepper {} {
 
     listbox .stepper.prod_frame.f4.f.list -listvar .stepper.prod_frame.f4.f.list.var \
             -yscrollcommand ".stepper.prod_frame.f4.f.scrl set" \
-            -selectmode single -exportselection 0 -font list_font
+            -selectmode single -exportselection 0 -font list_font -bd 0
      
     send_environment_cmd \
       "create select-first-list-box-handler .stepper.prod_frame.f4.f.list \
@@ -356,9 +355,9 @@ proc select_stepper {} {
     place .stepper.step -x 2 -y 2 -width 50 -height 25
     place .stepper.stop -x 55 -y 2 -width 50 -height 25
  
-    place .stepper.run_until -x 108 -y 2 -width 70 -height 25
-    place .stepper.run_until_type -x 180 -y 2 -width 100 -height 25
-    place .stepper.run_until_time -x 282 -y 2 -width -384 -relwidth 1.0 -height 25
+    place .stepper.run_until -x 108 -y 2 -width 80 -height 25
+    place .stepper.run_until_type -x 190 -y 2 -width 100 -height 25
+    place .stepper.run_until_time -x 292 -y 2 -width -394 -relwidth 1.0 -height 25
     place .stepper.stepper_tutor -x -100 -relx 1.0 -y 5 -height 25 -width 100
 
 
