@@ -16,10 +16,10 @@
 
 (clear-all)
 
-(defun run-test ()
+(defun run-test (&optional (visible t))
   ;; open a visible experiment window and make that the current device
   ;; the window has the default width and height of 300 pixels each
-  (install-device (open-exp-window "Test"))
+  (install-device (open-exp-window "Test" :visible visible))
   
   ;; draw the clock face off to one side with an "X" at the center
   (add-text-to-exp-window :text "X" :x 100 :y 100 :width 25)
@@ -43,7 +43,7 @@
   ;; the center.
   ;;(set-visual-center-point 100 100)
   
-  (run 10 :real-time t))
+  (run 10 :real-time visible))
 
 
 (define-model test-rotation
@@ -108,7 +108,8 @@
      ==>
      =goal>
        start =val
-       current =val)
+     current =val
+      !output! (Attending to =val))
   
   (p encode
      =goal>
@@ -121,7 +122,8 @@
        value =val
      ==>
      =goal>
-       current =val)
+     current =val
+     !output! (Attending to =val))
 
   
   (p encode-and-switch
@@ -135,7 +137,8 @@
      ==>
      =goal>
        dir counterclockwise
-       current =val)
+     current =val
+     !output! (Attending to =val))
   
   (p encode-and-stop
      =goal>
@@ -148,7 +151,8 @@
      ==>
      =goal>
        dir nil
-       current =val)
+     current =val
+     !output! (Attending to =val))
   
   
   (p find-next

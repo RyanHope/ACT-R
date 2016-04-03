@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -58,6 +58,11 @@
 ;;;             : * Visible-virtuals-available? now just calls check-with-environment-for-visible-virtuals
 ;;;             :   if it's defined to avoid having to redefine visible-virtuals-available?
 ;;;             :   it later.
+;;; 2015.05.26 Dan
+;;;             : * Added a font-size parameter to make-static-text-for-rpm-window.
+;;;             :   Should be a point size for the font, defaults to 12 and the
+;;;             :   height and width are based on the ratios for the previous
+;;;             :   defaults which were 10 high and 7 wide for 12 point.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -252,14 +257,18 @@
 (defgeneric make-static-text-for-rpm-window (window &key x y text height width color)
   (:documentation "Returns a text item built with the parameters supplied"))
 
-(defmethod make-static-text-for-rpm-window ((win rpm-virtual-window) &key (x 0) (y 0) (text "") (height 20) (width 80) (color 'black))
+(defmethod make-static-text-for-rpm-window ((win rpm-virtual-window) &key (x 0) (y 0) (text "") 
+                                            (height 20) (width 80) (color 'black) font-size)
+  (unless (numberp font-size)
+    (setf font-size 12))
   (make-instance 'static-text-vdi
     :x-pos x :y-pos y
     :dialog-item-text text
     :height height
     :width width
     :color color
-    ))
+    :text-height (round font-size 12/10)
+    :str-width-fct (let ((w (round font-size 12/7))) (lambda (str) (* (length str) w)))))
 
 
 ;;; MAKE-LINE-FOR-RPM-WINDOW  [Method]

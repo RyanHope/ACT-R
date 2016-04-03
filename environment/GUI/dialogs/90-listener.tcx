@@ -27,7 +27,7 @@ proc make_listener {} {
 
   entry .listener.command  -font text_font -font text_font
 
-  send_environment_cmd "create simple-handler .listener.command wait_for_cmd (lambda (x)) nil"
+  send_environment_cmd "create simple-handler .listener.command wait_for_cmd (lambda (x)(declare (ignore x))) nil"
 
 
   bind .listener.command <Key-Return> {

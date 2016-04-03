@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -67,6 +67,17 @@
 ;;;             : * Noted the bug about :on-click under Linux, which isn't an
 ;;;             :   issue for now since the Linux interface doesn't work for a
 ;;;             :   model anyway.
+;;; 2013.01.23 Dan
+;;;             : * Added a before method on virtual-key-down for button-panes 
+;;;             :   because sometimes those seem to get the key presses instead
+;;;             :   of the "key catcher" so pass the press "up" to the window
+;;;             :   in those cases too.
+;;; 2014.04.09 Dan
+;;;             : * Call rpm-window-click-event-handler with a position vector
+;;;             :   because that matches what the get-mouse-coordinates method
+;;;             :   returns.
+;;; 2015.05.26 Dan
+;;;             : * Added a font-size parameter to make-static-text-for-rpm-window.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -90,8 +101,8 @@
   (declare (ignore buttons))
   (when (null cur-pos)
       (setf cur-pos (cg:cursor-position device)))
-    (rpm-window-click-event-handler device (list (position-x cur-pos)
-                                                 (position-y cur-pos))))
+    (rpm-window-click-event-handler device (vector (position-x cur-pos)
+                                                   (position-y cur-pos))))
 
 (defmethod rpm-window-click-event-handler ((device rpm-real-window) position)
   (declare (ignore position))
@@ -173,17 +184,19 @@
  
 (defmethod make-button-for-rpm-window ((win rpm-real-window) &key (x 0) (y 0) (text "Ok")  (action nil) (height 18)  (width 60) (color 'black))
     (make-instance 'cg:button
-            :left x
-            :width width
-            :height height
-            :on-click #'(lambda (window button) (declare (ignore window)) (when action (funcall action button)))
-            :title text
+      :left x
+      :width width
+      :height height
+      :on-click #'(lambda (window button) (declare (ignore window)) (when action (funcall action button)))
+      :title text
       :top y
       :foreground-color (color-symbol->system-color color)))
 
 ;;; Windows
 
-(defmethod make-static-text-for-rpm-window ((win rpm-real-window) &key (x 0) (y 0) (text "") (height 20) (width 20) (color 'black))
+(defmethod make-static-text-for-rpm-window ((win rpm-real-window) &key (x 0) (y 0) (text "") (height 20) (width 20) (color 'black) font-size)
+  (unless (numberp font-size)
+    (setf font-size 12))
   (make-instance 'cg:static-text
     :left x
     :width width
@@ -191,7 +204,8 @@
     :value text
     :top y
     :foreground-color (color-symbol->system-color color)
-    :on-click #'(lambda (x y) (declare (ignore x y)) (mouse-left-down win nil nil))))
+    :on-click #'(lambda (x y) (declare (ignore x y)) (mouse-left-down win nil nil))
+    :font (make-font-ex :modern "courier new" (points-to-pixels font-size))))
 
 
 ;;; It turns out that due to the bottom up nature of
@@ -239,6 +253,12 @@
 #-(version>= 6 1) (defmethod virtual-key-down :before ((catcher cg::lisp-group-box-pane) buttons key-code)
   (when (subtypep (type-of (cg:parent catcher)) 'rpm-window)
     (virtual-key-down (cg:parent catcher) buttons key-code)))
+
+
+#+(version>= 8 0) (defmethod virtual-key-down :before ((catcher cg::button-pane) buttons key-code)
+  (when (subtypep (type-of (cg:parent catcher)) 'rpm-window)
+    (virtual-key-down (cg:parent catcher) buttons key-code)))
+
 
 
 (defun make-rpm-window (&key (visible nil) (class nil) (title "RPM Window") (width 100) (height 100) (x 0 ) (y 0))

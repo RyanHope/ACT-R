@@ -38,6 +38,17 @@
 ;;;             : * Changed the output so that the query info is first so that
 ;;;             :   it's easier to watch that for a change in a buffer since it
 ;;;             :   will be formatted consistently.
+;;; 2013.11.15 Dan
+;;;             : * Chunk contents are now displayed at time stamps when there
+;;;             :   isn't an "action" on that buffer which was a bug because of
+;;;             :   how the events were recorded and compared.
+;;;             : * Removed the special :cleared marker for the chunk details
+;;;             :   since it wasn't really being used -- now it's either the
+;;;             :   string of the chunk details or nil if the buffer is empty or
+;;;             :   being cleared at that time.
+;;; 2015.06.09 Dan
+;;;             : * Record time in ms internally, but still show seconds to the
+;;;             :   user in the list.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -54,7 +65,7 @@
 ;;; Public API:
 ;;;
 ;;; :save-buffer-history parameter
-;;;  Enables the recording of retrieval history for display (default is nil).
+;;;  Enables the recording of buffer history for display (default is nil).
 ;;;  This will also set the :save-buffer-trace parameter to t if it is not
 ;;;  already set.
 ;;;
@@ -80,7 +91,7 @@
 
 (defstruct buffer-history
   time
-  chunk  ; a string, :cleared, or nil
+  chunk  ; a string or nil
   status ; a string
   )
 
@@ -88,24 +99,20 @@
 (defun equal-history-samples (h1 h2)
   (and h1 h2
        (or (eq (buffer-history-chunk h1) (buffer-history-chunk h2))
-           (and (stringp h1) (stringp h2) (string-equal (buffer-history-chunk h1) (buffer-history-chunk h2))))
+           (and (stringp (buffer-history-chunk h1)) (stringp (buffer-history-chunk h2)) (string-equal (buffer-history-chunk h1) (buffer-history-chunk h2))))
        (string-equal (buffer-history-status h1) (buffer-history-status h2))))
 
 
 (defun buffer-history-recorder (summaries)
   (let ((history (get-module buffer-history))
-        (time (buffer-record-time-stamp summaries)))
+        (time (buffer-record-ms-time summaries)))
       
     (when (and history (buffer-history-module-enabled history))
       (dolist (summary (buffer-record-buffers summaries))
         (let* ((name (buffer-summary-name summary))
                (record (make-buffer-history :time time
-                                            :chunk (cond ((or (buffer-summary-modified summary)
-                                                              (buffer-summary-chunk-name summary))
-                                                          (capture-model-output (buffer-chunk-fct (list name))))
-                                                         ((buffer-summary-cleared summary)
-                                                          :cleared)
-                                                         (t nil))
+                                            :chunk (when (and (not (buffer-summary-cleared summary)) (buffer-read name))
+                                                     (capture-model-output (buffer-chunk-fct (list name))))
                                             :status (capture-model-output (buffer-status-fct (list name))))))
           (unless (equal-history-samples record (car (gethash name (buffer-history-module-table history))))
             (push record (gethash name (buffer-history-module-table history)))))))))
@@ -115,11 +122,12 @@
   (let ((history (get-module buffer-history)))
     (hash-table-keys (buffer-history-module-table history))))
 
-(defun buffer-history-text (time buffer)
-  (if (and time buffer)
+(defun buffer-history-text (time-string buffer)
+  (if (and (> (length time-string) 1) buffer)
       (let ((history (get-module buffer-history)))
         (when history 
-          (let* ((record (find-if (lambda (x) 
+          (let* ((time (read-from-string (remove #\. time-string)))
+                 (record (find-if (lambda (x) 
                                     (<= (buffer-history-time x) time))
                                   (gethash buffer (buffer-history-module-table history))))
                  
@@ -127,13 +135,13 @@
                  (status (when record (buffer-history-status record))))
             
             (concatenate 'string (cond ((and status (stringp status))
-                     status)
+                                        status)
                                        (t "No buffer status information available"))
               
               (string #\newline)
-              (cond ((and chunk (stringp chunk)) 
-                                        chunk)
-                                       (t (format nil "buffer empty~%")))))))
+              (cond ((stringp chunk) 
+                     chunk)
+                    (t (format nil "buffer empty~%")))))))
     ""))
 
 (defun buffer-history-time-list ()
@@ -144,7 +152,7 @@
                    (declare (ignore key))
                    (setf times (append (mapcar 'buffer-history-time value) times)))
                  (buffer-history-module-table history))
-        (sort (remove-duplicates times) #'<)))))
+        (mapcar (lambda (x) (format nil "~/print-time-in-seconds/" x)) (sort (remove-duplicates times) #'<))))))
 
 
 (defun reset-buffer-history-module (module)

@@ -31,6 +31,10 @@ set window_config(.reload_response) \
 set window_config(.stepper) \
     "500x550+[expr $screen_center_x - 250]+[expr $screen_center_y - 275]"
 
+set window_config(.event_queue) \
+    "800x180+[expr $screen_center_x - 400]+[expr $screen_center_y - 90]"
+
+
 set window_config(.tutor_response) \
     "480x130+[expr $screen_center_x - 240]+[expr $screen_center_y - 65]"
 

@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : buffers.lisp
-;;; Version     : 1.2
+;;; Version     : 3.0
 ;;; 
 ;;; Description : Functions that define the operation of buffers.
 ;;; 
@@ -227,6 +227,111 @@
 ;;;             :   of valid-slots since a static chunk doesn't need to be 
 ;;;             :   extended again just because it doesn't currently have such
 ;;;             :   a slot.
+;;; 2013.10.18 Dan
+;;;             : * Changed buffer-spread so that it doesn't have to call sgp
+;;;             :   and no-output.  No need for a module to use the external
+;;;             :   interfaces from an internal function.
+;;; 2014.02.26 Dan [2.0]
+;;;             : * Use the new chunk/chunk-type functions for chunks without
+;;;             :   type information.
+;;; 2014.03.17 Dan
+;;;             : * Test the request parameters up front in a module-request.
+;;; 2014.03.18 Dan
+;;;             : * Let modifications take a chunk-spec or list of mods and 
+;;;             :   always send a chunk-spec to a module for modification requests.
+;;; 2014.03.25 Dan
+;;;             : * Added valid-request-params-for-buffer for production parsing
+;;;             :   to use.
+;;;             : * Added valid-buffer-queries for production parsing too.
+;;; 2014.06.06 Dan
+;;;             : * Fixed the declaim for define-chunk-spec-fct to include the
+;;;             :   optional parameters.
+;;; 2014.11.07 Dan
+;;;             : * Schedule-query-buffer now tests the query spec passed in
+;;;             :   eventhough it's not used.
+;;; 2014.11.12 Dan
+;;;             : * Changed the warning for get-m-buffer-chunks to say buffer set
+;;;             :   for consistency with the docs and other warnings.
+;;; 2014.12.17 Dan
+;;;             : * Changed the declaims for define-*-spec-fct because they
+;;;             :   didn't indicate multiple return values and some Lisps care
+;;;             :   about that.
+;;;             : * Removed the declaim for define-and-extend-chunk-spec-fct 
+;;;             :   since it's not used now.
+;;; 2015.03.18 Dan [2.1]
+;;;             : * Adding a new buffer query value: failure.
+;;;             :   This works with empty and full such that the three are 
+;;;             :   mutially exclusive.  For a buffer to be marked as failure
+;;;             :   requires calling the new set-buffer-failure command which
+;;;             :   will clear the buffer (if it's full) and then set the failure
+;;;             :   flag.  Clearing the buffer will clear the failure flag.
+;;;             :   This is not a replacement for state error/error t because
+;;;             :   those still depend on the module to report the information,
+;;;             :   but presumably any module which sets its internal error flag
+;;;             :   will also set the buffer's flag as well.  
+;;;             :   The reason for adding this is so that a model has a way to
+;;;             :   test and then clear the error without having to make a module
+;;;             :   request to do so (isa clear or other such mechanisms).
+;;; 2015.03.20 Dan
+;;;             : * Added the backward compatability check so that "buffer empty"
+;;;             :   returns true as long as the buffer is empty if back. compat.
+;;;             :   is on.
+;;; 2015.03.23 Dan
+;;;             : * Added two keyword flags for set-buffer-failure to allow it
+;;;             :   to not warn if the buffer is full :ignore-if-full (just ingore 
+;;;             :   setting the flag) default of nil and :requested which sets
+;;;             :   the buffer's act-r-buffer-requested slot to the value and the
+;;;             :   defualt is t.  
+;;;             : * Queries for requested/unrequested now work for either a full
+;;;             :   buffer or one for which the failure flag is set.
+;;; 2015.03.26 Dan
+;;;             : * Check the backward compatibility flag and don't allow the
+;;;             :   requested/unrequested to work with failure in 6.0 mode.
+;;; 2015.06.04 Dan
+;;;             : * Add a :time-in-ms parameter to all the scheduling functions.
+;;; 2015.06.05 Dan
+;;;             : * Use schedule-event-now where appropriate.
+;;; 2015.07.28 Dan
+;;;             : * Removed the *act-r-6.0-compatibility* hack.
+;;; 2015.07.30 Dan
+;;;             : * Changed the declaims for the schedule-* functions to add
+;;;             :   the precondition keyword param.
+;;; 2015.09.09 Dan [3.0]
+;;;             : * Module requests and mod-requests can now be "tracked" by
+;;;             :   the requester if desired.  There's an optional parameter
+;;;             :   in the functions to make the requests and a keyword parameter
+;;;             :   called tracked in the scheduling functions which if specified
+;;;             :   as true will return a spec to the caller which can be used
+;;;             :   to check the completed status of the request.  This means
+;;;             :   that modules now also have to report when they "complete"
+;;;             :   or "finish" the request which could mean various things
+;;;             :   depending on the module i.e. it doesn't have to track the
+;;;             :   busy/free status and could refer to something else if desired
+;;;             :   (like the release of a finger for the keypress extension
+;;;             :   which could span press and release requests).
+;;;             : * When creating a buffer it can be marked as trackable or not.
+;;;             :   If a seventh element in the buffer description list is non-nil
+;;;             :   then the module is responsible for indicating when a request
+;;;             :   to that buffer is "completed".  If the seventh element is nil
+;;;             :   or not provided then all requests to that buffer will be 
+;;;             :   considered as "completed" immediately upon receipt.
+;;;             : * A define-buffer command is now available to replace the 
+;;;             :   buffer definition list.  It has keyword parameters for the
+;;;             :   components and returns an appropriately built list to specify
+;;;             :   the buffer.
+;;; 2015.09.14 Dan
+;;;             : * Changed define-buffer to define-buffer-fct to indicate that
+;;;             :   it is a function, and now providing a macro form as well.
+;;;             : * Also fixed a bug with how it generated the list with respect
+;;;             :   to the parameter and default.
+;;; 2015.12.16 Dan
+;;;             : * The scheduling request functions still need to return the
+;;;             :   event, not just the trackable spec.  So, now they return 2
+;;;             :   values.  The first is the event and the second is the spec
+;;;             :   if the request specified tracking was desired.  Going to
+;;;             :   refer to the returned spec as a "tag" and indcate that the
+;;;             :   representation of a tag is unspecified to avoid confusion
+;;;             :   or abuse and also allow for future changes.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -254,12 +359,17 @@
 
 (declaim (ftype (function () t) show-copy-buffer-trace))
 (declaim (ftype (function () t) current-model))
-(declaim (ftype (function (t t &key (:maintenance t) (:module t) (:destination t) (:priority t) (:params t) (:details t) (:output t) (:time-in-ms t)) t) schedule-event-relative))
+(declaim (ftype (function (t t &key (:maintenance t) (:module t) (:destination t) (:priority t) (:params t) (:details t) (:output t) (:time-in-ms t) (:precondition t)) t) schedule-event-relative))
+(declaim (ftype (function (t &key (:maintenance t) (:module t) (:destination t) (:priority t) (:params t) (:details t) (:output t) (:precondition t)) t) schedule-event-now))
+(declaim (ftype (function (t &optional t t) (values t t)) define-chunk-spec-fct))
+(declaim (ftype (function (t) (values t t)) define-query-spec-fct))
+(declaim (ftype (function (t t)) track-request))
+
+
+(suppress-extension-warnings)
 
 ;; Flag to prevent a chunk that's been cleared from a buffer set being 
 ;; put back into one.
-
-(suppress-extension-warnings)
 
 (extend-chunks buffer-set-invalid)
 (unsuppress-extension-warnings)
@@ -279,6 +389,25 @@
     (declare (ignore buffer))
     present))
 
+(defmacro define-buffer (name &key param-name param-default request-params queries status-fn search multi copy trackable)
+  `(define-buffer-fct ',name :param-name ',param-name :param-default ',param-default
+     :request-params ',request-params :queries ',queries :status-fn ',status-fn :search ',search
+     :multi ',multi :copy ',copy :trackable ',trackable))
+
+(defun define-buffer-fct (name &key param-name param-default request-params queries status-fn search multi copy trackable)
+  (list name (if param-name 
+                 (list param-name param-default) 
+               (if param-default 
+                   (list (read-from-string (format nil ":~S-activation" name)) param-default) 
+                 nil))
+        request-params queries status-fn 
+        (cond ((and search copy) :search-copy)
+              (search :search)
+              ((and multi copy) :multi-copy)
+              (multi :multi)
+              (t nil))
+        trackable))
+
 (defun parse-buffers (buffer-list)
   (let ((res nil))
     (dolist (buffer-def buffer-list res)
@@ -295,8 +424,8 @@
           (when (eql #\> (aref sym (1- (length sym))))
             (print-warning "Buffer name ~s is not valid because a buffer name must not end with the character '>'" name)
             (return-from parse-buffers :error))
-          (when (eql #\= (aref sym 0))
-            (print-warning "Buffer name ~s is not valid because a buffer name must not start with the character '='" name)
+          (unless (alphanumericp (char sym 0))
+            (print-warning "Buffer name ~s is not valid because a buffer name must not start with an alphanumeric character" name)
             (return-from parse-buffers :error))))
 
       (cond ((or (atom buffer-def)
@@ -318,12 +447,11 @@
                   (buffer-exists (car buffer-def)))
              (print-warning "Buffer name ~S already used, cannot reuse it.")
              (return-from parse-buffers :error))
-            
             ((not (listp buffer-def))
              (print-warning "Invalid buffer specification: ~S" buffer-def)
              (return-from parse-buffers :error))
 
-            ((<= (length buffer-def) 6)
+            ((<= (length buffer-def) 7)
              (let (param-name param-default requests queries print-status multi searchable
                    (copy t))
                (if (and (second buffer-def) (listp (second buffer-def)))
@@ -346,16 +474,16 @@
                         (return-from parse-buffers :error))))
                (when (third buffer-def)
                  (cond ((and (listp (third buffer-def))
-                             (every #'keywordp (third buffer-def)))
+                             (every 'keywordp (third buffer-def)))
                         (setf requests (third buffer-def)))
                        (t
                         (print-warning "Invalid buffer specification: ~S" buffer-def)
                         (return-from parse-buffers :error))))
                (when (fourth buffer-def)
                  (cond ((and (listp (fourth buffer-def))
-                             (every #'(lambda (x) 
-                                        (and (symbolp x) (not (keywordp x))
-                                             (not (find x *required-buffer-queries*))))
+                             (every (lambda (x) 
+                                      (and (symbolp x) (not (keywordp x))
+                                           (not (find x *required-buffer-queries*))))
                                     (fourth buffer-def)))
                         (setf queries (fourth buffer-def)))
                        (t
@@ -386,12 +514,11 @@
                     (print-warning "Invalid multi-buffer specification ~S for buffer ~s." buffer-def (first buffer-def))
                     (return-from parse-buffers :error))))
                    
-
                
                (when (valid-parameter-name param-name) 
                  (print-warning "Buffer spread parameter ~S is already the name of a parameter." param-name)
                  (return-from parse-buffers :error))
-                                
+               
                (push (make-act-r-buffer 
                       :name (first buffer-def)
                       :queries (append queries *required-buffer-queries*)
@@ -403,7 +530,9 @@
                       :searchable searchable
                       :copy copy
                       :chunk-set (make-hash-table :test 'eq :size 5)
-                      :requested nil)
+                      :requested nil
+                      :flags nil
+                      :trackable (seventh buffer-def))
                      res)))
             (t
              (print-warning "Invalid buffer specification: ~S" buffer-def)
@@ -417,13 +546,12 @@
     (setf (act-r-buffer-module buffer) module-name)
     (install-parameters 'buffer-params 
                         (list (define-parameter (act-r-buffer-parameter-name buffer)
-                                  :owner t :valid-test #'numberp
+                                  :owner t :valid-test 'numberp
                                   :default-value (if (null (act-r-buffer-spread buffer))
                                                      0
                                                    (act-r-buffer-spread buffer))
                                   :warning "a number"
-                                  :documentation (format nil "source spread for the ~S buffer" 
-                                                 (act-r-buffer-name buffer)))))))
+                                  :documentation (format nil "source spread for the ~S buffer" (act-r-buffer-name buffer)))))))
 
 
 (defun uninstall-buffers (buffers)
@@ -497,7 +625,7 @@
       (cond ((null buffer)
              (print-warning "get-m-buffer-chunks called with an invalid buffer name ~S" buffer-name))
             ((null (act-r-buffer-multi buffer))
-             (print-warning "get-m-buffer-chunks cannot return a chunk set for buffer ~s because it is not a multi-buffer" buffer-name))
+             (print-warning "get-m-buffer-chunks cannot return a buffer set for buffer ~s because it is not a multi-buffer" buffer-name))
             (t
              (hash-table-keys (act-r-buffer-chunk-set buffer))))))))
 
@@ -566,28 +694,20 @@
    (verify-current-model
     "buffer-status called with no current model."
     (let ((res nil))
-      (dolist (buffer-name (if buffer-names-list
-                               buffer-names-list
-                             (buffers))
-                           res)
+      (dolist (buffer-name (aif buffer-names-list it (buffers)) res)
         (let ((buffer (buffer-instance buffer-name)))
           (if buffer
               (progn
                 (command-output "~S:" buffer-name)
-                (command-output "  buffer empty          : ~S"
-                                (query-buffer buffer-name '((buffer . empty))))
-                (command-output "  buffer full           : ~S"
-                                (query-buffer buffer-name '((buffer . full))))
-                (command-output "  buffer requested      : ~S"
-                                (query-buffer buffer-name '((buffer . requested))))
-                (command-output "  buffer unrequested    : ~S"
-                                (query-buffer buffer-name '((buffer . unrequested))))
-                (command-output "  state free            : ~S"
-                                (query-buffer buffer-name '((state . free))))
-                (command-output "  state busy            : ~S"
-                                (query-buffer buffer-name '((state . busy))))
-                (command-output "  state error           : ~S"
-                                (query-buffer buffer-name '((state . error))))
+                (command-output "  buffer empty          : ~S"  (query-buffer buffer-name '(buffer empty)))
+                (command-output "  buffer full           : ~S"  (query-buffer buffer-name '(buffer full)))
+                (command-output "  buffer failure        : ~S"  (query-buffer buffer-name '(buffer failure)))
+                
+                (command-output "  buffer requested      : ~S"  (query-buffer buffer-name '(buffer requested)))
+                (command-output "  buffer unrequested    : ~S"  (query-buffer buffer-name '(buffer unrequested)))
+                (command-output "  state free            : ~S"  (query-buffer buffer-name '(state free)))
+                (command-output "  state busy            : ~S"  (query-buffer buffer-name '(state busy)))
+                (command-output "  state error           : ~S"  (query-buffer buffer-name '(state error)))
                 
                 (awhen (act-r-buffer-status-printing buffer)
                        (funcall it))
@@ -606,7 +726,7 @@
         (print-warning "Buffer-read called with an invalid buffer name ~S" buffer-name))))))
 
 
-(defun schedule-buffer-read (buffer-name time-delta &key (module :none) (priority 0) (output t))
+(defun schedule-buffer-read (buffer-name time-delta &key (module :none) (priority 0) (output t) time-in-ms)
   (verify-current-mp  
    "schedule-buffer-read called with no current meta-process."
    (verify-current-model
@@ -620,6 +740,7 @@
              (print-warning "schedule-buffer-read called with an invalid priority ~S" priority))
             (t
              (schedule-event-relative time-delta 'buffer-read-action 
+                                      :time-in-ms time-in-ms
                                       :module module
                                       :priority priority 
                                       :params (list buffer-name)
@@ -635,11 +756,11 @@
       (cond ((null buffer)
              (print-warning "buffer-read-report called with an invalid buffer name ~S" buffer-name))
             (t
-             (schedule-event-relative 0 'buffer-read-action 
-                                      :module module
-                                      :priority :max 
-                                      :params (list buffer-name)
-                                      :output t)
+             (schedule-event-now 'buffer-read-action 
+                                 :module module
+                                 :priority :max 
+                                 :params (list buffer-name)
+                                 :output t)
              (act-r-buffer-chunk buffer)))))))
 
 
@@ -647,102 +768,91 @@
   (declare (ignore buffer-name)))
 
 
-(defun query-buffer (buffer-name queries-list)
+(defun query-buffer (buffer-name queries-list-or-spec)
   (verify-current-mp  
    "query-buffer called with no current meta-process."
    (verify-current-model
     "query-buffer called with no current model."
     (let ((buffer (buffer-instance buffer-name)))
-      (cond ((null buffer)
-             (print-warning "query-buffer called with an invalid buffer name ~S" buffer-name))
-            ((not (every #'(lambda (x)
-                             (member (car x) (act-r-buffer-queries buffer)))
-                         queries-list))
-             (print-warning "Invalid query-buffer ~S.  Available queries to buffer ~S are ~S."
-                            queries-list buffer-name (act-r-buffer-queries buffer)))
-            (t
-             (do ((module (act-r-buffer-module buffer))
-                  (queries queries-list (cdr queries)))
-                 ((null queries) t)
-               (cond ((eq (caar queries) 'buffer)
-                      (case (cdar queries) 
-                        (full 
-                         (when (null (act-r-buffer-chunk buffer))
-                           (return-from query-buffer nil)))
-                        (empty
-                         (unless (null (act-r-buffer-chunk buffer))
-                           (return-from query-buffer nil)))
-                        (requested
-                         (when (or (null (act-r-buffer-chunk buffer))
-                                   (null (act-r-buffer-requested buffer)))
-                           (return-from query-buffer nil)))
-                        (unrequested
-                         (unless (and (act-r-buffer-chunk buffer)
-                                      (null (act-r-buffer-requested buffer)))
-                           (return-from query-buffer nil)))
-                        (t
-                         (model-warning "Unknown buffer query ~S" (cdar queries))
-                         (return-from query-buffer nil))))
-                     (t
-                      (unless (query-module module buffer-name (caar queries) (cdar queries))
-                   (return-from query-buffer nil)))))))))))
-                                              
+      (if (null buffer)
+          (print-warning "query-buffer called with an invalid buffer name ~S" buffer-name)
+        (let ((query-spec (query-list-or-spec->valid-query-spec queries-list-or-spec)))
+          (cond ((not (act-r-chunk-spec-p query-spec))
+                 (print-warning "Invalid query-buffer of buffer ~s with queries-list-or-spec ~s" buffer-name queries-list-or-spec))
+                ((not (every (lambda (x)
+                               (member (act-r-slot-spec-name x) (act-r-buffer-queries buffer)))
+                             (act-r-chunk-spec-slots query-spec)))
+                 (print-warning "Invalid query-buffer ~S.  Available queries to buffer ~S are ~S." queries-list-or-spec buffer-name (act-r-buffer-queries buffer)))
+                (t
+                 (do ((module (act-r-buffer-module buffer))
+                      (queries (act-r-chunk-spec-slots query-spec) (cdr queries)))
+                     ((null queries) t)
+                   (let* ((test (act-r-slot-spec-modifier (car queries)))
+                          (query (act-r-slot-spec-name (car queries)))
+                          (value (act-r-slot-spec-value (car queries)))
+                          (result (cond ((eq query 'buffer)
+                                         (case value 
+                                           ;; full, empty, and failure are
+                                           ;; mutially exclusive.  Full doesn't
+                                           ;; need to check the failure flag because
+                                           ;; it gets cleared automatically when a
+                                           ;; chunk is set in the buffer.  Empty needs
+                                           ;; to check however since the flag may or
+                                           ;; may not be set when it's empty.  
+                                           ;;
+                                           ;; But if backward compatibility is on empty 
+                                           ;; needs to return true regardless of the
+                                           ;; failure flag.
+                                           
+                                           ;; requested/unrequested can now also be set
+                                           ;; when there's a failure.  
+                                           ;; Not currently used by the modules, but the
+                                           ;; idea is to flag when it's an unrequested
+                                           ;; error incase the model cares i.e. a visual
+                                           ;; reencoding which finds nothing.
+                                           
+                                           (full (act-r-buffer-chunk buffer))
+                                           (empty (not (or (act-r-buffer-chunk buffer) (find :failure (act-r-buffer-flags buffer)))))
+                                           (failure (find :failure (act-r-buffer-flags buffer)))
+                                                                                      
+                                           (requested (and (or (act-r-buffer-chunk buffer) (find :failure (act-r-buffer-flags buffer)))
+                                                           (act-r-buffer-requested buffer)))
+                                           (unrequested (and (or (act-r-buffer-chunk buffer) (find :failure (act-r-buffer-flags buffer)))
+                                                             (null (act-r-buffer-requested buffer))))
+                                           (t 
+                                            (model-warning "Unknown buffer query for 'buffer ~S'" value)
+                                            (return-from query-buffer nil))))
+                                        (t (query-module module buffer-name query value)))))
+                     (when (or (and (eql test '=) (null result))
+                               (and (eql test '-) result))
+                       (return-from query-buffer nil))))))))))))
 
-(defun schedule-query-buffer (buffer-name queries-list time-delta &key (module :none) (priority 0) (output t))
+(defun schedule-query-buffer (buffer-name queries-list-or-spec time-delta &key (module :none) (priority 0) (output t) time-in-ms)
   (verify-current-mp  
    "schedule-query-buffer called with no current meta-process."
    (verify-current-model
     "schedule-query-buffer called with no current model."
-    (let ((buffer (buffer-instance buffer-name)))
-      (cond ((null buffer)
+    (let ((buffer (buffer-instance buffer-name))
+          (query-spec (query-list-or-spec->valid-query-spec queries-list-or-spec)))
+      (cond ((not (act-r-chunk-spec-p query-spec))
+             (print-warning "schedule-query-buffer called with an invalid query specification ~s" queries-list-or-spec))
+            ((null buffer)
              (print-warning "schedule-query-buffer called with an invalid buffer name ~S" buffer-name))
             ((not (numberp time-delta))
-             (print-warning "schedule-query-buffer called with non-nimber time-delta: ~S" time-delta))
+             (print-warning "schedule-query-buffer called with non-number time-delta: ~S" time-delta))
             ((and (not (numberp priority)) (not (eq priority :max)) (not (eq priority :min)))
              (print-warning "schedule-query-buffer called with an invalid priority ~S" priority))
             (t
              (schedule-event-relative time-delta 'query-buffer-action 
+                                      :time-in-ms time-in-ms
                                       :module module
                                       :priority priority 
-                                      :params (list buffer-name queries-list)
-                                      :details
-                                      (concatenate 'string
-                                        (symbol-name 'query-buffer-action)
-                                        " "
-                                        (symbol-name buffer-name))
+                                      :params (list buffer-name queries-list-or-spec)
+                                      :details (concatenate 'string (symbol-name 'query-buffer-action) " " (symbol-name buffer-name))
                                       :output output)))))))
-
-
-(defun query-buffer-report (buffer-name queries-list &key (module :none))
-  (verify-current-mp  
-   "query-buffer-report called with no current meta-process."
-   (verify-current-model
-    "query-buffer-report called with no current model."
-    (let ((buffer (buffer-instance buffer-name)))
-      (cond ((null buffer)
-             (print-warning "query-buffer-report called with an invalid buffer name ~S" buffer-name))
-            ((not (every #'(lambda (x)
-                             (member (car x) (act-r-buffer-queries buffer)))
-                         queries-list))
-             (print-warning "Invalid query-buffer ~S.  Available queries to buffer ~S are ~S."
-                            queries-list buffer-name (act-r-buffer-queries buffer)))
-            (t
-             (schedule-event-relative 0 'query-buffer-action 
-                                      :module module
-                                      :priority :max 
-                                      :params (list buffer-name queries-list)
-                                      :details 
-                                      (concatenate 'string
-                                        (symbol-name 'query-buffer-action)
-                                        " "
-                                        (symbol-name buffer-name))
-                                      :output t)
-             (query-buffer buffer-name queries-list)))))))
-
 
 (defun query-buffer-action (buffer-name queries)
   (declare (ignore buffer-name queries)))
-
 
 (defun clear-buffer (buffer-name)
   (verify-current-mp  
@@ -753,6 +863,8 @@
       (cond ((null buffer)
              (print-warning "clear-buffer called with an invalid buffer name ~S" buffer-name))
             (t
+             ;; clearing the buffer clears all the flags
+             (setf (act-r-buffer-flags buffer) nil)
              (let ((chunk (act-r-buffer-chunk buffer)))
                (when chunk
                  (setf (act-r-buffer-chunk buffer) nil)
@@ -765,7 +877,7 @@
                chunk)))))))
 
 
-(defun schedule-clear-buffer (buffer-name time-delta &key (module :none) (priority 0) (output 'low))
+(defun schedule-clear-buffer (buffer-name time-delta &key (module :none) (priority 0) (output 'low) time-in-ms)
   (verify-current-mp  
    "schedule-clear-buffer called with no current meta-process."
    (verify-current-model
@@ -779,6 +891,7 @@
              (print-warning "schedule-clear-buffer called with an invalid priority ~S" priority))
             (t
              (schedule-event-relative time-delta 'clear-buffer 
+                                      :time-in-ms time-in-ms
                                       :module module
                                       :priority priority 
                                       :params (list buffer-name)
@@ -794,8 +907,27 @@
       (if (null buffer)
           (print-warning "erase-buffer called with an invalid buffer name ~S" buffer-name)
         (let ((chunk (act-r-buffer-chunk buffer)))
+          ;; erasing the buffer also clears all the flags
+          (setf (act-r-buffer-flags buffer) nil)
           (setf (act-r-buffer-chunk buffer) nil)
           chunk))))))
+
+
+(defun set-buffer-failure (buffer-name &key (ignore-if-full nil) (requested t))
+  (verify-current-mp  
+   "set-buffer-failure called with no current meta-process."
+   (verify-current-model
+    "set-buffer-failure called with no current model."
+    (let ((buffer (buffer-instance buffer-name)))
+      (if (null buffer)
+          (print-warning "set-buffer-failure called with an invalid buffer name ~S" buffer-name)
+        (if (act-r-buffer-chunk buffer)
+            (unless ignore-if-full
+              (print-warning "cannot set the failure flag when there is a chunk in the ~s buffer" buffer-name))
+          (progn
+            (pushnew :failure (act-r-buffer-flags buffer))
+            (setf (act-r-buffer-requested buffer) requested)
+            t)))))))
 
 (defun set-buffer-chunk (buffer-name chunk-name &key (requested t))
   "Forces a copy unless it's a multi-buffer and this chunk is in the set"
@@ -816,17 +948,21 @@
                                   (copy-chunk-fct chunk-name)
                                 chunk-name)))
                (when (and (show-copy-buffer-trace) (not (eq copy-name chunk-name)))
-                 (schedule-event-relative 0 'show-buffer-copy :maintenance t :module 'buffer 
-                                          :priority :max 
-                                          :details (concatenate 'string "Buffer " (string buffer-name) " copied chunk " (string chunk-name) " to " (string copy-name)) 
-                                          :output 'medium))
+                 (schedule-event-now 'show-buffer-copy :maintenance t :module 'buffer 
+                                     :priority :max 
+                                     :details (concatenate 'string "Buffer " (string buffer-name) " copied chunk " (string chunk-name) " to " (string copy-name)) 
+                                     :output 'medium))
+               
+               ;; setting the buffer clears the failure flag
+               (setf (act-r-buffer-flags buffer) (remove :failure (act-r-buffer-flags buffer)))
+         
                (setf (act-r-buffer-chunk buffer) copy-name))))))))
 
 
 ;; A dummy function for the event action
 (defun show-buffer-copy ())
 
-(defun schedule-set-buffer-chunk (buffer-name chunk-name time-delta &key (module :none) (priority 0) (output 'low) (requested t))
+(defun schedule-set-buffer-chunk (buffer-name chunk-name time-delta &key (module :none) (priority 0) (output 'low) (requested t) time-in-ms)
   (verify-current-mp  
    "set-buffer-chunk called with no current meta-process."
    (verify-current-model
@@ -842,6 +978,7 @@
              (print-warning "schedule-set-buffer-chunk called with an invalid priority ~S" priority))
             (t
              (schedule-event-relative time-delta 'set-buffer-chunk 
+                                      :time-in-ms time-in-ms
                                       :module module
                                       :priority priority 
                                       :params (if requested
@@ -867,14 +1004,14 @@
                                   (copy-chunk-fct chunk-name)
                                 chunk-name)))
                (when (and (show-copy-buffer-trace) (not (eq copy-name chunk-name)))
-                 (schedule-event-relative 0 'show-buffer-copy :maintenance t :module 'buffer 
-                                          :priority :max 
-                                          :details (concatenate 'string "Buffer " (string buffer-name) " copied chunk " (string chunk-name) " to " (string copy-name)) 
-                                          :output 'medium))
+                 (schedule-event-now 'show-buffer-copy :maintenance t :module 'buffer 
+                                     :priority :max 
+                                     :details (concatenate 'string "Buffer " (string buffer-name) " copied chunk " (string chunk-name) " to " (string copy-name)) 
+                                     :output 'medium))
                (setf (act-r-buffer-chunk buffer) copy-name))))))))
 
 
-(defun schedule-overwrite-buffer-chunk (buffer-name chunk-name time-delta &key (module :none) (priority 0) (output 'low) (requested nil))
+(defun schedule-overwrite-buffer-chunk (buffer-name chunk-name time-delta &key (module :none) (priority 0) (output 'low) (requested nil) time-in-ms)
   (verify-current-mp  
    "overwrite-buffer-chunk called with no current meta-process."
    (verify-current-model
@@ -890,6 +1027,7 @@
              (print-warning "schedule-overwrite-buffer-chunk called with an invalid priority ~S" priority))
             (t
              (schedule-event-relative time-delta  'overwrite-buffer-chunk 
+                                      :time-in-ms time-in-ms
                                       :module module
                                       :priority priority 
                                       :params (if requested
@@ -898,7 +1036,7 @@
                                       :output output)))))))
 
 
-(defun module-warning (buffer-name chunk-type)
+(defun module-warning (buffer-name chunk-spec)
   (verify-current-mp  
    "module-warning called with no current meta-process."
    (verify-current-model
@@ -906,10 +1044,10 @@
     (let ((buffer (buffer-instance buffer-name)))
       (cond ((null buffer)
              (print-warning "module-warning called with an invalid buffer name ~S" buffer-name))
-            ((null (chunk-type-p-fct chunk-type))
-             (print-warning "module-warning called with an invalid chunk-type ~S" chunk-type))
+            ((null (act-r-chunk-spec-p chunk-spec))
+             (print-warning "module-warning called with an invalid chunk-spec ~S" chunk-spec))
             (t
-             (warn-module (act-r-buffer-module buffer) buffer-name chunk-type)))))))
+             (warn-module (act-r-buffer-module buffer) buffer-name chunk-spec)))))))
 
 
 (defun require-module-warning? (buffer-name)
@@ -924,7 +1062,7 @@
              (warn-module? (act-r-buffer-module buffer))))))))
 
 
-(defun module-request (buffer-name chunk-spec)
+(defun module-request (buffer-name chunk-spec &optional track)
   (verify-current-mp  
    "module-request called with no current meta-process."
    (verify-current-model
@@ -934,11 +1072,20 @@
              (print-warning "module-request called with an invalid buffer name ~S" buffer-name))
             ((null (act-r-chunk-spec-p chunk-spec))
              (print-warning "module-request called with an invalid chunk-spec ~S" chunk-spec))
+            ((not (zerop (logandc2 (act-r-chunk-spec-request-param-slots chunk-spec) (act-r-buffer-requests-mask buffer))))
+             (print-warning "module-request to buffer ~s has invalid request parameters ~{~S~^, ~}" buffer-name
+                          (slot-mask->names (logandc2 (act-r-chunk-spec-request-param-slots chunk-spec) (act-r-buffer-requests-mask buffer)))))  
             (t
-             (request-module (act-r-buffer-module buffer) buffer-name chunk-spec)))))))
+             (if track
+                 (let* ((new-spec (copy-act-r-chunk-spec chunk-spec))
+                        (result (request-module (act-r-buffer-module buffer) buffer-name new-spec)))
+                   (track-request buffer new-spec)
+                   (values result new-spec))
+               (progn
+                 (request-module (act-r-buffer-module buffer) buffer-name chunk-spec)))))))))
 
 
-(defun schedule-module-request (buffer-name chunk-spec time-delta &key (module :none) (priority 0) (output 'medium) (details nil))
+(defun schedule-module-request (buffer-name chunk-spec time-delta &key (module :none) (priority 0) (output 'medium) (details nil) time-in-ms track)
   (verify-current-mp  
    "schedule-module-request called with no current meta-process."
    (verify-current-model
@@ -952,18 +1099,36 @@
              (print-warning "schedule-module-request called with a non-number time-delta: ~S" time-delta))
             ((and (not (numberp priority)) (not (eq priority :max)) (not (eq priority :min)))
              (print-warning "schedule-module-request called with an invalid priority ~S" priority))
+            ((not (zerop (logandc2 (act-r-chunk-spec-request-param-slots chunk-spec) (act-r-buffer-requests-mask buffer))))
+             (print-warning "module-request to buffer ~s has invalid request parameters ~{~S~^, ~}" buffer-name
+                            (slot-mask->names (logandc2 (act-r-chunk-spec-request-param-slots chunk-spec) (act-r-buffer-requests-mask buffer)))))
             (t
-             (schedule-event-relative time-delta  'module-request 
-                                      :module module
-                                      :priority priority 
-                                      :params (list buffer-name chunk-spec)
-                                      :details
-                                      (if (stringp details)
-                                          details
-                                        (concatenate 'string (symbol-name 'module-request) " " (symbol-name buffer-name)))
-                                      :output output)))))))
+             (if track
+                 (let* ((new-spec (copy-act-r-chunk-spec chunk-spec))
+                        (result (schedule-event-relative time-delta  'module-request 
+                                                         :time-in-ms time-in-ms
+                                                         :module module
+                                                         :priority priority 
+                                                         :params (list buffer-name new-spec)
+                                                         :details
+                                                         (if (stringp details)
+                                                             details
+                                                           (concatenate 'string (symbol-name 'module-request) " " (symbol-name buffer-name)))
+                                                         :output output)))
+                   (track-request buffer new-spec)
+                   (values result new-spec))
+               (schedule-event-relative time-delta  'module-request 
+                                          :time-in-ms time-in-ms
+                                          :module module
+                                          :priority priority 
+                                          :params (list buffer-name chunk-spec)
+                                          :details
+                                          (if (stringp details)
+                                              details
+                                            (concatenate 'string (symbol-name 'module-request) " " (symbol-name buffer-name)))
+                                          :output output))))))))
 
-(defun module-mod-request (buffer-name modification &optional (verify t))
+(defun module-mod-request (buffer-name mod-list-or-spec &optional track)
   (verify-current-mp  
    "module-mod-request called with no current meta-process."
    (verify-current-model
@@ -973,13 +1138,22 @@
              (print-warning "module-mod-request called with an invalid buffer name ~S" buffer-name))
             ((null (act-r-buffer-chunk buffer))
              (print-warning "module-mod-request called with no chunk in buffer ~s" buffer-name))
-            ((and verify 
-                  (null (valid-chunk-modification (act-r-buffer-chunk buffer) modification)))
-             (print-warning "module-mod-request called with an invalid modification ~S" modification))
             (t
-             (buffer-mod-module (act-r-buffer-module buffer) buffer-name modification)))))))
+             (let ((spec (mod-list-or-spec->valid-mod-spec mod-list-or-spec)))
+               (cond ((null spec)
+                      (print-warning "module-mod-request called with an invalid modification ~s" mod-list-or-spec))
+                     ((not (zerop (logandc2 (act-r-chunk-spec-request-param-slots spec) (act-r-buffer-requests-mask buffer))))
+                      (print-warning "module-mod-request to buffer ~s has invalid request parameters ~{~S~^, ~}" buffer-name
+                            (slot-mask->names (logandc2 (act-r-chunk-spec-request-param-slots spec) (act-r-buffer-requests-mask buffer)))))
+                     (t
+                      (if track
+                          (let* ((new-spec (copy-act-r-chunk-spec spec))
+                                 (result (buffer-mod-module (act-r-buffer-module buffer) buffer-name new-spec)))
+                            (track-request buffer new-spec)
+                            (values result new-spec))
+                        (buffer-mod-module (act-r-buffer-module buffer) buffer-name spec)))))))))))
 
-(defun schedule-module-mod-request (buffer-name modification time-delta &key (module :none) (priority 0) (output 'medium) (verify t))
+(defun schedule-module-mod-request (buffer-name mod-list-or-spec time-delta &key (module :none) (priority 0) (output 'medium) time-in-ms track)
   (verify-current-mp  
    "schedule-module-mod-request called with no current meta-process."
    (verify-current-model
@@ -989,24 +1163,61 @@
              (print-warning "schedule-module-mod-request called with invalid buffer name ~S" buffer-name))
             ((null (act-r-buffer-chunk buffer))
              (print-warning "schedule-module-mod-request called with no chunk in buffer ~s" buffer-name))
-            ((and verify
-                  (null (valid-chunk-modification (act-r-buffer-chunk buffer) modification)))
-             (print-warning "schedule-module-mod-request called with an invalid modification ~S" modification))
-            ((not (numberp time-delta))
-             (print-warning "~s called with a non-number time-delta: ~S" 'schedule-module-mod-request time-delta))
-            ((and (not (numberp priority)) (not (eq priority :max)) (not (eq priority :min)))
-             (print-warning "schedule-module-mod-request called with an invalid priority ~S" priority))
             (t
-             (schedule-event-relative time-delta  'module-mod-request 
-                                      :module module
-                                      :priority priority 
-                                      :params (list buffer-name modification verify)
-                                      :details
-                                      (concatenate 'string (symbol-name 'module-mod-request) " " (symbol-name buffer-name))
-                                      :output output)))))))
+             (let ((spec (mod-list-or-spec->valid-mod-spec mod-list-or-spec)))
+               (cond ((null spec)
+                      (print-warning "schedule-module-mod-request called with an invalid modification ~s" mod-list-or-spec))
+                     ((not (zerop (logandc2 (act-r-chunk-spec-request-param-slots spec) (act-r-buffer-requests-mask buffer))))
+                      (print-warning "module-mod-request to buffer ~s has invalid request parameters ~{~S~^, ~}" buffer-name
+                                     (slot-mask->names (logandc2 (act-r-chunk-spec-request-param-slots spec) (act-r-buffer-requests-mask buffer)))))
+                     ((not (numberp time-delta))
+                      (print-warning "schedule-module-mod-request called with a non-number time-delta: ~S" time-delta))
+                     ((and (not (numberp priority)) (not (eq priority :max)) (not (eq priority :min)))
+                      (print-warning "schedule-module-mod-request called with an invalid priority ~S" priority))
+                     (t
+                      (if track
+                          (let* ((new-spec (copy-act-r-chunk-spec spec))
+                                 (result (schedule-event-relative time-delta  'module-mod-request 
+                                                                  :time-in-ms time-in-ms
+                                                                  :module module
+                                                                  :priority priority 
+                                                                  :params (list buffer-name new-spec)
+                                                                  :details
+                                                                  (concatenate 'string (symbol-name 'module-mod-request) " " (symbol-name buffer-name))
+                                                                  :output output)))
+                            (track-request buffer new-spec)
+                            (values result new-spec))
+                        (schedule-event-relative time-delta  'module-mod-request 
+                                                 :time-in-ms time-in-ms
+                                                 :module module
+                                                 :priority priority 
+                                                 :params (list buffer-name spec)
+                                                 :details
+                                                 (concatenate 'string (symbol-name 'module-mod-request) " " (symbol-name buffer-name))
+                                                 :output output)))))))))))
+  
 
 
-(defun mod-buffer-chunk (buffer-name modifications)
+(defun mod-list-or-spec->valid-mod-spec (list-or-spec)
+  (if (act-r-chunk-spec-p list-or-spec)
+      (and
+       (zerop (act-r-chunk-spec-duplicate-slots list-or-spec))
+       (zerop (act-r-chunk-spec-negated-slots list-or-spec))
+       (zerop (act-r-chunk-spec-relative-slots list-or-spec))
+       list-or-spec)
+    (awhen (and (listp list-or-spec) (define-chunk-spec-fct list-or-spec))
+           (mod-list-or-spec->valid-mod-spec it))))
+
+(defun query-list-or-spec->valid-query-spec (list-or-spec)
+  (if (act-r-chunk-spec-p list-or-spec)
+      (and
+       (zerop (act-r-chunk-spec-relative-slots list-or-spec))
+       (null (act-r-chunk-spec-slot-vars list-or-spec))
+       list-or-spec)
+    (awhen (and (listp list-or-spec) (define-query-spec-fct list-or-spec))
+           (query-list-or-spec->valid-query-spec it))))
+
+(defun mod-buffer-chunk (buffer-name mod-list-or-spec)
   (verify-current-mp  
    "mod-buffer-chunk called with no current meta-process."
    (verify-current-model
@@ -1016,13 +1227,15 @@
              (print-warning "mod-buffer-chunk called with an invalid buffer name ~S" buffer-name))
             ((null (act-r-buffer-chunk buffer))
              (print-warning "mod-buffer-chunk called with no chunk in buffer ~s" buffer-name))
-            ((null (valid-chunk-modification (act-r-buffer-chunk buffer) modifications))
-             (print-warning "mod-buffer-chunk called with an invalid modification ~S" modifications))
-            (t 
-             (fast-mod-chunk-fct (act-r-buffer-chunk buffer) modifications)))))))
+            (t
+             (let ((spec (mod-list-or-spec->valid-mod-spec mod-list-or-spec)))
+               (cond ((null spec)
+                      (print-warning "mod-buffer-chunk called with an invalid modification ~s" mod-list-or-spec))
+                     (t
+                      (mod-chunk-with-spec-fct (act-r-buffer-chunk buffer) spec))))))))))
             
 
-(defun schedule-mod-buffer-chunk (buffer-name modifications time-delta &key (module :none) (priority 0) (output 'low) (extend nil))
+(defun schedule-mod-buffer-chunk (buffer-name mod-list-or-spec time-delta &key (module :none) (priority 0) (output 'low) time-in-ms)
   (verify-current-mp  
    "schedule-mod-buffer-chunk called with no current meta-process."
    (verify-current-model
@@ -1032,75 +1245,23 @@
              (print-warning "schedule-mod-buffer-chunk called with an invalid buffer name ~S" buffer-name))
             ((null (act-r-buffer-chunk buffer))
              (print-warning "schedule-mod-buffer-chunk called with no chunk in buffer ~s" buffer-name))
-            ((or (oddp (length modifications))
-                 (and (null extend) (null (valid-chunk-modification (act-r-buffer-chunk buffer) modifications))))
-             (print-warning "schedule-mod-buffer-chunk called with an invalid modification ~S" modifications))
             ((not (numberp time-delta))
              (print-warning "schedule-mod-buffer-chunk called with non-number time-delta: ~S" time-delta))
             ((and (not (numberp priority)) (not (eq priority :max)) (not (eq priority :min)))
              (print-warning "schedule-mod-buffer-chunk called with an invalid priority ~S" priority))
             (t
-             (unless (valid-chunk-modification (act-r-buffer-chunk buffer) modifications)
-               (if (eq priority :max)
-                   (progn ;; have to do it directly since the scheduling 
-                     ;; won't guarantee the order, but still schedule an event
-                     ;; just to show it.
-                     (extend-buffer-chunk buffer-name modifications)
-                     (schedule-event-relative time-delta 'extend-buffer-chunk
-                                        :module module
-                                        :priority priority
-                                        :params (list buffer-name modifications)
-                                        :details (concatenate 'string (symbol-name 'extending-chunk-type) 
-                                                     " " (symbol-name (chunk-chunk-type-fct (act-r-buffer-chunk buffer))))
-                                        :output output))
-                 (schedule-event-relative time-delta 'extend-buffer-chunk
-                                        :module module
-                                        :priority (if (numberp priority) (1+ priority) 0)
-                                        :params (list buffer-name modifications)
-                                          :details (concatenate 'string (symbol-name 'extending-chunk-type) 
-                                                     " " (symbol-name (chunk-chunk-type-fct (act-r-buffer-chunk buffer))))
-                                          :output output)))
-             (schedule-event-relative time-delta  'mod-buffer-chunk 
-                                      :module module
-                                      :priority priority 
-                                      :params (list buffer-name modifications)
-                                      :details (concatenate 'string (symbol-name 'mod-buffer-chunk) " " (symbol-name buffer-name))
-                                      :output output)))))))
- 
-(defun modification-slot-names (mods)
-  (do ((s mods (cddr s))
-       (r nil))
-      ((null s) r)
-    (push (car s) r)))
+             (let ((spec (mod-list-or-spec->valid-mod-spec mod-list-or-spec)))
+                 (if (null spec)
+                     (print-warning "schedule-mod-buffer-chunk called with an invalid modification ~s" mod-list-or-spec)
+                   (schedule-event-relative time-delta 'mod-buffer-chunk 
+                                            :time-in-ms time-in-ms
+                                            :module module
+                                            :priority priority 
+                                            :params (list buffer-name spec)
+                                            :details (concatenate 'string (symbol-name 'mod-buffer-chunk) " " (symbol-name buffer-name))
+                                            :output output)))))))))
 
-(defun extend-buffer-chunk (buffer-name mod-list)
-  (let ((chunk (buffer-read buffer-name)))
-    (cond ((null chunk)
-           (print-warning "extend-buffer-chunk called with no chunk in buffer ~S" buffer-name))
-          (t
-           (let ((ct (chunk-chunk-type-fct chunk)))
-             (dolist (slot (remove-if (lambda (x) 
-                                        (valid-chunk-type-slot ct x))
-                                      (modification-slot-names mod-list)))
-               (extend-chunk-type-slots ct slot chunk)))))))
-
-
-(defun valid-chunk-modification (chunk-name modifications)
-  (when (chunk-p-fct chunk-name)
-    (if (oddp (length modifications))
-        nil
-      (let ((slots nil)
-            (slots-and-values nil))
-        (do ((s modifications (cddr s)))
-            ((null s))
-          (push (car s) slots)
-          (push (list (car s) (second s)) slots-and-values))
-        (and (every #'(lambda (slot)
-                        (possible-chunk-type-slot (chunk-chunk-type-fct chunk-name) slot))
-                    slots)
-             (= (length slots) (length (remove-duplicates slots))))))))
-
-   
+  
 (defun buffer-spread (buffer-name)
   (verify-current-mp  
    "buffer-spread called with no current meta-process."
@@ -1110,7 +1271,7 @@
       (cond ((null buffer)
              (print-warning "buffer-spread called with an invalid buffer name ~S" buffer-name))
             (t
-             (car (no-output (sgp-fct (list (act-r-buffer-parameter-name buffer)))))))))))
+             (buffer-params-handler (get-module buffer-params) (act-r-buffer-parameter-name buffer))))))))
 
 
 (defun buffers-module-name (buffer-name)
@@ -1137,6 +1298,23 @@
              (print-warning "invalid buffer name ~S" buffer-name))
             (t
              (act-r-buffer-searchable buffer)))))))
+
+(defun valid-request-params-for-buffer (buffer-name request-vector)
+  (verify-current-mp  
+   "valid-request-params-for-buffer called with no current meta-process."
+   (verify-current-model
+    "valid-request-params-for-buffer called with no current model."
+    (let ((buffer (buffer-instance buffer-name)))
+      (and buffer (zerop (logandc2 request-vector (act-r-buffer-requests-mask buffer))))))))
+
+
+(defun valid-buffer-queries (buffer-name)
+  (verify-current-mp  
+   "valid-buffer-queries called with no current meta-process."
+   (verify-current-model
+    "valid-buffer-queries called with no current model."
+    (let ((buffer (buffer-instance buffer-name)))
+      (and buffer (act-r-buffer-queries buffer))))))
 
 #|
 This library is free software; you can redistribute it and/or

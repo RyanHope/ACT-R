@@ -93,6 +93,8 @@
 ;;;             : * Changed the environment data cache to an equalp hashtable
 ;;;             :   since the keys are now a cons of the handler name and the
 ;;;             :   window to prevent issues with multi-environment settings.
+;;; 2015.06.10 Dan
+;;;             : * Changed time to use ms instead.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -262,21 +264,21 @@
   (declare (ignore reward))
   (let ((history (get-module production-history)))
     (when (p-history-module-enabled history)
-      (push (make-p-history :tag :reward :time (mp-time) :info (no-output (spp :name :u))) (p-history-module-history history)))))
+      (push (make-p-history :tag :reward :time (mp-time-ms) :info (no-output (spp :name :u))) (p-history-module-history history)))))
 
 (defun production-history-start-markers (ph)
   (when (p-history-module-enabled ph)
-    (push (make-p-history :tag :start :time (mp-time)) (p-history-module-history ph))))
+    (push (make-p-history :tag :start :time (mp-time-ms)) (p-history-module-history ph))))
 
 (defun production-history-stop-markers (ph)
   (when (p-history-module-enabled ph)
-    (push (make-p-history :tag :stop :time (mp-time) :info (no-output (spp :name :u))) (p-history-module-history ph))))
+    (push (make-p-history :tag :stop :time (mp-time-ms) :info (no-output (spp :name :u))) (p-history-module-history ph))))
 
 (defun production-history-recorder (cs)
   (let* ((history (get-module production-history))
          (best (car cs))
          (mismatched (set-difference (all-productions) cs))
-         (block (make-p-history :mismatched mismatched :time (mp-time))))
+         (block (make-p-history :mismatched mismatched :time (mp-time-ms))))
     (no-output
      (let ((ut (sgp :ut)))
        (when (and best 
@@ -332,7 +334,7 @@
       (when (and (or (p-history-module-draw-blanks history)
                      (or (p-history-selected x) (p-history-matched x)))
                  (null (p-history-tag x)))
-        (let ((col (list 'column (p-history-time x))))
+        (let ((col (list 'column (format nil "~/print-time-in-seconds/" (p-history-time x)))))
           (dolist (y p-names)
             
             (cond ((eq y (p-history-selected x))
@@ -978,8 +980,8 @@
             (when (and (or (eq which :cycle) (eq which :run) (eq which :utility))
                        (> min-time -1) (> max-time -1))
               (list
-               (format nil "min_time ~f" min-time)
-               (format nil "max_time ~f" max-time)))
+               (format nil "min_time ~/print-time-in-seconds/" min-time)
+               (format nil "max_time ~/print-time-in-seconds/" max-time)))
             
             (list (format nil "cycles ~d" max-loops))
             

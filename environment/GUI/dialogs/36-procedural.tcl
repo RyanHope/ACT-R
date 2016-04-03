@@ -223,7 +223,7 @@ proc show_why_not {prods model} {
       "create text-output-handler $text_box $text_box \
         (lambda (x) \
            (declare (ignore x)) \
-           (format t \"Time: ~s~%\" (mp-time)) \
+           (format t \"Time: ~/print-time-in-seconds/~%\" (mp-time-ms)) \
            (whynot $prod)) \
         nil $model"
 

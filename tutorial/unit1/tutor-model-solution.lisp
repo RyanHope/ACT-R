@@ -12,15 +12,11 @@
 ;; Add Chunks here
 
 (add-dm
-
  (fact17 isa addition-fact addend1 1 addend2 7 sum 8)
  (fact34 isa addition-fact addend1 3 addend2 4 sum 7)
  (fact67 isa addition-fact addend1 6 addend2 7 sum 13)
  (fact103 isa addition-fact addend1 10 addend2 3 sum 13)
-
- (goal isa add-pair ten1 3 one1 6 ten2 4 one2 7)
-
- )
+ (goal isa add-pair ten1 3 one1 6 ten2 4 one2 7))
 
 ;; Add productions here
 
@@ -37,8 +33,8 @@
   +retrieval>
     ISA addition-fact
     addend1 =num1
-    addend2 =num2
-)
+    addend2 =num2)
+
 (p add-ones
   =goal>
     ISA add-pair
@@ -57,8 +53,8 @@
   +retrieval>
     ISA addition-fact
     addend1 10
-    sum =sum
-)
+    sum =sum)
+
 (p process-carry
   =goal>
     ISA add-pair
@@ -79,8 +75,8 @@
   +retrieval>
     ISA addition-fact
     addend1 =num1
-    addend2 =num2
-)
+    addend2 =num2)
+
 (p no-carry
   =goal>
     ISA add-pair
@@ -89,7 +85,7 @@
     one-ans =ones
     carry busy
   ?retrieval>
-    state error
+    buffer failure
 ==>
   =goal>
     carry nil
@@ -97,8 +93,8 @@
   +retrieval>
     ISA addition-fact
     addend1 =num1
-    addend2 =num2
-)
+    addend2 =num2)
+
 (p add-tens-done
   =goal>
     ISA add-pair
@@ -109,19 +105,15 @@
     sum =sum
 ==>
   =goal>
-    ten-ans =sum
-)
+    ten-ans =sum)
+
 (p add-tens-carry
   =goal>
     ISA add-pair
-    ten1 =num1
-    ten2 =num2
     carry 1
     ten-ans busy
   =retrieval>
     ISA addition-fact
-    addend1 =num1
-    addend2 =num2
     sum =sum
 ==>
   =goal>
@@ -129,8 +121,7 @@
   +retrieval>
     ISA addition-fact
     addend1 1
-    addend2 =sum
-)
+    addend2 =sum)
 
 (goal-focus goal)
 )

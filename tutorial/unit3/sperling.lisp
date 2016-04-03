@@ -46,7 +46,7 @@
 (defun compute-score (answers)
   (let ((score 0))
     (dolist (x answers score)
-      (when (member x *responses* :test #'string-equal)
+      (when (member x *responses* :test 'string-equal)
         (incf score)))))
     
   
@@ -80,14 +80,14 @@
         (result nil))
     (dolist (x times)
       (push (cons x (do-sperling-trial x)) result))
-    (sort result #'< :key #'car)))
+    (sort result '< :key 'car)))
 
 
 (defun run-sperling (n)
   (let ((results (list 0 0 0 0)))
     (dotimes (i n)
-      (setf results (mapcar #'+ results (mapcar #'cdr (run-block)))))
-    (report-data (mapcar #'(lambda (x) (/ x n)) results))))
+      (setf results (mapcar '+ results (mapcar 'cdr (run-block)))))
+    (report-data (mapcar (lambda (x) (/ x n)) results))))
 
 (clear-all)
 
@@ -103,22 +103,19 @@
 (chunk-type report-row row)
 
 (add-dm
- (attending isa chunk) (low isa chunk)
- (medium isa chunk) (high isa chunk)
- (find isa chunk) (encode isa chunk)
+ (attending isa chunk) 
+ (medium isa chunk) 
+ (find isa chunk) 
+ (encode isa chunk)
  (goal isa read-letters state attending upper-y 0 lower-y 300))
 
 (p detected-sound
    =aural-location>
-     isa      audio-event
-  
    ?aural>
-      state    free
-   
+     state   free
    ==>
    +aural>
-     isa      sound
-     event    =aural-location)
+     event   =aural-location)
 
 (p sound-respond-low
    =goal>
@@ -161,137 +158,122 @@
 
 (p attend-low
    =goal>
-     isa      read-letters
-     state    attending
+     isa        read-letters
+     state      attending
    =visual-location>
-     isa      visual-location
-   > screen-y 204
-   < screen-y 216
+     isa        visual-location
+   > screen-y   204
+   < screen-y   216
    
    ?visual>
-      state    free
-   
+     state      free
    ==>
    =goal>
-     location low
-     state    encode
+     location   low
+     state      encode
    +visual>
-     isa      move-attention
+     cmd        move-attention
      screen-pos =visual-location)
 
 (p attend-medium
    =goal>
-     isa      read-letters
-     state    attending
+     isa        read-letters
+     state      attending
    =visual-location>
-     isa      visual-location
-   > screen-y 154
-   < screen-y 166
+     isa        visual-location
+   > screen-y   154
+   < screen-y   166
    
    ?visual>
-      state    free
+     state      free
 ==>
    =goal>
-     location medium
-     state    encode
+     location   medium
+     state      encode
    +visual>
-     isa      move-attention
+     cmd        move-attention
      screen-pos =visual-location)
-
 
 (p attend-high
    =goal>
-     isa      read-letters
-     state    attending
+     isa        read-letters
+     state      attending
    =visual-location>
-     isa      visual-location
-   > screen-y 104
-   < screen-y 116
+     isa        visual-location
+   > screen-y   104
+   < screen-y   116
    
    ?visual>
-      state    free
+     state      free
 ==>
    =goal>
-     location high
-     state    encode
+     location   high
+     state      encode
    +visual>
-     isa      move-attention
+     cmd        move-attention
      screen-pos =visual-location)
 
 (p encode-row-and-find
    =goal>
-     isa      read-letters
-     location =pos
-     upper-y  =uy
-     lower-y  =ly
+     isa       read-letters
+     location  =pos
+     upper-y   =uy
+     lower-y   =ly
    =visual>
-     isa      text
 ==>
    =visual>
-     status   =pos
-   
+     status    =pos
    -visual>
-   
    =goal>
-     location nil
-     state    attending
+     location  nil
+     state     attending
    +visual-location>
-     isa      visual-location
      :attended nil
-   > screen-y =uy 
-   < screen-y =ly)
+   > screen-y  =uy 
+   < screen-y  =ly)
 
 (P start-report
    =goal>
-     isa      read-letters
-     tone     =tone
-   
+     isa     read-letters
+     tone    =tone
    ?visual>
-      state   free
+     state   free
    ==>
    +goal>
-     isa      report-row
-     row      =tone
+     isa     report-row
+     row     =tone
    +retrieval>
-     isa      text
-     status   =tone)
+     status  =tone)
 
 (P do-report
    =goal>
      isa      report-row
      row      =tone
    =retrieval>
-     isa      text
      status   =tone
      value    =val
-   
    ?manual>
-      state    free
+     state    free
    ==>
-   
    +manual>              
-     isa      press-key     
+     cmd      press-key     
      key      =val
    +retrieval>
-     isa      text
      status   =tone
-     :recently-retrieved nil
-)
+     :recently-retrieved  nil)
 
 (p stop-report 
    =goal>
-     isa      report-row
-     row      =row
-   
+     isa     report-row
+     row     =row
    ?retrieval>
-      state   error
-   
+     buffer  failure
    ?manual>
-      state    free
+     state   free
 ==>
    +manual>              
-     isa      press-key       
-     key      space
+     cmd     press-key       
+     key     space
    -goal>)
 
 (setf *show-responses* t)

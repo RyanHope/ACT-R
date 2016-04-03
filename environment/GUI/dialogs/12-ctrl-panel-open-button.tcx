@@ -59,7 +59,7 @@ pack [control_panel_name].o_frame
 
 send_environment_cmd \
   "create list-handler [control_panel_name].o_frame.open\
-     open_return (lambda (x)) ()"
+     open_return (lambda (x) (declare (ignore x))) ()"
 
 bind [control_panel_name].o_frame.open <Destroy> {
   remove_handler %W

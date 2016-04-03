@@ -7,10 +7,10 @@
 ;;; - using the fill-default-vis-obj-slots command to set the 
 ;;;   primary slots of the visual-object chunks.
 ;;;
-;;; - Using a chunk's real-visual-value parameter to have
-;;;   the value used in the visual-location be different
-;;;   from the one used in the visual-object (which is
-;;;   handled by the fill-default-dimensions command automatically).
+;;; - Using a chunk's real-visual-value parameter to have the
+;;;   value used in the visual-object be different from
+;;;   the one used in the visual-location (which is handled
+;;;   by the fill-default-vis-obj-slots command automatically).
 ;;; 
 ;;;
 ;;; This example will also show the use of the set-visloc-default 
@@ -74,8 +74,8 @@
   ;; 
   ;; We want to save the value slot's content as the "real"
   ;; value to use in the object and then replace the value
-  ;; slot in the visual-location with the value of the kind
-  ;; slot.
+  ;; slot in the visual-location with the same value as the 
+  ;; kind slot.
   
   (dolist (x device)
     (when (null (chunk-real-visual-value x))
@@ -103,7 +103,7 @@
   
   (let ((new-object (car (define-chunks-fct `((isa ,(chunk-slot-value-fct vis-loc 'kind)))))))
     
-    ;; Now, we use the fill-default-dimensions command to
+    ;; Now, we use the fill-default-vis-obj-slots command to
     ;; set the value, color, height, and width slots of
     ;; that chunk based on what's in the visual-location chunk
     ;; which takes into account the chunk's real-visual-value
@@ -174,7 +174,7 @@
   
   (chunk-type (polygon-feature (:include visual-location)) regular)
   (chunk-type (polygon (:include visual-object)) sides)
-  (chunk-type (square (:include polygon)) (sides 4))
+  (chunk-type (square (:include polygon)) (sides 4) (square t))
   (chunk-type goal step)
   
   ;; Here we set the default specification to use in finding
@@ -192,62 +192,55 @@
   
   
   
-  ;; Just do this to avoid the warning when the visual-locations are created
-  (define-chunks (square isa chunk))
+  ;; Just do this to avoid the warnings when the visual-locations are created
+  (define-chunks (square isa chunk) (red-square-1 isa chunk))
      
-  (p find-oval
+  (p start
      ?goal>
-     buffer empty
+      buffer empty
      ==>
      +goal>
-     isa goal
-     step 0
-     )
+      isa goal
+      step 0)
   
-  
-     (p find-regular
-        =goal>
-        isa goal
-        step 1
-        ?visual-location>
-        buffer empty
-        ?visual>
-        buffer empty
-        state free
-        ==>
-        
-        +visual-location>
-        isa visual-location
-        kind text
-        )
-    
+    (p find-text
+     =goal>
+      isa goal
+      step 1
+     ?visual-location>
+      buffer empty
+     ?visual>
+      buffer empty
+      state free
+     ==>
+     +visual-location>
+      isa visual-location
+      kind text)
   
   (p shift-attention
      =goal>
-     isa goal
+      isa goal
      =visual-location>
-     isa visual-location
+      isa visual-location
+     ?visual>
+      state free
      ==>
      +visual>
-     isa move-attention
-     screen-pos =visual-location
+      isa move-attention
+      screen-pos =visual-location
      !output! (Here is the chunk in the visual-location buffer)
      !eval! (pprint-chunks-fct (list =visual-location)))
   
   (p attend-item
      =goal>
-     isa goal
-     step =step
+      isa goal
+      step =step
      =visual>
-     isa visual-object
+      isa visual-object
      ==>
-     !output! (Note the difference in the values between the visual-location and visual-object chunks)
+     !output! (Note the difference in the value slots between the visual-location and visual-object chunks)
      !eval! (pprint-chunks-fct (list =visual))
      !bind! =next-step (1+ =step)
      =goal>
-     step =next-step
-  )   
+      step =next-step)   
   )
-
-  
-  

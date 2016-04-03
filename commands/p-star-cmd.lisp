@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : p-star-cmd.lisp
-;;; Version     : 1.2
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Functions that work with the procedural module to allow
 ;;;             : definition of productions with bound-variable slot names.
@@ -225,6 +225,15 @@
 ;;; 2013.06.04 Dan
 ;;;             : * Fixed valid-variable-chunk-mod-spec to allow static chunks
 ;;;             :   to modify any of the possible slots for the type given.
+;;; 2014.03.19 Dan [2.0]
+;;;             : * Start of conversion to chunks without types.  
+;;;             : * Remove define-varaible-chunk-spec-fct and associated functions
+;;;             :   because chunk-specs are now allowed to have variable slot names.
+;;; 2014.03.20 Dan
+;;;             : * Don't really do anything here now, and just keep this around
+;;;             :   mostly for the commnets because p and p* are now the same.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -234,8 +243,8 @@
 ;;;
 ;;; Public API:
 ;;;
-;;; p* and p*-fct which work like p and p-fct but allow one to use variables
-;;; in the place of slot names as long as those variables get bound elsewhere.
+;;; p* and p*-fct which work kust like p and p-fct since those are allowed to
+;;; have variables in slot positions now too.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Design Choices:
@@ -282,7 +291,7 @@
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(require-compiled "PRODUCTION-PARSING" "ACT-R6:support;production-parsing-support")
+(require-compiled "PRODUCTION-PARSING" "ACT-R-support:production-parsing-support")
 
 #|
 
@@ -329,84 +338,9 @@ test queries, call evals and test remaining slot specs
 (defun p*-fct (definition)
   (let ((prod (get-module procedural)))  
     (if (procedural-p prod)  
-        (create-production prod definition t)  
+        (create-production prod definition)  
       (print-warning "No procedural modulue found cannot create production."))))
 
-
-(defun define-variable-chunk-spec-fct (specifications-list)
-  "Allows variables in the slot-name position, but the return value isn't
-   really a valid chunk-spec for purposes of testing chunks"
-  (verify-current-mp  
-   "define-variable-chunk-spec-fct called with no current meta-process."
-   (verify-current-model
-    "define-variable-chunk-spec-fct called with no current model."
-    (cond ((null specifications-list)
-           (print-warning "No specification in call to define-chunk-spec."))
-          ((= (length specifications-list) 1)
-           (if (get-chunk (car specifications-list))
-               (chunk-name-to-chunk-spec (car specifications-list))
-             (print-warning 
-              "define-chunk-spec's 1 parameter doesn't name a chunk: ~S" 
-              specifications-list)))
-          
-          ((not (eq (car specifications-list) 'isa))
-           (print-warning 
-            "First element to define-chunk-spec isn't the symbol ISA. ~s" 
-            specifications-list))
-          ((not (get-chunk-type (second specifications-list)))
-           (print-warning 
-            "Second element in define-chunk-spec isn't a chunk-type. ~S" 
-            specifications-list))
-          (t
-           (let* ((new-spec (make-act-r-chunk-spec :type (second specifications-list)))
-                  (slots (process-variable-slots-specs (second specifications-list) (cddr specifications-list))))
-             (unless (eq slots :error)
-               (setf (act-r-chunk-spec-slots new-spec) slots)
-               new-spec)))))))
-
-
-(defun process-variable-slots-specs (chunk-type specs)
-  (let ((slots nil))
-    (loop 
-      (when (null specs)
-        (return slots))
-      (let ((spec (make-act-r-slot-spec)))
-        (when (find (car specs) '(= - > < >= <=))
-          (setf (act-r-slot-spec-modifier spec) (pop specs)))
-        (when (null specs)
-          (print-warning 
-           "Invalid specs in call to define-chunk-spec - not enough arguments")
-          (return :error))
-        (unless (or (chunk-spec-variable-p (car specs)) ;; let this go through...
-                    (possible-chunk-type-slot chunk-type (car specs)) 
-                    (keywordp (car specs)))
-          (print-warning "Invalid slot-name ~S in call to define-chunk-spec." 
-                         (car specs))
-          (return :error))
-        (setf (act-r-slot-spec-name spec) (pop specs))
-        (when (null specs)
-          (print-warning 
-           "Invalid specs in call to define-chunk-spec - not enough arguments")
-          (return :error))
-        (setf (act-r-slot-spec-value spec) (pop specs))
-        (push spec slots)))))
-
-(defun valid-variable-chunk-mod-spec (chunk-type-and-slots modifications-list)
-  (if (oddp (length modifications-list))
-      (print-warning "Odd length modifications list.")
-    (if (procedural-check-p*-mods (get-module procedural))
-      (do ((slots nil (cons (car s) slots))
-           (s modifications-list (cddr s)))
-          ((null s) 
-           (and (every #'(lambda (slot)
-                           (or (chunk-spec-variable-p slot)
-                               (and (not (chunk-type-static-p-fct  (car chunk-type-and-slots))) (valid-chunk-type-slot (car chunk-type-and-slots) slot))
-                               (and (chunk-type-static-p-fct (car chunk-type-and-slots)) (possible-chunk-type-slot (car chunk-type-and-slots) slot))
-                               (find slot (cdr chunk-type-and-slots))))
-                       slots)
-                (= (length slots) (length (remove-duplicates slots))))))
-      t)))
-  
 
 
 

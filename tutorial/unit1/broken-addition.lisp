@@ -40,7 +40,7 @@
       ISA         add
       count       =num
       arg2        =num2
-      sum         =answer
+      summ        =answer
 ==>
    =goal>
       isa         add

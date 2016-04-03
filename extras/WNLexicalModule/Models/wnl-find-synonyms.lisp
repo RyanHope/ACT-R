@@ -22,8 +22,6 @@
      
      ?wn-lexical>
      state free
-     
-     ?wn-lexical>
      state success
      
      ==>
@@ -47,8 +45,6 @@
      
      ?wn-lexical>
      state free
-     
-     ?wn-lexical>
      state error
      
      ==>
@@ -67,8 +63,6 @@
      
      ?wn-lexical>
      state free
-     
-     ?wn-lexical>
      state success
      
      =wn-lexical>
@@ -98,8 +92,6 @@
      
      ?wn-lexical>
      state free
-     
-     ?wn-lexical>
      state success
      
      =wn-lexical>
@@ -129,8 +121,6 @@
      
      ?wn-lexical>
      state free
-     
-     ?wn-lexical>
      state success
      
      =wn-lexical>

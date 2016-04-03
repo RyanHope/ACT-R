@@ -213,13 +213,43 @@
 ;;;             :   delay seconds pass.
 ;;; 2013.02.26 Dan
 ;;;             : * Fixed a bug with the CCL Mac run-environment.
+;;; 2013.12.18 Dan
+;;;             : * Changed close-connection so that there's a parameter which
+;;;             :   indcates whether or not to send the close message.
+;;;             : * Changed the reception of a goodbye message so that it 
+;;;             :   completely closes down the connection by killing the 
+;;;             :   process as well.
+;;; 2014.09.10 Dan
+;;;             : * Changed the flag on run-environment for LispWorks to
+;;;             :   :lispworks6 instead of 6.0 so that 6.1 also works (and
+;;;             :   presumably any other 6.x they create).
+;;; 2014.09.30 Dan
+;;;             : * Changed safe-evaluation from a defmethod to defun since
+;;;             :   it wasn't specifying types in the params list anyway.
+;;; 2015.02.20 Dan
+;;;             : * Connect-to-environment now passes the optional parameter
+;;;             :   for capturing the current stream as t to uni-run-process
+;;;             :   to avoid issues with the "AltConsole" in CCL.
+;;; 2015.07.28 Dan
+;;;             : * Changed the ACT-R6 logicals to ACT-R in the environment
+;;;             :   directory pathing.
+;;;             : * Changed ACT-R6;support to ACT-R-support in require compiled.
+;;; 2015.08.03 Dan
+;;;             : * Fix a bug with run-environment in CCL because with versions
+;;;             :   1.9 or newer it doesn't properly create the command line to
+;;;             :   evaluate when there are spaces in the path.
+;;; 2015.08.10 Dan
+;;;             : * Adjust the feature test for run-environment for Lispworks
+;;;             :   because v7 is available and assuming it works the same as
+;;;             :   the previous 2 so just removing the version check since
+;;;             :   I doubt that anyone is using v4 at this point.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(require-compiled "UNI-FILES" "ACT-R6:support;uni-files")
+(require-compiled "UNI-FILES" "ACT-R-support:uni-files")
 
 (declaim (ftype (function (t t) t) delete-handler))
 (declaim (ftype (function (t) t) send-register))
@@ -326,21 +356,24 @@
 
 
 ;;; close-connection
-;;; This function takes one parameter which should be an environment-connection
-;;; and a keywork parameter kill which defaults to t.  If kill is t, then
-;;; it kills the process that is associated with that connection.  The only
-;;; time one wouldn't want to kill the process is if the close comes from
-;;; within the process itself.  It always removes all the handlers in the table 
-;;; that are associated with that stream and then closes the stream.
+;;; This function takes one parameter which should be an environment-connection,
+;;; a keywork parameter kill which defaults to t, and a keyword parameer send which
+;;; defaults to t.  If kill is t, then it kills the process that is associated with 
+;;; that connection.  The only time one wouldn't want to kill the process is if the 
+;;; close comes from within the process itself.  It always removes all the handlers 
+;;; in the table that are associated with that stream and then closes the stream.
+;;; If send is t then it sends the close notice to the Tcl/Tk side.  If the close
+;;; notice came from that side don't need to send one back.
 
-(defun close-connection (connection &key (kill t))
+(defun close-connection (connection &key (kill t)(send t))
   
   (when (and kill (environment-connection-process connection))
     (uni-process-kill (environment-connection-process connection)))
   
-  (uni-without-interrupts
-   (ignore-errors 
-    (uni-send-string (environment-connection-stream connection) "close nil nil<end>")))
+  (when send
+    (uni-without-interrupts
+     (ignore-errors 
+      (uni-send-string (environment-connection-stream connection) "close nil nil<end>"))))
     
     
   (setf (environment-control-connections *environment-control*)
@@ -414,7 +447,8 @@
               (setf (environment-connection-process connection)
                 (uni-run-process "Environment-Connection" 
                                  #'(lambda ()
-                                     (message-process connection))))
+                                     (message-process connection))
+                                 t))
               (push connection (environment-control-connections *environment-control*))
               connection)
           (progn 
@@ -567,12 +601,13 @@
       (sync
        (setf (environment-connection-sync connection) t))
       (goodbye ;; kill the connection
-       (format t "Environment Closed~%")
-       (close-connection connection :kill nil))
+       (format *error-output* "Environment Closed~%")
+       (finish-output *error-output*)
+       (close-connection connection :kill t :send nil))
       (t 
        (format *error-output* "Invalid command request: ~s~%" cmd-list)))))
 
-(defmethod safe-evaluation (form handler)
+(defun safe-evaluation (form handler)
     (let ((model (aif (handler-model handler) it (current-model))))
     (if (and model (find model (mp-models)))
         
@@ -631,16 +666,29 @@
            (> (/ (- (get-internal-real-time) start-time) internal-time-units-per-second) max-delay))))))
 
 
+;;; Adding a hack for a problem with how run-program creates the string that it
+;;; sends to Windows to execute because it doesn't properly escape spaces as of
+;;; CCL 1.9.
+;;; The fix was found here: http://comments.gmane.org/gmane.lisp.openmcl.devel/9030
+
+#+(and :ccl :windows :ccl-1.9)
+(let ((*WARN-IF-REDEFINE-KERNEL* nil))
+  (defun ccl::make-windows-command-line (strings)
+    (setf strings (mapcar 'prin1-to-string strings))
+    (reduce (lambda (s1 s2) (concatenate 'string s1 " " s2))
+            (cdr strings) :initial-value (car strings))))
+
+
 #+(and :ccl :windows)
 (defun run-environment (&optional (delay 5))
-  (run-program (namestring (translate-logical-pathname "ACT-R6:environment;start environment.exe")) nil :wait nil)
+  (run-program (namestring (translate-logical-pathname "ACT-R:environment;start environment.exe")) nil :wait nil)
   (sleep delay)
   (while (null (start-environment)) (sleep delay)))
 
 #+(and :ccl :linux)
 (defun run-environment (&optional (delay 5))
   (let ((c (ccl::cd "."))) 
-    (ccl::cd "ACT-R6:environment;GUI")
+    (ccl::cd "ACT-R:environment;GUI")
     (run-program "wish" (list "starter.tcl") :wait nil)
     (sleep delay)
     (while (null (start-environment)) (sleep delay))
@@ -649,22 +697,22 @@
 #+(and :ccl :darwin)
 (defun run-environment (&optional (delay 5))
   (let ((c (ccl::cd "."))) 
-    (ccl::cd "ACT-R6:environment")
-    (run-program (namestring (translate-logical-pathname "ACT-R6:environment;Start Environment OSX.app;Contents;MacOS;start-environment-osx")) nil :wait nil)
+    (ccl::cd "ACT-R:environment")
+    (run-program (namestring (translate-logical-pathname "ACT-R:environment;Start Environment OSX.app;Contents;MacOS;start-environment-osx")) nil :wait nil)
     (sleep delay)
     (while (null (start-environment)) (sleep delay))
     (ccl::cd c)))
 
-#+(and :lispworks (or :win32 :win64) (or :lispworks5 :lispworks6.0))
+#+(and :lispworks (or :win32 :win64))
 (defun run-environment (&optional (delay 5))
-  (sys:call-system "\"Start Environment.exe\"" :current-directory (translate-logical-pathname "ACT-R6:environment") :wait nil)
+  (sys:call-system "\"Start Environment.exe\"" :current-directory (translate-logical-pathname "ACT-R:environment") :wait nil)
   (sleep delay)
   (while (null (start-environment)) (sleep delay)))
 
 #+(and :lispworks :macosx)
 (defun run-environment (&optional (delay 5))
   (sys:call-system (format nil "'~a/Start Environment OSX.app/Contents/MacOS/start-environment-osx'"
-                     (namestring (translate-logical-pathname "ACT-R6:environment")))
+                     (namestring (translate-logical-pathname "ACT-R:environment")))
                    :wait nil)
   (sleep delay)
   (while (null (start-environment)) (sleep delay)))
@@ -673,7 +721,7 @@
 #+(and :allegro :mswindows)
 (defun run-environment (&optional (delay 5))
   (let ((c (current-directory)))
-    (chdir "ACT-R6:environment")
+    (chdir "ACT-R:environment")
     (run-shell-command "\"Start Environment.exe\"" :wait nil)
     (chdir c))
   (sleep delay)
@@ -682,7 +730,7 @@
 #+(and :allegro :macosx)
 (defun run-environment (&optional (delay 5))
   (let ((c (current-directory)))
-    (chdir "ACT-R6:environment")
+    (chdir "ACT-R:environment")
     (run-shell-command "'Start Environment OSX.app/Contents/MacOS/start-environment-osx'" :wait nil)
     (chdir c))
   (sleep delay)

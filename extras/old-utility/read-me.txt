@@ -1,8 +1,0 @@
-This directory contains a module that implments the previous
-utility equation (PG-C) for productions and the corresponding
-tutorial units.
-
-
-To use the old mechanism instead of the new one, remove the 
-utility-and-reward-1.lisp file from the modules directory 
-and replace it with the utility-and-reward.lisp file found here.

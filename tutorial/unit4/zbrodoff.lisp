@@ -93,10 +93,10 @@
     (dotimes (i n)
       (push (zbrodoff-experiment nil nil) results))
     
-    (let ((rts (mapcar #'(lambda (x) (/ x (length results)))
-                 (apply #'mapcar #'+ (mapcar #'first results))))
-          (counts (mapcar #'(lambda (x) (truncate x (length results)))
-                    (apply #'mapcar #'+ (mapcar #'second results)))))
+    (let ((rts (mapcar (lambda (x) (/ x (length results)))
+                 (apply 'mapcar '+ (mapcar 'first results))))
+          (counts (mapcar (lambda (x) (truncate x (length results)))
+                    (apply 'mapcar '+ (mapcar 'second results)))))
       
       (correlation rts *zbrodoff-control-data*)
       (mean-deviation rts *zbrodoff-control-data*)
@@ -105,29 +105,29 @@
 
         
 (defun analyze-results (&optional (display t))
-  (let ((blocks (sort (remove-duplicates (mapcar #'response-block *results*)) #'<))
-        (addends (sort (remove-duplicates (mapcar #'response-addend *results*) :test #'string-equal) #'string<))
+  (let ((blocks (sort (remove-duplicates (mapcar 'response-block *results*)) '<))
+        (addends (sort (remove-duplicates (mapcar 'response-addend *results*) :test 'string-equal) 'string<))
         (counts nil)
         (rts nil)
         (total-counts nil))
     
-    (setf total-counts (mapcar #'(lambda (x) 
-                                   (/ (count x *results* 
-                                             :key #'response-addend 
-                                             :test #'string=)
-                                      (length blocks)))
+    (setf total-counts (mapcar (lambda (x) 
+                                 (/ (count x *results* 
+                                           :key 'response-addend 
+                                           :test 'string=)
+                                    (length blocks)))
                          addends))
     
     (dolist (x blocks)
       (dolist (y addends)
-        (let ((data (mapcar #'response-time
-                      (remove-if-not #'(lambda (z)
+        (let ((data (mapcar 'response-time
+                      (remove-if-not (lambda (z)
                                          (and (response-correct z)
                                               (string= y (response-addend z))
                                               (= x (response-block z))))
                                      *results*))))
           (push (length data) counts)
-          (push (/ (apply #'+ data) (max 1 (length data))) rts))))
+          (push (/ (apply '+ data) (max 1 (length data))) rts))))
     
     
     (when display
@@ -214,7 +214,7 @@
    =goal>
       state       attending
    +visual>
-      ISA         move-attention
+      cmd         move-attention
       screen-pos  =visual-location
 )
 
@@ -223,9 +223,8 @@
      ISA         goal
      state       attending
    =visual>
-     ISA         text
+     ISA         visual-object
      value       =char
-     status      nil
    ?vocal>
      state      free
    ?imaginal>
@@ -233,7 +232,7 @@
      state      free   
 ==>
    +vocal>
-     isa         subvocalize
+     cmd         subvocalize
      string      =char
    +imaginal>
      isa         problem 
@@ -252,17 +251,16 @@
      ISA         goal
      state       attending
    =visual>
-     ISA         text
+     ISA         visual-location
      value       =char
-     status      nil
    =imaginal>
      isa         problem
      arg2        nil
    ?vocal>
-       state      free
+     state       free
 ==>
    +vocal>
-     isa         subvocalize
+     cmd         subvocalize
      string      =char
    =imaginal>
      arg2       =char
@@ -284,21 +282,20 @@
      arg1        =arg1
      arg2        =arg2
    =visual>
-     ISA         text
+     ISA         visual-object
      value       =char
-     status      nil
    ?vocal>
-       state      free
+     state       free
 ==>
    =imaginal>
    +vocal>
-     isa         subvocalize
+     cmd         subvocalize
      string      =char
    =goal>
      target      =char
      state       count
    +visual>
-     isa         clear
+     cmd         clear
 )
 
 
@@ -316,7 +313,7 @@
      state      free
 ==>
    +vocal>
-     isa         subvocalize
+     cmd         subvocalize
      string      =a
    =imaginal>
      result      =a
@@ -341,10 +338,10 @@
      identity    =let
      next        =new
    ?vocal>
-      state      free
+     state       free
 ==>
    +vocal>
-     isa         subvocalize
+     cmd         subvocalize
      string      =new
    =imaginal>
      result      =new
@@ -368,7 +365,7 @@
      state       free
 ==>
    +vocal>
-     isa         subvocalize
+     cmd         subvocalize
      string      =new
    =imaginal>
    =goal>
@@ -395,9 +392,9 @@
      state       free
    ==>
    +goal>
-     isa goal
+     
    +manual>
-     ISA         press-key
+     cmd         press-key
      key         "k"
    
 )
@@ -410,6 +407,7 @@
    =imaginal>
      isa         problem
    - result      =let
+   - result      nil
      arg2        =val
    ?vocal>
      state       free
@@ -418,9 +416,9 @@
      state       free
    ==>
    +goal>
-     isa goal
+     
    +manual>
-     ISA         press-key
+     cmd         press-key
      key         "d"
    
 )

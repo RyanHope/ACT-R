@@ -40,12 +40,12 @@
    (mapcar (lambda (x) 
              (mapcar (lambda (y) 
                        (/ y (length responses))) x))
-     (apply #'mapcar 
+     (apply 'mapcar 
             (lambda (&rest z) 
               (let ((res nil))
                 (dolist (i '("zero" "one" "two" "three" "four" "five" "six" "seven" "eight"))
-                  (push (count i z :test #'string-equal) res)
-                  (setf z (remove i z :test #'string-equal)))
+                  (push (count i z :test 'string-equal) res)
+                  (setf z (remove i z :test 'string-equal)))
                 (push (length z) res)
                 (reverse res)))
             responses))))
@@ -63,7 +63,7 @@
 
 (define-model siegler
     
-    (sgp :rt -.45 :esc t :v nil :act nil :ans 0.5 :mp 16)
+    (sgp :rt -.45 :esc t :v nil :act nil :ans 0.5 :mp 16 :style-warnings nil)
 
   
 (chunk-type plus-fact addend1 addend2 sum)
@@ -124,9 +124,7 @@
      state      free
   ==>
    +aural>
-     isa        sound
-     event      =aural-location
-   )
+     event      =aural-location)
 
 (p encode-digit 
    =aural>
@@ -137,19 +135,18 @@
   ==>
    +retrieval>
      isa        number
-     value      =val
-   )
+     value      =val)
 
 (p harvest-arg1
    =retrieval>
      isa        number
    ?imaginal>
      buffer     empty
+     state      free
   ==>
    +imaginal>
      isa        plus-fact
-     addend1    =retrieval
-   )
+     addend1    =retrieval)
 
 (p harvest-arg2
    =retrieval>
@@ -157,10 +154,11 @@
    =imaginal>
      isa          plus-fact
      addend2      nil
+   ?imaginal> 
+     state        free
   ==>
-   =imaginal>
-     addend2      =retrieval
-   )
+   *imaginal>
+     addend2      =retrieval)
 
 (P retrieve-answer
    =imaginal>
@@ -171,15 +169,13 @@
    ?retrieval>
      state        free
      buffer       empty
-     error        nil
   ==>
    =imaginal>
   
    +retrieval>
      ISA          plus-fact
      addend1      =val1
-     addend2      =val2
-   )
+     addend2      =val2)
 
 (P harvest-answer
    =retrieval>
@@ -187,11 +183,12 @@
       sum         =number
    =imaginal>
       isa         plus-fact
+   ?imaginal>
+      state       free
   ==>
-   =imaginal>
+   *imaginal>
       sum         =number
-   +retrieval>   =number
-   )
+   +retrieval>    =number)
 
 (P respond
    =imaginal>
@@ -204,9 +201,8 @@
      state       free
   ==>
    +vocal>
-     isa         speak
-     string      =name
-)
+     cmd         speak
+     string      =name)
 
 
 ;; The base level activation of the number chunks are

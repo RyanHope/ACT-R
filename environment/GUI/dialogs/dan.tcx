@@ -2,7 +2,7 @@
 # you'll get a new button on the control-panel and understand 
 # why the what.gif file is there...
 
-image create photo dan -file what.gif
+image create photo dan -file [file join $tcl_env_dir dialogs what.gif]
 proc show_dan {} {
 toplevel .dan
 wm withdraw .dan

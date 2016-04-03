@@ -39,8 +39,7 @@
    (sky isa chunk)
    (grass isa chunk)
    (rose isa chunk)
-   (pink isa chunk)
-   
+      
    (1-1 isa math-fact arg1 one arg2 one result zero operator subtract)
    (2-1 isa math-fact arg1 two arg2 one result one operator subtract)
    (3-2 isa math-fact arg1 three arg2 two result one operator subtract)
@@ -65,7 +64,11 @@
                    (v2 1 -1500)
                    (v3 1 -1500))
   
+  ;; Note that we are using all the slots of the context type
+  ;; in the imaginal buffer to avoid warnings.
   
+  (declare-buffer-usage imaginal context :all)
+
   ;; The productions which perform the demonstration actions.
   
   (p p1
@@ -84,7 +87,6 @@
        isa task-state
        state r2
      =retrieval>
-       isa simple-value
    ==>
      =goal>
        state r3
@@ -121,8 +123,9 @@
      =goal>
        isa task-state
        state r5
+     ?imaginal>
+       state free
      =retrieval>
-       isa simple-fact
    ==>
      =goal>
        state r6
@@ -131,7 +134,10 @@
        val1 one
        val2 two
      +retrieval>
-       isa math-fact)
+       isa math-fact
+       - arg1 nil
+       - arg2 nil
+       - result nil)
   
   (p p6
      =goal>
@@ -142,6 +148,9 @@
    ==>
      +retrieval>
        isa math-fact
+       - arg1 nil
+       - arg2 nil
+       - result nil
      =goal>
        state r7
      =imaginal>
@@ -152,9 +161,7 @@
        isa task-state
        state r7
      =imaginal>
-       isa context
      =retrieval>
-       isa math-fact
    ==>
      =goal>
        state r8
@@ -165,10 +172,7 @@
      =goal>
        isa task-state
        state r8
-     =imaginal>
-       isa context
    ==>
      +goal>
-       isa task-state
      -imaginal>)
   )

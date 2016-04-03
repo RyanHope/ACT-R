@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : perceptual-compilation.lisp
-;;; Version     : 1.1
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Production compilation PERCEPTUAL style definition.
 ;;; 
@@ -27,6 +27,8 @@
 ;;;             : * Added the details of the functions.
 ;;; 2012.04.04 Dan [1.1]
 ;;;             : * Added the whynot reason function.
+;;; 2014.05.07 Dan [2.0]
+;;;             : * Start of conversion to typeless chunks.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -67,67 +69,84 @@
          (b+ (intern (concatenate 'string "+" (symbol-name bn))))
          (b? (intern (concatenate 'string "?" (symbol-name bn))))
          
-         (c1 (copy-tree (find b= (first p1-s) :key #'car)))
-         (c2 (copy-tree (find b= (first p2-s) :key #'car)))
-         (q1 (copy-tree (find b? (first p1-s) :key #'car)))
-         (q2 (copy-tree (find b? (first p2-s) :key #'car)))
+         (c1 (copy-tree (find b= (first p1-s) :key 'car)))
+         (c2 (copy-tree (find b= (first p2-s) :key 'car)))
+         (q1 (copy-tree (find b? (first p1-s) :key 'car)))
+         (q2 (copy-tree (find b? (first p2-s) :key 'car)))
          
-         (a1+ (copy-tree (find b+ (second p1-s) :key #'car)))
-         (a2+ (copy-tree (find b+ (second p2-s) :key #'car))))
+         (a1+ (copy-tree (find b+ (second p1-s) :key 'car)))
+         (a2+ (copy-tree (find b+ (second p2-s) :key 'car))))
     
     (case (aif (cdr (assoc buffer (production-buffer-indices p1))) it 0)
       (0 
-       (list (append (when c2 (list c2)) (when q2 (list q2)))  
-             (when a2+ (list a2+))))
+       (list (append 
+              (when c2 
+                (list c2)) 
+              (when q2 
+                (list q2)))  
+             (when a2+ 
+               (list a2+))))
       ((4 12)
-       (list (when c1 (list c1))
-             (when a1+ (list a1+))))
+       (list (when c1 
+               (list c1))
+             (when a1+ 
+               (list a1+))))
       (8
-       (list (append (when c1 (list c1)) (when q2 (list q2)))
-             (when a2+ (list a2+))))
+       (list (append 
+              (when c1 
+                (list c1)) 
+              (when q2 
+                (list q2)))
+             (when a2+ 
+               (list a2+))))
       ((16 24)
-       (list (append (awhen (buffer-condition-union c1 c2 nil) (list it)) (when q1 (list q1)))
-             (when a2+ (list a2+))))
+       (list (append 
+              (awhen (buffer-condition-union c1 c2 nil) 
+                     (list it)) 
+              (when q1 
+                (list q1)))
+             (when a2+ 
+               (list a2+))))
       ((20 28)
-       (list (append (when c1 (list c1)) (when q1 (list q1)))
-             (when a1+ (list a1+)))))))
+       (list (append 
+              (when c1 
+                (list c1)) 
+              (when q1 
+                (list q1)))
+             (when a1+ 
+               (list a1+)))))))
 
 (defun P-B-C1 (buffer p1 p2)
   "Compilation check for queries such that p2 only uses 'buffer empty' or
    'state busy'"
   (declare (ignore p1))
-  (let ((queries (mapcan #'third  (copy-tree (remove-if-not 
-                                              #'(lambda (x)
-                                                  (equal (car x) (cons #\? buffer)))
-                                              (production-lhs p2))))))
-    (every #'(lambda (x)      
-               (and (eq (first x) '=)
-                    (or (and (eq (second x) 'state)
-                             (eq (third x) 'busy))
-                        (and (eq (second x) 'buffer)
-                             (eq (third x) 'empty)))))
-           
-           queries)))
+  (let ((query (find-if (lambda (x)
+                          (and (eq (production-statement-op x) #\?)
+                               (eq (production-statement-target x) buffer)))
+                        (production-lhs p2))))
+    (every (lambda (x)      
+             (or 
+              (equalp x '(= state busy))
+              (equalp x '(= buffer empty))))
+           (chunk-spec-slot-spec (production-statement-spec query)))))
 
 
 (defun P-B-C2 (buffer p1 p2)
   "queries in p1 and p2 must be the same
    NOTE: this doesn't take into account any variables at this time"
-  (let ((queries-1 (remove-duplicates
-                    (mapcan #'third  (copy-tree (remove-if-not 
-                                                 #'(lambda (x)
-                                                     (equal (car x) (cons #\? buffer)))
-                                                 (production-lhs p1))))
-                    :test #'equal))
-        (queries-2 (remove-duplicates 
-                    (mapcan #'third  (copy-tree (remove-if-not 
-                                                 #'(lambda (x)
-                                                     (equal (car x) (cons #\? buffer)))
-                                                 (production-lhs p2))))
-                    :test #'equal)))
+  (let ((query1 (awhen (find-if (lambda (x)
+                                  (and (eq (production-statement-op x) #\?)
+                                       (eq (production-statement-target x) buffer)))
+                                (production-lhs p1))
+                       (chunk-spec-slot-spec (production-statement-spec it))))
+        (query2 (awhen (find-if (lambda (x)
+                                  (and (eq (production-statement-op x) #\?)
+                                       (eq (production-statement-target x) buffer)))
+                                (production-lhs p2))
+                       (chunk-spec-slot-spec (production-statement-spec it)))))
     
-    (= (length queries-1) (length queries-2) 
-       (length (remove-duplicates (append queries-1 queries-2) :test #'equal)))))
+    (= (length query1) (length query2) 
+       (length (remove-duplicates (append query1 query2) :test 'equal)))))
 
 (defun perceptual-reason (p1-index p2-index failed-function)
   (cond ((eql failed-function 'p-b-c1)
@@ -189,11 +208,8 @@
                                      (0 16 T)
                                      (0 12 T)
                                      (0 8 T)
-                                     (0 4 T)) (VISUAL-LOCATION
-                                               VISUAL
-                                               AURAL-LOCATION
-                                               AURAL
-                                               TEMPORAL) NIL COMPOSE-PERCEPTUAL-BUFFER NIL NIL NIL perceptual-reason)
+                                     (0 4 T)) 
+  (VISUAL-LOCATION VISUAL AURAL-LOCATION AURAL TEMPORAL) NIL COMPOSE-PERCEPTUAL-BUFFER NIL NIL NIL perceptual-reason)
 
 #|
 This library is free software; you can redistribute it and/or

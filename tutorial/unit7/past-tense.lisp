@@ -1,164 +1,166 @@
 (defvar *report*)
-(defvar *number*)
 (defvar *word*)
 (defvar *repcount*)
 (defvar *trial*)
 
-(defun make-triples (l)
-   (when l
-   (cons (list (first l)(second l)(third l)
-               (fourth l)
-               (if (eq (second l) 'I) 'blank 'ed))
-         (make-triples (nthcdr 4 l)))))
+(defun make-word-freq-list (l &optional (start 0))
+  (when l
+    (let ((count (third l)))
+      (cons (list (+ start count) (first l) (fourth l)
+                  (if (eq (second l) 'I) 'blank 'ed))
+            (make-word-freq-list (nthcdr 4 l) (+ start count))))))
 
 (defparameter *word-list* 
-  (make-triples '(have      I              12458 had
-                  do        I               4367 did
-                  make      I               2312 made
-                  get       I               1486 got
-                  use       R               1016 use
-                  look      R                910 look
-                  seem      R                831 seem
-                  tell      I                759 told
-                  show      R                640 show
-                  want      R                631 want
-                  call      R                627 call
-                  ask       R                612 ask
-                  turn      R                566 turn
-                  follow    R                540 follow
-                  work      R                496 work
-                  live      R                472 live
-                  try       R                472 try
-                  stand     I                468 stood
-                  move      R                447 move
-                  need      R                413 need
-                  start     R                386 start
-                  lose      I                274 lost)))
+  (make-word-freq-list '(have      I              12458 had
+                         do        I               4367 did
+                         make      I               2312 made
+                         get       I               1486 got
+                         use       R               1016 use
+                         look      R                910 look
+                         seem      R                831 seem
+                         tell      I                759 told
+                         show      R                640 show
+                         want      R                631 want
+                         call      R                627 call
+                         ask       R                612 ask
+                         turn      R                566 turn
+                         follow    R                540 follow
+                         work      R                496 work
+                         live      R                472 live
+                         try       R                472 try
+                         stand     I                468 stood
+                         move      R                447 move
+                         need      R                413 need
+                         start     R                386 start
+                         lose      I                274 lost)))
 
 
-(defparameter *total-count* (apply #'+ (mapcar #'third *word-list*)))
-
-;;; Select a random word from the vocabulary, but based on its frequency
+(defparameter *total-count* (caar (last *word-list*)))
 
 (defun random-word ()
-  (let
-    ((num (act-r-random *total-count*)))
-    (dolist (i *word-list*)
-      (if (< num (third i))
-        (return i)
-        (setf num (- num (third i)))))))
-
-;;; Set the goal to do one past tense
+  (let ((num (act-r-random *total-count*)))
+    (cdr (find-if (lambda (x) (< num (first x))) *word-list*))))
 
 (defun make-one-goal ()
-   (let*
-     ((wordpair (random-word))
-      (word (first wordpair))
-      (word-no (second wordpair)))
-     
-     (setf *number* word-no *word* word)
-     (set-buffer-chunk 'imaginal (car (define-chunks-fct 
-                                          (list (list 'isa 'past-tense 'verb word)))))
-     (goal-focus starting-goal)))
-
-;;; This function simulates "hearing" a past tense: it adds a correct 
-;;; past tense to memory by placing it into a buffer and then clearing
-;;; it so that it can be merged with others
+  (setf *word* (random-word))
+  
+  (set-buffer-chunk 'imaginal 
+                    (car (define-chunks-fct 
+                             (list (list 'verb (first *word*))))))
+  (goal-focus starting-goal))
 
 (defun add-past-tense-to-memory ()
-   (let*
-     ((wordpair (random-word))
-      (word (first wordpair))
-      (stem (fourth wordpair))
-      (suffix (fifth wordpair)))
-     (set-buffer-chunk 'imaginal (car (define-chunks-fct 
-                                          (list (list 'isa 'past-tense 'verb word 
-                                                      'stem stem 'suffix suffix)))))
-     (clear-buffer 'imaginal)))
+  (let ((word (random-word)))
+    (set-buffer-chunk 'imaginal 
+                      (car (define-chunks-fct 
+                               (list (mapcan (lambda (x y) (list x y))
+                                       '(verb stem suffix) word)))))
+    (clear-buffer 'imaginal)))
 
-;;; The following function reports how often an irregular word gets an irregular 
-;;; (correct), regular past tense or just the stem as past tense (None). It 
-;;; shows how this developes in time.
 
 (defun report-irreg (&optional (graph nil) (trials 1000))
-   (format t "~% Irreg    Reg   None   Overreg~%")
-   (let ((data (mapcar #'fourth (rep-f-i (reverse *report*) trials))))
-     (when graph
-       (graph-it data)))
+  (format t "~% Irreg   Reg   None  Overreg~%")
+  (let ((data (mapcar 'fourth (rep-f-i *report* trials))))
+    (when (and graph data)
+      (graph-it data)))
   nil)
 
 (defun graph-it (data)
-  (let ((win (open-exp-window "Irregular Verbs correct" :width 400 :height 350)))
+  (let* ((win (open-exp-window "Irregular Verbs correct" :width 500 :height 475))
+         (low (apply 'min data))
+         (zoom (min .9 (/ (floor low .1) 10))))
+    (allow-event-manager win)
     (clear-exp-window)
     (add-text-to-exp-window :x 5 :y 5 :text "1.0" :width 22)
-    (add-text-to-exp-window :x 5 :y 300 :text "0.7" :width 22)
-    (add-text-to-exp-window :x 150 :y 320 :text "Trials" :width 100)
-    (add-line-to-exp-window '(30 10) '(30 310) :color 'black)
-    (add-line-to-exp-window '(380 310) '(30 310) :color 'black)
-    (add-line-to-exp-window '(25 10) '(35 10) :color 'black)
-    (add-line-to-exp-window '(25 110) '(35 110) :color 'black)
-    (add-line-to-exp-window '(25 210) '(35 210) :color 'black)
-      
-    (do* ((increment (max 1.0 (floor (/ 350.0 (length data)))))
+    (add-text-to-exp-window :x 5 :y 400 :text (format nil "~0,2f" zoom) :width 22)
+    (add-text-to-exp-window :x 5 :y 200 :text (format nil "~0,2f" (+ zoom (/ (- 1.0 zoom) 2))) :width 22)
+    
+    (add-text-to-exp-window :x 200 :y 420 :text "Trials" :width 100)
+    (add-line-to-exp-window '(30 10) '(30 410) :color 'black)
+    (add-line-to-exp-window '(450 410) '(25 410) :color 'black)
+    (dotimes (i 10)
+      (add-line-to-exp-window (list 25 (+ (* i 40) 10)) (list 35 (+ (* i 40) 10)) :color 'black))
+    
+    (when (= (length data) 1)
+      (push (first data) data))
+    (do* ((increment (max 1.0 (floor (/ 450.0 (length data)))))
+          (range (floor 400 (- 1.0 zoom)))
+          (intercept (+ range 10))
           (p1 (butlast data) (cdr p1))
           (p2 (cdr data) (cdr p2))
           (last-x 30 this-x)
-          (last-y (+ 10 (floor (* (- 1.0 (car p1)) 1000)))
-                  (+ 10 (floor (* (- 1.0 (car p1)) 1000))))
+          (last-y (- intercept (floor (* range (car p1))))
+                  (- intercept (floor (* range (car p1)))))
           (this-x (+ last-x increment)
                   (+ last-x increment))
-          (this-y (+ 10 (floor (* (- 1.0 (car p2)) 1000)))
-                  (+ 10 (floor (* (- 1.0 (car p2)) 1000)))))
+          (this-y (- intercept (floor (* range (car p2))))
+                  (- intercept (floor (* range (car p2))))))
          ((null (cdr p1)) (add-line-to-exp-window 
                            (list last-x last-y) (list this-x this-y) :color 'red))
       (add-line-to-exp-window (list last-x last-y) 
                               (list this-x this-y) 
-                              :color 'red))))
+                              :color 'red))
+    (allow-event-manager win)))
 
 
 (defun rep-f-i (l n)
-   (if l
+   (when l
      (let ((x (if (> (length l) n) (subseq l 0 n) l))
            (y (if (> (length l) n) (subseq l n) nil))
            (irreg 0)
            (reg 0)
            (none 0)
-           (data nil))
+           (error 0))
        (dolist (i x)
-         (cond ((eq (first i) 'R) nil)
-               ((eq (second i) 'reg) (setf reg (1+ reg)))
-               ((eq (second i) 'irreg) (setf irreg (1+ irreg)))
-               (t (setf none (1+ none)))))
-       (if (> (+ irreg reg none) 0)
-         (setf data (list (/ irreg (+ irreg reg none))
-                 (/ reg (+ irreg reg none))(/ none (+ irreg reg none))
-                 (if (> (+ irreg reg) 0) (/ irreg (+ irreg reg)) 0)))
-         (setf data (list 0 0 0 0)))
-       (format t "~{~6,3F~}~%" data)
-       (cons data (rep-f-i y n)))
-    nil))
+         (when (first i)
+           (case (second i)
+             (reg
+              (incf reg))
+             (irreg 
+              (incf irreg))
+             (none
+              (incf none))
+             (t
+              (incf error)))))
+       
+       (let* ((total (+ irreg reg none))
+              (data
+               (if (zerop total)
+                   (list 0 0 0 0)
+                 (list (/ irreg total) (/ reg total)
+                       (/ none total) (if (> (+ irreg reg) 0) (/ irreg (+ irreg reg)) 0)))))
+         (format t "~{~6,3F~^ ~}~%" data)
+         (cons data (rep-f-i y n))))))
 
 (defun add-to-report (the-chunk)
-   (let* ((stem (chunk-slot-value-fct the-chunk 'stem))
-          (word (chunk-slot-value-fct the-chunk 'verb))
-          (suffix (chunk-slot-value-fct the-chunk 'suffix)))
-     (cond
-      ((eq stem word) (push (list *number* 'reg *word*) *report*))
-      ((eq suffix nil) (push (list *number* 'none *word*) *report*))
-      (t (push (list *number* 'irreg *word*) *report*)))))
+  (let ((stem (chunk-slot-value-fct the-chunk 'stem))
+        (word (chunk-slot-value-fct the-chunk 'verb))
+        (suffix (chunk-slot-value-fct the-chunk 'suffix))
+        (irreg (eq (third *word*) 'blank)))
+    
+    (if (eq (first *word*) word)
+        (cond ((and (eq stem word) (eq suffix 'ed))
+               (push-last (list irreg 'reg) *report*))
+              ((and (null suffix) (null stem))
+               (push-last (list irreg 'none) *report*))
+              ((and (eq stem (second *word*)) (eq suffix 'blank))
+               (push-last (list irreg 'irreg) *report*))
+              (t
+               (print-warning "Incorrectly formed verb.  Presented ~s and produced ~{~s~^ ~}." 
+                              (first *word*) 
+                              (mapcan (lambda (x y) (list x y))
+                                '(verb stem suffix) (list word stem suffix)))
+               (push-last (list irreg 'error) *report*)))
+      (progn
+        (print-warning "Incorrectly formed verb.  Presented ~s and produced ~{~s~^ ~}." 
+                       (first *word*) 
+                       (mapcan (lambda (x y) (list x y))
+                         '(verb stem suffix) (list word stem suffix)))
+        (push-last (list irreg 'error) *report*)))))
 
-
-;;; This function will run the experiment for n trials.
-;;; The keyword parameters are:
-;;;   cont - continue, when set to true the experiment continues instead of 
-;;;          starting anew.
-;;;   repfreq - determines how often results are reported during a run.
-;;;   v - the setting for the :v parameter of the model i.e. whether or not
-;;;       to display the model's trace.
 
 (defun past-tense (n &key (cont nil)(repfreq 100)(v nil))
   (unless cont
-   
     (reset)
     (format t "~%")
     (setf *report* nil)
@@ -174,13 +176,13 @@
     (add-to-report (buffer-read 'imaginal))
     (clear-buffer 'imaginal)
     (incf *repcount*)
+    (incf *trial*)
     (when (>= *repcount* repfreq)
-      (format t "Trial ~6D : " (1+ *trial*))
-      (rep-f-i (subseq *report* 0 repfreq) repfreq)
+      (format t "Trial ~6D : " *trial*)
+      (rep-f-i (subseq *report* (- *trial* repfreq)) repfreq)
       (setf *repcount* 0))
     
-    (run-full-time 200)
-    (incf *trial*)))
+    (run-full-time 200)))
 
 (clear-all)
 
@@ -207,57 +209,67 @@
   (chunk-type past-tense verb stem suffix)
   (chunk-type goal state)
   
-  (define-chunks (starting-goal isa goal state start))
+  (define-chunks 
+      (starting-goal isa goal state start)
+      (start isa chunk) (done isa chunk))
   
+  ;; Make sure all the words needed are already chunks
+  (dolist (x *word-list*)
+    (unless (chunk-p-fct (second x)) (define-chunks-fct (list (list (second x)))))
+    (unless (chunk-p-fct (third x)) (define-chunks-fct (list (list (third x)))))
+    (unless (chunk-p-fct (fourth x)) (define-chunks-fct (list (list (fourth x))))))
 
-;;; When there is no suffix we have an irregular
+(declare-buffer-usage goal goal state)
+  (declare-buffer-usage imaginal past-tense :all)
 
-(p find-past-tense-no-suffix
-    =goal>
-   isa goal
-   state done
-   =imaginal>
-      isa past-tense
-      verb =word
-      suffix blank
-      
-==>
-   =goal> state nil
-   )
+;;; When there is a stem and no suffix we have an irregular
 
-(spp find-past-tense-no-suffix :reward 5)
-
-;;; When there is a suffix
-
-(p find-past-tense-regular
+(p past-tense-irregular
    =goal>
-   isa goal
-   state done
+     isa    goal
+     state  done
    =imaginal>
-   isa past-tense
-      verb =stem
-      stem =stem
-      suffix =suffix
+     isa    past-tense
+     verb   =word
+     stem   =past
+     suffix blank
+  ==>
+   =goal> 
+     state  nil)
+
+(spp past-tense-irregular :reward 5)
+
+;;; When the stem matches the verb and the suffix is not "blank" consider it regular
+
+(p past-tense-regular
+   =goal>
+    isa     goal
+    state   done
+   =imaginal>
+     isa    past-tense
+     verb   =stem
+     stem   =stem
+     suffix =suffix
    !safe-eval! (not (eq =suffix 'blank)) 
-   ==>
-   =goal> state nil
-   )
+  ==>
+   =goal> 
+     state  nil)
 
-(spp find-past-tense-regular :reward 4.2)
+(spp past-tense-regular :reward 4.2)
 
-;;; a failed goal
+;;; when there's no stem and no suffix that's a "give up" result
 
-(p find-past-tense-equal
-    =goal>
-   isa goal
-   state done
+(p no-past-tense-formed
+   =goal>
+     isa    goal
+     state  done
    =imaginal>
-   isa past-tense
-      stem nil
-      suffix nil
-==>
-   =goal> state nil
-   )
+     isa    past-tense
+     stem   nil
+     suffix nil
+  ==>
+   =goal> 
+     state  nil)
 
-(spp find-past-tense-equal :reward 3.9) 
+(spp no-past-tense-formed :reward 3.9) 
 )

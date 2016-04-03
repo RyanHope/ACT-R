@@ -13,6 +13,7 @@ global standalone_mode
 # Use 0 for not standalne
 # Use 1 for Windows standalone
 # Use 2 for Mac standalone
+# Use 3 for Android app
 
 set standalone_mode 0
 
@@ -88,14 +89,16 @@ global top_dir
 global tcl_env_dir
 
 set tcl_env_dir [pwd]
-cd ..
+
+if {$standalone_mode != 3} {cd ..}
+
 if {$standalone_mode == 0} {cd ..}
 
 set top_dir [pwd]
 
 if {$standalone_mode == 0} {cd "environment"}
 
-cd "GUI"
+if {$standalone_mode != 3} {cd "GUI"}
 
 
 # To make sure everything is the "same size" on all systems
@@ -103,7 +106,7 @@ cd "GUI"
 # Environment display of virtual windows otherwise the fixation
 # cursor isn't in the 'right' place ...
 
-tk scaling 1.0
+# tk scaling 0.5
 
 
 # Define some general file handling procedures.
@@ -154,20 +157,20 @@ wm withdraw .
 # They're sourced in sorted order, so prepending a # to the
 # beginning of the name helps enforce an order on them.
 
-cd init
+#cd [file join $tcl_env_dir init]
 
 global init_error
 global init_error_msg
 
 set init_error 0
 
-foreach f [lsort [glob -nocomplain *.tcl]] {if { [catch {source $f} init_error_msg] } {
+foreach f [lsort [glob -nocomplain -directory [file join $tcl_env_dir init] *.tcl]] {if { [catch {source $f} init_error_msg] } {
     append_data "Error during init of $f: $init_error_msg\n" [file join $tcl_env_dir "error.log"]
     set init_error 1
 }}
 
 
-cd ..
+#cd $tcl_env_dir
 
 # Create the Control Panel here...
 
@@ -272,8 +275,9 @@ proc report_status {s} {
 
 bind .control_panel <Destroy> {
   global time_to_exit
+  global standalone_mode
 
-  save_window_positions
+  if {$standalone_mode != 3} {save_window_positions}
 
   catch {
     global environment_socket
@@ -370,7 +374,8 @@ proc shut_it_down {now} {
                          # but this simple setup isn't too bad for now
     #tk_messageBox -icon warning -title "Closing Environment" \
     #              -message "ACT-R Environment exiting" -type ok
-    exit
+    send_environment_cmd "goodbye"
+    after 1000 exit
     
   } elseif {$current_open_model != ""} {
     set answer [tk_messageBox -icon warning -title "Model still open" \
@@ -449,9 +454,12 @@ proc accept_socket_commands {sock} {
               shut_it_down 1
               after 2000 { #wait a little for things to restart
                 global top_dir
-                cd $top_dir
-                if [catch {exec "actr6s-64.exe" -V}] {
-                  if [catch {exec "actr6s-32.exe" -V}] {
+                
+                set cur_dir [pwd]
+                cd [file join $top_dir apps]
+
+                if [catch {exec "actr-s-64.exe" -V}] {
+                  if [catch {exec "actr-s-32.exe" -V}] {
                     tk_messageBox -icon warning -title "No ACT-R available" \
                       -message "Cannot run the ACT-R application. Contact Dan for help." -type ok
                     exit
@@ -461,7 +469,10 @@ proc accept_socket_commands {sock} {
                 } else {
                   exec "./run-64.bat" &
                 }
+                
+                cd $cur_dir
               }
+              
           }
           cancel { 
               shut_it_down 0
@@ -679,9 +690,29 @@ set environment_socket ""
 # This is where the listening server gets started.
 # Just create a server that calls accept_connection when
 # a connection is made on the port specified in the net-config file.
-# That's all there is to it!
 
-set connection_socket [socket -server accept_connection $tcl_port]
+# Being safe now to make sure that the socket gets opened
+
+set not_connected 1
+
+while {$not_connected} {
+  if {[catch {socket -server accept_connection $tcl_port} init_error_msg] } {
+    set try_again [tk_messageBox -icon warning -title "Connection Problem" -type yesno -message "Error occurred trying to listen for ACT-R on port $tcl_port\nError: $init_error_msg \nHit Yes to try again."]
+    
+    if {$try_again != "yes"} {
+      tk_messageBox -icon warning -title "Environment terminated" -type ok -message "ACT-R Environment GUI components not started."
+      exit 33
+    } 
+  } else {
+    set connection_socket $init_error_msg 
+    set not_connected 0
+  } 
+}
+
+
+# This is the original unprotected call
+# set connection_socket [socket -server accept_connection $tcl_port]
+
 
 
 # These procedures are ones that I needed for the declarative viewer
@@ -778,15 +809,15 @@ set up_and_running 0
 # beginning of the name helps enforce an order on them.
 
 
-cd dialogs
+#cd dialogs
 
-foreach f [lsort [glob -nocomplain *.tcl]] {if { [catch {source $f} init_error_msg] } {
+foreach f [lsort [glob -nocomplain -directory [file join $tcl_env_dir dialogs] *.tcl]] {if { [catch {source $f} init_error_msg] } {
     append_data "Error during dialog loading of $f: $init_error_msg\n" [file join $tcl_env_dir "error.log"]
     set global_status "dialog error"
 }}
 
 
-cd ..
+#cd ..
 
 set up_and_running 1
 

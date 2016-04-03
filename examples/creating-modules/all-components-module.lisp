@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : all-components-module.lisp
-;;; Version     : 1.0b2
+;;; Version     : 2.0
 ;;; 
 ;;; Description : A module which uses all the options that were available in '08,
 ;;;               but there are more now which should be added to this at some
@@ -21,18 +21,25 @@
 ;;; 
 ;;; Bugs        : 
 ;;;
-;;; To do       : 
+;;; To do       : [] Add the rest of the module options which are available now.
 ;;; 
 ;;; ----- History -----
 ;;; 2008.09.26 Dan
 ;;;             : * Initial creation.
 ;;; 2012.03.23 Dan [1.0b2]
 ;;;             : * Fixed bugs that someone just pointed out...
+;;; 2014.03.17 Dan [2.0]
+;;;             : * Changed the query-buffer call to be consistent with the new
+;;;             :   internal code.
+;;; 2014.08.13 Dan [3.0]
+;;;             : * Changed the request function since chunks and chunk-specs
+;;;             :   no longer have a type, but still haven't added all the other
+;;;             :   module components.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
-;;; This example module will use all of the possible components
+;;; This example module will use many of the possible components
 ;;; for a module.  It will perform actions that are similar to
 ;;; the goal buffer but will also print out a trace of when the 
 ;;; particular functions are called and what the parameters to
@@ -130,8 +137,11 @@
   (model-output "Demo module's primary reset function called.")
   
   ;; create the chunk-types used by the module
-  (chunk-type create-chunk)
-  (chunk-type result answer)
+  ;; and set some default slots which will be used in
+  ;; the request testing
+  
+  (chunk-type create-chunk (create-chunk t))
+  (chunk-type result answer (demo-result t))
   
   ;; clear its internal flags
   (setf (demo-module-busy instance) nil)
@@ -195,7 +205,7 @@
                   ;; of getting the module's instance and pulling 
                   ;; out the value directly.
 
-                  (query-buffer 'demo2 '((detect-jam . t)))))
+                  (query-buffer 'demo2 '(detect-jam  t))))
 
 ;;; Function to handle the demo module's parameters.
 
@@ -225,10 +235,15 @@
 ;;; buffers.  This function will call a buffer specific function
 ;;; to handle the different requests.
 
+;;; First a simple function to use to output the details of a chunk-spec
+
+(defun demo-spec->string (spec)
+  (let ((out (make-string-output-stream)))
+    (format out "~{~{~S~^ ~}~^~%~}" (chunk-spec-slot-spec spec))
+    (get-output-stream-string out)))
+
 (defun demo-requests (instance buffer chunk-spec)
-  (model-output "Request to the ~s buffer made with a request of type ~S"
-                buffer
-                (chunk-spec-chunk-type chunk-spec))
+  (model-output "Request to the ~s buffer:~%~s" buffer (demo-spec->string chunk-spec))
   (if (eq buffer 'demo1)
       (handle-demo1-request chunk-spec)
     (handle-demo2-request instance chunk-spec)))
@@ -247,8 +262,8 @@
       (model-warning "Invalid chunk-spec provided for a demo1 buffer request."))))
 
 ;;; A request to the demo2 buffer results in the creation
-;;; of a chunk of chunk-type result after 100ms and if the
-;;; request parameter :value is specified then the answer
+;;; of a chunk after 100ms with (define-chunks (isa result)). 
+;;; If the request parameter :value is specified then the answer 
 ;;; slot of that chunk will be set to that value.
 
 (defun handle-demo2-request (instance chunk-spec)
@@ -259,10 +274,10 @@
         (model-warning "Demo module's demo2 buffer can only process one request at a time.")
         (setf (demo-module-jammed instance) t))
     ;; otherwise handle the request
-    (if (eq (chunk-spec-chunk-type chunk-spec) 'create-chunk)
-        (let ((slot-specs (chunk-spec-slot-spec chunk-spec))
+    (if (chunk-spec-slot-spec chunk-spec 'create-chunk) ;; if it has the slot create-chunk in it
+        (let ((request-spec (chunk-spec-slot-spec chunk-spec :value))
               (new-chunk (car (define-chunks (isa result)))))
-          (cond ((null slot-specs) ; there is no request parameter give
+          (cond ((null request-spec) ; there is no request parameter given
                  ; set the busy flag for the module
                  (setf (demo-module-busy instance) t)
                  ; clear the error flag 
@@ -274,11 +289,10 @@
                  ; less than the buffer setting
                  (schedule-event-relative .1 'finish-demo2-request :module 'demo :destination 'demo :priority -1))
                 ;; if there is only a valid request parameter given
-                ((and (= (length slot-specs) 1)
-                      (eq (second (first slot-specs)) :value)
-                      (eq (first (first slot-specs)) '=))
+                ((and (= (length request-spec) 1)
+                      (eq (spec-slot-op (first request-spec)) '=))
                  ; modify the chunk with that value
-                 (mod-chunk-fct new-chunk (list 'answer (third (first slot-specs))))
+                 (mod-chunk-fct new-chunk (list 'answer (spec-slot-value (first request-spec))))
                  ; set the flags and schedule the buffer setting as above
                  (setf (demo-module-busy instance) t)
                  (setf (demo-module-error instance) nil)
@@ -286,12 +300,10 @@
                  (schedule-event-relative .1 'finish-demo2-request :module 'demo :destination 'demo :priority -1))
                 (t ; something was wrong with the request
                  (setf (demo-module-error instance) t)
-                 (model-warning "Invalid request to the demo2 buffer with this chunk-spec:")
-                 (pprint-chunk-spec chunk-spec))))
+                 (model-warning "Invalid request to the demo2 buffer:~%~s" (demo-spec->string chunk-spec)))))
       (progn
         (setf (demo-module-error instance) t)
-        (model-warning "Invalid request to the demo2 buffer with this chunk-spec:")
-        (pprint-chunk-spec chunk-spec)))))
+        (model-warning "Invalid request to the demo2 buffer:~%~s" (demo-spec->string chunk-spec))))))
 
 (defun finish-demo2-request (instance)
   ;; Just clear the busy and jammed flags
@@ -301,19 +313,20 @@
 ;;; The modification request for the module will be called
 ;;; for modification requests on either buffer.  It will
 ;;; only perform an action to modify a chunk in the demo2 buffer 
-;;; if it is of type result.
+;;; if it has a demo-result slot.
 
-(defun demo-modification-request (instance buffer modifications)
+(defun demo-modification-request (instance buffer modification-spec)
   
-  (model-output "A buffer modification request was made to the ~s buffer with mods: ~s"
-                buffer modifications)
+  (model-output "A buffer modification request was made to the ~s buffer:~%~s." buffer (demo-spec->string modification-spec))
   
   ;; The demo1 buffer just makes the change right away
   (if (eq buffer 'demo1)
-      (schedule-mod-buffer-chunk 'demo1 modifications 0 :module 'demo)
+      (schedule-mod-buffer-chunk 'demo1 modification-spec 0 :module 'demo)
       
+    ;; the demo2 buffer requires that the chunk have a demo-result slot,
+    ;; that the module not be busy,
+    ;; and only a slot named answer will be modified.
     
-    ;; check if the module is busy
     (if (demo-module-busy instance)
         (progn  ;; if so issue a warning and set the jammed flag
           (model-warning "Demo module's demo2 buffer can only process one request at a time.")
@@ -322,22 +335,20 @@
       (cond ((null (buffer-read 'demo2)) ; buffer is empty
              (model-warning "No chunk in the demo2 buffer to modify")
              (setf (demo-module-error instance) t))
-            ((not (eq (chunk-chunk-type-fct (buffer-read 'demo2)) 'result)) ;wrong type of chunk in the buffer
-             (model-warning "Chunk in the demo2 buffer is not of type result")
+            ((not (chunk-slot-value-fct (buffer-read 'demo2) 'demo-result)) ; doesn't have the demo-result slot
+             (model-warning "Chunk in the demo2 buffer does not have the demo-result slot")
              (setf (demo-module-error instance) t))
-            ((and (= (length modifications) 2)
-                  (eq (car modifications) 'answer))
+            ((= (length (chunk-spec-slot-spec modification-spec 'answer)) 1 (length (chunk-spec-slot-spec modification-spec)))
              ; set the flags 
              (setf (demo-module-busy instance) t)
              (setf (demo-module-error instance) nil)
              ; schedule the modification and finish events after the
              ; parameter time has passed
-             (schedule-mod-buffer-chunk 'demo2 modifications (demo-module-param instance) :module 'demo :priority 0)
+             (schedule-mod-buffer-chunk 'demo2 modification-spec (demo-module-param instance) :module 'demo :priority 0)
              (schedule-event-relative (demo-module-param instance) 'finish-demo2-request :module 'demo :destination 'demo :priority -1))
             (t
-             (model-warning "Invalid modification request to the demo2 buffer: ~s" modifications)
+             (model-warning "Invalid modification request to the demo2 buffer")
              (setf (demo-module-error instance) t))))))
-      
 
 
 ;;; This function will be called whenever any buffer clears.
@@ -350,11 +361,9 @@
 ;;; demo module will be made by a production which has been
 ;;; selected.
 
-(defun demo-detect-incoming-request (instance buffer type)
-  (declare (ignore instance))
-  (model-output "Demo module detects that a production will be making a request to the ~s buffer of chunk-type ~s"
-                buffer type))
-
+(defun demo-detect-incoming-request (instance buffer spec)
+  (declare (ignore instance spec))
+  (model-output "Demo module detects that a production will be making a request to the ~s buffer" buffer))
                             
 ;;; The actual module definition call specifying all the components.  
   

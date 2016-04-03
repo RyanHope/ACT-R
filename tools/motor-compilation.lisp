@@ -64,11 +64,11 @@
          (b+ (intern (concatenate 'string "+" (symbol-name bn))))
          (b? (intern (concatenate 'string "?" (symbol-name bn))))
          
-         (q1 (copy-tree (find b? (first p1-s) :key #'car)))
-         (q2 (copy-tree (find b? (first p2-s) :key #'car)))
+         (q1 (copy-tree (find b? (first p1-s) :key 'car)))
+         (q2 (copy-tree (find b? (first p2-s) :key 'car)))
          
-         (a1+ (copy-tree (find b+ (second p1-s) :key #'car)))
-         (a2+ (copy-tree (find b+ (second p2-s) :key #'car))))
+         (a1+ (copy-tree (find b+ (second p1-s) :key 'car)))
+         (a2+ (copy-tree (find b+ (second p2-s) :key 'car))))
     
     (case (aif (cdr (assoc buffer (production-buffer-indices p1))) it 0)
       (0 
@@ -89,35 +89,30 @@
   "Compilation check for queries such that p2 only uses 'state busy' 
   since buffer empty is meaningless for motor style buffers"
   (declare (ignore p1))
-  (let ((queries (mapcan #'third  (copy-tree (remove-if-not 
-                                              #'(lambda (x)
-                                                  (equal (car x) (cons #\? buffer)))
-                                              (production-lhs p2))))))
-    (every #'(lambda (x)      
-               (and (eq (first x) '=)
-                    (eq (second x) 'state)
-                    (eq (third x) 'busy)))
-           queries)))
-
+  (let ((query (find-if (lambda (x)
+                          (and (eq (production-statement-op x) #\?)
+                               (eq (production-statement-target x) buffer)))
+                        (production-lhs p2))))
+    (every (lambda (x)      
+             (equalp x '(= state busy)))
+           (chunk-spec-slot-spec (production-statement-spec query)))))
 
 (defun M-B-C2 (buffer p1 p2)
   "queries in p1 and p2 must be the same
    NOTE: this doesn't take into account any variables at this time"
-  (let ((queries-1 (remove-duplicates
-                    (mapcan #'third  (copy-tree (remove-if-not 
-                                                 #'(lambda (x)
-                                                     (equal (car x) (cons #\? buffer)))
-                                                 (production-lhs p1))))
-                    :test #'equal))
-        (queries-2 (remove-duplicates 
-                    (mapcan #'third  (copy-tree (remove-if-not 
-                                                 #'(lambda (x)
-                                                     (equal (car x) (cons #\? buffer)))
-                                                 (production-lhs p2))))
-                    :test #'equal)))
+  (let ((query1 (awhen (find-if (lambda (x)
+                                  (and (eq (production-statement-op x) #\?)
+                                       (eq (production-statement-target x) buffer)))
+                                (production-lhs p1))
+                       (chunk-spec-slot-spec (production-statement-spec it))))
+        (query2 (awhen (find-if (lambda (x)
+                                  (and (eq (production-statement-op x) #\?)
+                                       (eq (production-statement-target x) buffer)))
+                                (production-lhs p2))
+                       (chunk-spec-slot-spec (production-statement-spec it)))))
     
-    (= (length queries-1) (length queries-2) 
-       (length (remove-duplicates (append queries-1 queries-2) :test #'equal)))))
+    (= (length query1) (length query2) 
+       (length (remove-duplicates (append query1 query2) :test 'equal)))))
 
 (defun motor-reason (p1-index p2-index failed-function)
   (cond ((eql failed-function 'm-b-c1)
@@ -149,9 +144,8 @@
                                 (4 0 T)
                                 (0 20 T)
                                 (0 16 T)
-                                (0
-                                 4
-                                 T)) :DEFAULT NIL COMPOSE-MOTOR-BUFFER NIL NIL NIL motor-reason)
+                                (0 4 T))
+  :DEFAULT NIL COMPOSE-MOTOR-BUFFER NIL NIL NIL motor-reason)
 
 #|
 This library is free software; you can redistribute it and/or

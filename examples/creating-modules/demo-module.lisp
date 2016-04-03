@@ -6,7 +6,7 @@
 
 (defun reset-demo-module (demo)
   (declare (ignore demo))
-  (chunk-type demo-output value))
+  (chunk-type demo-output value (demo-output t)))
 
 (defun delete-demo-module (demo)
   (declare (ignore demo)))
@@ -29,18 +29,17 @@
 
 
 (defun demo-handle-print-out (spec)
-  (let* ((type (chunk-spec-chunk-type spec))
-         (value? (slot-in-chunk-spec-p spec 'value))
-         (v1 (when value? (chunk-spec-slot-spec spec 'value))))
-     (if (eq type 'demo-output)
-         (if value?
+  (let ((output-slot? (chunk-spec-slot-spec spec 'demo-output))
+        (v1 (chunk-spec-slot-spec spec 'value)))
+     (if output-slot?
+         (if v1
              (if (= (length v1) 1)
                  (if (eq (caar v1) '=)
                      (model-output "Value: ~s" (caddar v1))
                    (model-warning "Invalid slot modifier ~s in output buffer request" (caar v1)))
                (model-warning "Value slot specified multiple times in output buffer request"))
            (model-warning "Value slot missing in output buffer request"))
-       (model-warning "bad chunk-type in request to output buffer"))))
+       (model-warning "demo-output slot missing in request to output buffer"))))
 
 (defun demo-create-chunk (demo spec)
    (if (demo-module-busy demo)
@@ -118,64 +117,40 @@
 
 CG-USER(27): (run .25)
      0.000   PROCEDURAL             CONFLICT-RESOLUTION 
- 0[4]: (DEMO-MODULE-QUERIES #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) CREATE STATE FREE)
- 0[4]: returned T
+ 0[5]: (DEMO-MODULE-QUERIES #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) CREATE STATE FREE)
+ 0[5]: returned T
      0.000   PROCEDURAL             PRODUCTION-SELECTED P1 
      0.000   PROCEDURAL             QUERY-BUFFER-ACTION CREATE 
      0.050   PROCEDURAL             PRODUCTION-FIRED P1 
      0.050   PROCEDURAL             MODULE-REQUEST CREATE 
- 0[4]: (DEMO-MODULE-REQUESTS #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) CREATE
-                             #S(ACT-R-CHUNK-SPEC :TYPE #S(ACT-R-CHUNK-TYPE :NAME VISUAL-LOCATION
-                                                                           :DOCUMENTATION NIL
-                                                                           :SUPERTYPES (VISUAL-LOCATION)
-                                                                           :SUBTYPES (CHAR-PRIMITIVE VISUAL-LOCATION)
-                                                                           :SLOTS (SCREEN-X SCREEN-Y DISTANCE KIND COLOR VALUE HEIGHT WIDTH SIZE)
-                                                                           :EXTENDED-SLOTS NIL)
-                                                 :SLOTS (#S(ACT-R-SLOT-SPEC :MODIFIER = :NAME SCREEN-X :VALUE 10)
-                                                         #S(ACT-R-SLOT-SPEC :MODIFIER = :NAME SCREEN-Y :VALUE 20))))
- 0[4]: returned
-         #S(ACT-R-EVENT :TIME 0.2
-                        :PRIORITY 0
-                        :ACTION FREE-DEMO-MODULE
-                        :MODEL TEST-DEMO-MODULE
-                        :MP DEFAULT
-                        :MODULE DEMO
-                        :DESTINATION NIL
-                        :PARAMS (#S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY T))
-                        :DETAILS NIL
-                        :OUTPUT T
-                        :WAIT-CONDITION NIL)
+ 0[5]: (DEMO-MODULE-REQUESTS #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) CREATE #S(ACT-R-CHUNK-SPEC :FILLED-SLOTS 805306368 :EMPTY-SLOTS 0 :REQUEST-PARAM-SLOTS 0 :DUPLICATE-SLOTS 0 :EQUAL-SLOTS 805306368 :NEGATED-SLOTS 0 :RELATIVE-SLOTS 0 :VARIABLES NIL :SLOT-VARS NIL :DEPENDENCIES NIL :SLOTS (#S(ACT-R-SLOT-SPEC :MODIFIER = :NAME SCREEN-X :VALUE 10 :TESTABLE T :VARIABLE NIL) #S(ACT-R-SLOT-SPEC :MODIFIER = :NAME SCREEN-Y :VALUE 20 :TESTABLE T :VARIABLE NIL))))
+ 0[5]: returned #S(ACT-R-EVENT :MSTIME 200 :PRIORITY 0 :ACTION FREE-DEMO-MODULE :MODEL TEST-DEMO-MODULE :MP DEFAULT :MODULE DEMO :DESTINATION NIL :PARAMS (#S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY T)) :DETAILS NIL :OUTPUT T :WAIT-CONDITION NIL :DYNAMIC NIL)
      0.050   PROCEDURAL             CLEAR-BUFFER CREATE 
      0.050   PROCEDURAL             CONFLICT-RESOLUTION 
- 0[4]: (DEMO-MODULE-QUERIES #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY T) CREATE STATE FREE)
- 0[4]: returned NIL
-     0.200   DEMO                   SET-BUFFER-CHUNK CREATE VISUAL-LOCATION0 
+ 0[5]: (DEMO-MODULE-QUERIES #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY T) CREATE STATE FREE)
+ 0[5]: returned NIL
+     0.200   DEMO                   SET-BUFFER-CHUNK CREATE CHUNK0 
      0.200   DEMO                   FREE-DEMO-MODULE #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY T) 
      0.200   PROCEDURAL             CONFLICT-RESOLUTION 
+ 0[5]: (DEMO-MODULE-QUERIES #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) CREATE STATE FREE)
+ 0[5]: returned T
      0.200   PROCEDURAL             PRODUCTION-SELECTED P2 
      0.200   PROCEDURAL             BUFFER-READ-ACTION CREATE 
      0.250   PROCEDURAL             PRODUCTION-FIRED P2 
      0.250   PROCEDURAL             MODULE-REQUEST OUTPUT 
- 0[4]: (DEMO-MODULE-REQUESTS #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) OUTPUT
-                             #S(ACT-R-CHUNK-SPEC :TYPE #S(ACT-R-CHUNK-TYPE :NAME DEMO-OUTPUT
-                                                                           :DOCUMENTATION NIL
-                                                                           :SUPERTYPES (DEMO-OUTPUT)
-                                                                           :SUBTYPES (DEMO-OUTPUT)
-                                                                           :SLOTS (VALUE)
-                                                                           :EXTENDED-SLOTS NIL)
-                                                 :SLOTS (#S(ACT-R-SLOT-SPEC :MODIFIER = :NAME VALUE :VALUE VISUAL-LOCATION0-0))))
-Value: VISUAL-LOCATION0-0
- 0[4]: returned NIL
+ 0[5]: (DEMO-MODULE-REQUESTS #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) OUTPUT #S(ACT-R-CHUNK-SPEC :FILLED-SLOTS 72057594037928960 :EMPTY-SLOTS 0 :REQUEST-PARAM-SLOTS 0 :DUPLICATE-SLOTS 0 :EQUAL-SLOTS 72057594037928960 :NEGATED-SLOTS 0 :RELATIVE-SLOTS 0 :VARIABLES NIL :SLOT-VARS NIL :DEPENDENCIES NIL :SLOTS (#S(ACT-R-SLOT-SPEC :MODIFIER = :NAME VALUE :VALUE CHUNK0-0 :TESTABLE T :VARIABLE NIL) #S(ACT-R-SLOT-SPEC :MODIFIER = :NAME DEMO-OUTPUT :VALUE T :TESTABLE T :VARIABLE NIL))))
+Value: CHUNK0-0
+ 0[5]: returned NIL
      0.250   PROCEDURAL             CLEAR-BUFFER CREATE 
      0.250   PROCEDURAL             CLEAR-BUFFER OUTPUT 
      0.250   PROCEDURAL             CONFLICT-RESOLUTION 
- 0[4]: (DEMO-MODULE-QUERIES #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) CREATE STATE FREE)
- 0[4]: returned T
+ 0[5]: (DEMO-MODULE-QUERIES #S(DEMO-MODULE :DELAY 0.15 :ESC T :BUSY NIL) CREATE STATE FREE)
+ 0[5]: returned T
      0.250   PROCEDURAL             PRODUCTION-SELECTED P1 
      0.250   PROCEDURAL             QUERY-BUFFER-ACTION CREATE 
      0.250   ------                 Stopped because time limit reached 
 0.25
-22
+23
 NIL
 CG-USER(31): (clear-all)
  0[4]: (DELETE-DEMO-MODULE #S(DEMO-MODULE :DELAY 0.15 :BUSY NIL :ESC T))

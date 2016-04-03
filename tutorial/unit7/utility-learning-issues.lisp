@@ -18,11 +18,11 @@
   (chunk-type choose choice)
   (chunk-type response answer)
          
-  (define-chunks (initial-goal isa choose)
-      (response isa response)
-      (a isa chunk)
-      (b isa chunk))
-         
+  (define-chunks (initial-goal isa choose) (response isa response)
+      (a isa chunk) (b isa chunk))
+  
+  (declare-buffer-usage imaginal response answer)
+  
   (p choose-a
      =goal>
        isa choose

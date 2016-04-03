@@ -95,7 +95,7 @@ button [control_panel_name].load -text "Load Model" -font button_font -command {
 pack [control_panel_name].load
 
 send_environment_cmd \
-  "create list-handler [control_panel_name].load load_return (lambda (x)) ()"
+  "create list-handler [control_panel_name].load load_return (lambda (x)(declare (ignore x))) ()"
 
 bind [control_panel_name].load <Destroy> {
   remove_handler %W

@@ -10,7 +10,7 @@ button [control_panel_name].save \
 pack [control_panel_name].save
 
 send_environment_cmd \
-  "create list-handler [control_panel_name].save save_return (lambda (x)) ()"
+  "create list-handler [control_panel_name].save save_return (lambda (x) (declare (ignore x))) ()"
 
 bind [control_panel_name].save <Destroy> {
   remove_handler %W

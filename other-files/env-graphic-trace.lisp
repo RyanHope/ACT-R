@@ -53,6 +53,11 @@
 ;;;             :   now since the BOLD tools use it too.
 ;;; 2011.06.01 Dan
 ;;;             : * Removed some global vars that are no longer needed.
+;;; 2014.05.06 Dan
+;;;             : * Fixed a bug with parse-trace-list which could happen when
+;;;             :   production breaks cause 'bad' production events to be recorded.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -126,7 +131,7 @@
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(require-compiled "ENVIRONMENT-COLORS" "ACT-R6:support;environment-colors")
+(require-compiled "ENVIRONMENT-COLORS" "ACT-R-support:environment-colors")
 
 ;; Give the option to color the productions
 (suppress-extension-warnings)
@@ -251,6 +256,7 @@
               (push (list 'rectangle (gt-rect-start z) y (aif (gt-rect-end z) it (mp-time-ms)) (+ y y-inc) 
                           
                           (if (and (eq x 'production)
+                                   (gt-rect-request z)
                                    (production-color (read-from-string (gt-rect-request z)))
                                    (stringp (production-color (read-from-string (gt-rect-request z)))))
                               (production-color (read-from-string (gt-rect-request z)))
@@ -266,10 +272,11 @@
                         (+ x-coord (nth buffer-index widths-list)) (aif (gt-rect-end z) it (mp-time-ms))  
                                                 
                         (if (and (eq x 'production)
-                                   (production-color (read-from-string (gt-rect-request z)))
-                                   (stringp (production-color (read-from-string (gt-rect-request z)))))
-                              (production-color (read-from-string (gt-rect-request z)))
-                            (nth buffer-index color-list)) 
+                                 (gt-rect-request z)
+                                 (production-color (read-from-string (gt-rect-request z)))
+                                 (stringp (production-color (read-from-string (gt-rect-request z)))))
+                            (production-color (read-from-string (gt-rect-request z)))
+                          (nth buffer-index color-list)) 
                         
                         (gt-rect-request z) (gt-rect-chunk z) 
                         (if (gt-rect-notes z)

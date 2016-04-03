@@ -1,4 +1,4 @@
-image create photo brain -file ref-brain.gif
+image create photo brain -file [file join $tcl_env_dir dialogs ref-brain.gif]
 
 
 global brain_data 

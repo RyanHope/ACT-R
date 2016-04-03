@@ -196,6 +196,68 @@
 ;;; 2013.01.07 Dan
 ;;;             : * Added a check for a current meta-process to print-warning to
 ;;;             :   avoid a problem with checking for the current model.
+;;; 2014.03.21 Dan
+;;;             : * Moved circular-references here. 
+;;; 2014.03.27 Dan
+;;;             : * Moved replace-variables here.
+;;; 2014.04.07 Dan
+;;;             : * Moved chunk-spec-variable-p here as well.
+;;; 2014.05.20 Dan
+;;;             : * Moved objs-max-val here from vision.
+;;; 2014.05.21 Dan
+;;;             : * Added an objs-min-val as well.
+;;;             : * Added a pz macro.
+;;; 2014.06.18 Dan
+;;;             : * Added test to dist to make sure that it ignores non-numbers
+;;;             :   in the vectors.
+;;; 2014.09.29 Dan
+;;;             : * Changed string-to-lines from a defmethod to defun since it
+;;;             :   isn't called with different object types anyway.
+;;; 2014.10.14 Dan
+;;;             : * Change seconds->ms to multiply by 1000 instead of using 
+;;;             :   round with .001 because of issues with converting large
+;;;             :   times: (round (* 24 60 60) .001) doesn't result in 86400000
+;;;             :   in some Lisps for example.
+;;; 2015.06.01 Dan
+;;;             : * Added the one-time-model-warning command which is like model-
+;;;             :   warning except that there's an a parameter before the control
+;;;             :   string and args which is the "tag".  The first time a warning 
+;;;             :   with that tag is called since reset the warning is printed,
+;;;             :   but all subsequent calls will be ignored and result in no
+;;;             :   output and will also not evaluate the args.
+;;;             : * Changed the "time-size" testing to check for accuracy at the
+;;;             :   1 millisecond level by default instead of 50ms as was done
+;;;             :   before since it's acutally going to be used again with the
+;;;             :   *seconds->ms-accuracy-limit* variable which holds the approximate
+;;;             :   time in seconds beyond which the current floating point format
+;;;             :   may not accurately represent 1 ms.
+;;;             : * Added the safe-seconds->ms command which tests the value
+;;;             :   provided against *seconds->ms-accuracy-limit* and issues a
+;;;             :   one time warning if the provided seconds value is above that
+;;;             :   limit.
+;;; 2015.06.02 Dan
+;;;             : * Added an optional parameter to safe-seconds->ms to provide a
+;;;             :   name that will be included in the warning.
+;;;             : * Check the absolute value of the time since something like
+;;;             :   creation time for declarative items is sometimes specified
+;;;             :   as a negative.
+;;; 2015.06.03 Dan
+;;;             : * Some more adjustments to safe-seconds->ms and the variables
+;;;             :   that were holding the time accuracy info.  Now *time-size-test-list*
+;;;             :   is just an alist of a type and the actual number for the limit 
+;;;             :   calculated directly from the float info instead of by a
+;;;             :   search and safe-seconds->ms considers the specific type of the 
+;;;             :   number it was passed instead of assuming the default floating point
+;;;             :   format so that one can use an appropriate float format for a
+;;;             :   particular number without having to change the default and
+;;;             :   recompile everything i.e. (run-until-time 10000.5d0).
+;;;             : * Added a declaim for get-module-fct since that's called because
+;;;             :   of the warning in safe-seconds->ms.
+;;; 2015.06.08 Dan
+;;;             : * New format function for printing a millisecond time in seconds
+;;;             :   without loss of accuracy that converting to a float might have.
+;;;             :   It is used like this: (format t "~10/print-time-in-seconds/" ms-time)
+;;;             :   The only modifier it uses is the first one which specifies the min width.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -255,11 +317,11 @@
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
 
-(declaim (ftype (function (t &optional t) t) chunk-spec-variable-p))
 (declaim (ftype (function (t) t) act-r-random))
 (declaim (ftype (function () t) current-model))
 (declaim (ftype (function () t) current-mp-fct))
 (declaim (ftype (function () t) mp-models))
+(declaim (ftype (function (t) t) get-module-fct))
 
 ;;; WHILE      [Macro]
 ;;; From _On Lisp_.
@@ -397,7 +459,8 @@
 
 (defun seconds->ms (x)
   "Rounds a time in seconds to an integer number of milliseconds"
-  (round x .001))
+  (round (* x 1000)))
+
 
 (defun ms->seconds (x)
   "Converts an integer number of milliseconds to a floating point number of seconds"
@@ -617,6 +680,33 @@
                 nil)))))))
 
 
+(defmacro one-time-model-warning (tag control-string &rest args)
+  (let ((module (gensym))
+        (present (gensym))
+        (stream (gensym)))
+    `(multiple-value-bind (,module ,present)
+       (get-module-fct 'printing-module)
+     (when (and ,present (act-r-output-stream (printing-module-v ,module)))
+       (let ((,stream (act-r-output-stream (printing-module-v ,module))))
+         (unless (find ,tag (printing-module-one-time-tags ,module) :test 'equal)
+           (push ,tag (printing-module-one-time-tags ,module))
+           (cond ((null (printing-module-model-warnings ,module))
+                  ;; just suppress the warnings
+                  nil)
+                 ((or (null ,stream)
+                      (eq ,stream *error-output*)
+                      *one-stream-hack*
+                      (and (eq ,stream t) (eql *error-output* *standard-output*)))
+                  (format *error-output* 
+                      "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args))
+                 (t
+                  (format *error-output* 
+                      "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
+                  (format ,stream 
+                      "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
+                  nil))))))))
+
+
 (defmacro meta-p-output (control-string &rest args)
   (let ((module (gensym))
         (present (gensym))
@@ -665,6 +755,10 @@
   "Y coordinate of an XY vector."
   `(svref ,vpt 1))
 
+(defmacro pz (vpt)
+  "Z coordinate of an XYZ vector."
+  `(svref ,vpt 2))
+
 (defmacro vr (vrt)
   "R component of an r-theta vector."
   `(svref ,vrt 0))
@@ -700,7 +794,9 @@
 
 (defun dist (loc1 loc2)
   (sqrt (reduce '+ (map 'vector (lambda (x1 x2)
-                                  (expt (- x1 x2) 2))
+                                  (if (and (numberp x1) (numberp x2))
+                                      (expt (- x1 x2) 2)
+                                    0))
                      loc1 loc2) :initial-value 0)))
 
 
@@ -784,6 +880,39 @@
              (setf best current)
              (setf out-lst (list obj)))))))
 
+
+;; similar functions for non-objects using a general accessor
+
+
+(defun objs-min-val (list accessor)
+  (let ((value nil)
+        (matches nil))
+          
+    (dolist (y list)
+      (let ((cur-val (funcall accessor y)))
+        (if (or (null value) 
+                (< cur-val value))
+            (progn
+              (setf value cur-val)
+              (setf matches (list y)))
+          (when (= cur-val value)
+            (push y matches)))))
+    matches))
+
+(defun objs-max-val (list accessor)
+  (let ((value nil)
+        (matches nil))
+          
+    (dolist (y list)
+      (let ((cur-val (funcall accessor y)))
+        (if (or (null value) 
+                (> cur-val value))
+            (progn
+              (setf value cur-val)
+              (setf matches (list y)))
+          (when (= cur-val value)
+            (push y matches)))))
+    matches))
 
 ;;; MKSTR      [Function]
 ;;; Date        : 97.07.02
@@ -903,56 +1032,93 @@
   (not (eq x y)))
 
 
-(defmethod string-to-lines ((s string))
+(defun string-to-lines (s)
   (aif (position #\Newline s)
     (append (mklist (subseq s 0 it))
             (string-to-lines (subseq s (1+ it) (length s))))
     (list s)))
 
-;;; A specific value of nil may be important to some things, so that's why it
-;;; returns a second value of t on success.
 
-(defun verify-single-explicit-value (slot-specs module cmd slot)
-  (cond ((zerop (length slot-specs))
-         (print-warning 
-          "~a command to ~s module requires a value for the ~a slot." 
-          cmd module slot))
-        ((> (length slot-specs) 1)
-         (print-warning 
-          "~a slot may only be specified once in a ~a command to the ~s module." 
-          slot cmd module))
-        ((not (eql '= (caar slot-specs)))
-         (print-warning 
-          "~a slot may only have the = modifier in a ~a command to the ~s module." 
-          slot cmd module))
-        ((chunk-spec-variable-p (third (car slot-specs)))
-         (print-warning 
-          "~a slot must be explict - not a variable in a ~a command to the ~s module." 
-          slot cmd module))
-        (t
-         (values (third (car slot-specs)) t))))   
+(defun find-float-time-limit (size &optional (digits 3))
+  (let* ((radix (float-radix (coerce 1.0 size)))
+         (precision (float-precision (coerce 1.0 size)))
+         (significant (log (expt radix precision) 10)))
+    
+    (cons size (coerce (expt 10 (/ (floor (- significant digits) .1) 10)) size))))
 
+(defvar *time-size-test-list* (mapcar 'find-float-time-limit
+                                (list 'short-float 'single-float 'double-float 'long-float)))
 
-(defun find-float-time-limit (size &optional (delta .05))
-  (do* ((offset (coerce delta size))
-        (low (* .5 offset))
-        (high (+ offset low))
-        (e 0 (1+ e))
-        (test (coerce (expt 2 e) size) (coerce (expt 2 e) size)))
-       ((or (> e 100) (< (- (+ test offset) test) low) (> (- (+ test delta) test) high)) (1- e))))
-
-(defvar *time-size-test-list* (sort (let ((res nil)
-                                          (vals (list 'short-float 'single-float 'double-float 'long-float)))
-                                      (dolist (type (pushnew *read-default-float-format* vals) res)
-                                        (let ((size (find-float-time-limit type)))
-                                          (aif (find size res :key 'car)
-                                               (progn
-                                                 (push-last type (cdr it)))
-                                               (push (list size type) res))))) #'< :key 'car))
-
-(defvar *time-size-current-limit* (seconds->ms (expt 2 (find-float-time-limit *read-default-float-format*))))
+;(defvar *time-size-current-limit* (seconds->ms (expt 2 (find-float-time-limit *read-default-float-format*))))
 (defvar *time-size-current-type* *read-default-float-format*)                                    
 
+
+(defun safe-seconds->ms (seconds &optional fname)
+  (when (floatp seconds)
+    (let* ((type (type-of seconds))
+           (size (assoc type *time-size-test-list*)))
+      (when (null size)
+        (setf size (find-float-time-limit type))
+        (push-last size *time-size-test-list*))
+      
+      (when (> (abs seconds) (cdr size))
+        (let* ((larger (find-if (lambda (x) (> (cdr x) (cdr size))) *time-size-test-list*))
+               (marker (case (car larger) (single-float #\f) (double-float #\d) (long-float #\L)))
+               (options (list "specify the time in milliseconds if the command that was used has such an option"
+                              "use a rational number instead of a float e.g. 1234567/1000 instead of 1234.567")))
+          (when larger
+            (push-last (format nil "change the default floating point format to a higher precision type like ~s and recompile the ACT-R sources" (car larger))
+                       options))
+          (when marker
+            (push-last (format nil "directly specify the time as a higher precision floating point type e.g. 1234.567~c0" marker)
+                       options))
+          (one-time-model-warning :large-seconds "A time of ~f seconds was specified~@[ in a call to the ~a command~] which is beyond the limit to accurately represent time in milliseconds for the floating point type of that number (~s).~%To avoid potential problems you could do one of the following:~%~{ - ~a~%~}"
+                                seconds fname (car size) options)))))
+  (round (* seconds 1000)))
+                            
+
+(defun circular-references (dependencies)
+  "Modify the dependencies lists passed and return t if there are any circularities"
+  (dolist (x dependencies)
+    (dolist (y (cdr x))
+      (awhen (find y dependencies :test (lambda (i j) (if (listp (car j))
+                                                          (find i (car j))
+                                                        (eq i (car j)))))
+             (setf (cdr x) (append (cdr x) (cdr it))))))
+  
+  (some (lambda (x) 
+          (if (listp (car x))
+              (some (lambda (z) (find z (cdr x))) (car x))
+            (find (car x) (cdr x)))) dependencies))
+
+
+(defun chunk-spec-variable-p (chunk-spec-slot-value &optional (char #\=))
+  (and (symbolp chunk-spec-slot-value) 
+       (> (length (string chunk-spec-slot-value)) 1)
+       (char-equal (char (symbol-name chunk-spec-slot-value) 0) char)))
+
+(defun replace-variables (arg bindings)
+  (cond ((and (consp arg) (eq (last arg) arg))  ;; detect that it's something like (a . b)
+         (cons (replace-variables (car arg) bindings)
+               (replace-variables (cdr arg) bindings)))
+         
+         ((listp arg) 
+          (mapcar (lambda (x)
+                    (replace-variables x bindings))
+            arg))
+        ((chunk-spec-variable-p arg) 
+         (aif (assoc arg bindings)
+              (cdr it)
+              arg))
+        (t arg)))
+
+
+(defun cl-user::print-time-in-seconds (stream time colon-p atsign-p &optional (width 0) padchar commachar)
+  (declare (ignore colon-p atsign-p padchar commachar))
+  (multiple-value-bind (sec ms) (truncate time 1000)
+    (let* ((digits (format nil "~d.~3,'0d" sec ms))
+           (pad (max 0 (- width (length digits)))))
+      (format stream "~va~a" pad "" digits))))
 
 #|
 This library is free software; you can redistribute it and/or

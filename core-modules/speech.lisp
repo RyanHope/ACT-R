@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Mike Byrne & Dan Bothell
@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : speech.lisp
-;;; Version     : 2.2
+;;; Version     : 4.0
 ;;; 
 ;;; Description : Source code for the ACT-R/PM Speech Module.  This Module
 ;;;             : is pretty brain-damaged but should get the job done
@@ -100,36 +100,60 @@
 ;;;             :   the lower level sound creation code which has been changed
 ;;;             :   over to using ms internally to avoid having to do math on
 ;;;             :   times in seconds.
+;;; 2014.02.12 Dan
+;;;             : * The request chunk-types are no longer subtypes of speech-command
+;;;             :   since that wasn't actually used for anything.
+;;; 2014.05.16 Dan [3.0]
+;;;             : * Start the conversion to type-less chunks.
+;;;             : * In addition to isa speak string <text> one can now just do
+;;;             :   speak <text> as the request.
+;;; 2014.05.30 Dan
+;;;             : * Use the test-for-clear-request function in pm-module-request.
+;;; 2014.10.31 Dan
+;;;             : * Changed the speak and subvocalize chunks to be of the
+;;;             :   corresponding type.
+;;; 2015.06.04 Dan [3.1]
+;;;             : * Convert to using ms for internal math and convert user
+;;;             :   times in seconds to ms with safe-seconds->ms.
+;;;             : * Added an optional parameter to get-articulation-time so 
+;;;             :   that it can be returned in ms if needed.
+;;;             : * Add :time-in-ms t to all scheduled events and explicitly
+;;;             :   convert the exec-time to ms.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2015.09.22 Dan [4.0]
+;;;             : * Track and complete requests to the vocal buffer. Should mostly
+;;;             :   just work since this is built upon movement-styles and that's 
+;;;             :   benn generally updated.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-;(require-compiled "CENTRAL-PARAMETERS" "ACT-R6:support;central-parameters")
-
-;#+(and :mcl (not :openmcl)) 
-;(require-compiled "SPEECH-UTILS" "ACT-R6:support;speech-utils")
+(require-compiled "GENERAL-PM" "ACT-R-support:general-pm")
 
 (defclass speech-module (pm-module)
-  ((syllable-rate :accessor s-rate :initform 0.150)
-   (subvocalize-delay :accessor subvocalize-delay :initform .3)
+  ((syllable-rate :accessor s-rate :initform 150)
+   (subvocalize-delay :accessor subvocalize-delay :initform 300)
    (char-per-syllable :accessor char-per-syllable :initform 3)
    (art-time-ht :accessor art-time-ht :initarg :art-time-ht 
-                :initform (make-hash-table :test #'equal)))
+                :initform (make-hash-table :test 'equal)))
   (:default-initargs
-    :version-string "2.2"
+    :version-string "4.0"
     :name :SPEECH))
 
 
 (defmethod register-art-time ((spch-mod speech-module) (text string) (time number))
-  (setf (gethash text (art-time-ht spch-mod)) time))
+  (setf (gethash text (art-time-ht spch-mod)) (safe-seconds->ms time 'register-articulation-time)))
 
 
-(defmethod get-art-time ((spch-mod speech-module) (text string))
-  (aif (gethash text (art-time-ht spch-mod))
-       it
-       (ms-round (* (s-rate spch-mod) (/ (length text) (char-per-syllable spch-mod))))))
+(defmethod get-art-time ((spch-mod speech-module) (text string) &optional time-in-ms)
+  (let ((time
+         (aif (gethash text (art-time-ht spch-mod))
+              it
+              (round (* (s-rate spch-mod) (/ (length text) (char-per-syllable spch-mod)))))))
+    (if time-in-ms time (ms->seconds time))))
 
 ;;;; ---------------------------------------------------------------------- ;;;;
 ;;;; SPEAK movement style
@@ -156,9 +180,7 @@
 (defmethod queue-output-events ((spch-mod speech-module) (mvmt speak))
   (new-sound-event (make-instance 'word-sound-evt :onset (+ (mp-time-ms) (seconds->ms (exec-time mvmt))) 
                               :string (text mvmt) :location 'self))
-  (schedule-event-relative (exec-time mvmt) 'output-speech :params (list (text mvmt)) :destination :device :module :speech))
-
-
+  (schedule-event-relative (seconds->ms (exec-time mvmt)) 'output-speech :time-in-ms t :params (list (text mvmt)) :destination :device :module :speech))
 
 
 ;;;; SUBVOCALIZE movement style
@@ -167,8 +189,8 @@
 
 (defmethod queue-output-events ((spch-mod speech-module) (mvmt subvocalize))
   (new-sound-event (make-instance 'sound-event :onset (+ (mp-time-ms) (seconds->ms (exec-time mvmt)))
-                              :duration (seconds->ms (get-art-time spch-mod (text mvmt))) :content (text mvmt) 
-                              :delay (seconds->ms (subvocalize-delay spch-mod)) :recode 0 :location 'internal
+                              :duration (get-art-time spch-mod (text mvmt) t) :content (text mvmt) 
+                              :delay (subvocalize-delay spch-mod) :recode 0 :location 'internal
                               :kind 'word)))
 
 
@@ -183,105 +205,122 @@
     (generic-state-query speech buffer slot value)))
 
 
-(defmethod pm-module-request ((speech speech-module) buffer-name 
-                                  chunk-spec)
-  (declare (ignorable speech))
-  (case (chunk-spec-chunk-type chunk-spec)
-    (clear 
-     (schedule-event-relative 0 'clear :module :speech :destination :speech :output 'low))
-    (speak 
-     (let ((string (if (slot-in-chunk-spec-p chunk-spec 'string) 
-                       (verify-single-explicit-value 
-                        (chunk-spec-slot-spec chunk-spec 'string) 
-                        :speech 'speak 'string)
-                     nil)))
-       
-       (if (stringp string)
-             (schedule-event-relative 
-              0 
-              'speak 
-              :destination :speech
-              :params (list :text string)
-              :module :speech
-              :output 'low)
-         (model-warning "String slot in a speak request must be a Lisp string."))))
-    (subvocalize 
-     (let ((string (if (slot-in-chunk-spec-p chunk-spec 'string) 
-                       (verify-single-explicit-value 
-                        (chunk-spec-slot-spec chunk-spec 'string) 
-                        :speech 'speak 'string)
-                     nil)))
-       
-       (if (stringp string)
-         (schedule-event-relative 
-          0 
-          'subvocalize 
-          :destination :speech
-          :params (list :text string)
-          :module :speech
-          :output 'low)
-         (model-warning "String slot in a subvocalize request must be a Lisp string."))))
-    (t
-     (print-warning "Invalid command ~a sent to the ~s buffer" 
-                    (chunk-spec-chunk-type chunk-spec)
-                    buffer-name))))
+(defmethod pm-module-last-cmd-name ((speech speech-module) buffer-name chunk-spec)
+  (declare (ignorable speech buffer-name))
+  (let ((main-spec (chunk-spec-slot-spec chunk-spec)))
+    (and (= (length main-spec) 1)
+         (or (eq 'speak (spec-slot-name (first main-spec)))
+             (eq 'subvocalize (spec-slot-name (first main-spec))))
+         (spec-slot-name (first main-spec)))))
+    
+  
+(defmethod pm-module-request ((speech speech-module) buffer-name chunk-spec)
+  (declare (ignorable speech buffer-name))
+  (cond ((test-for-clear-request chunk-spec)
+         (schedule-event-now 'clear :module :speech :destination :speech :output 'low))
+        
+        ((= (length (chunk-spec-slot-spec chunk-spec 'cmd)) 1)
+         (let ((cmd (spec-slot-value (first (chunk-spec-slot-spec chunk-spec 'cmd)))))
+           (case cmd
+             ((speak subvocalize)
+              (let ((string (verify-single-explicit-value chunk-spec 'string :speech cmd)))
+                (if (stringp string)
+                    (schedule-event-now cmd :destination :speech :params (list :text string :request-spec chunk-spec) 
+                                        :module :speech :output 'low
+                                        :details (format nil "~a ~a ~a" cmd :text string))
+                  (progn
+                    (complete-request chunk-spec)
+                    (model-warning "String slot in a ~s request must be a Lisp string." cmd)))))
+             (t
+              (complete-request chunk-spec)
+              (print-warning "Invalid command ~a sent to the vocal buffer" cmd)))))
+        ((chunk-spec-slot-spec chunk-spec 'cmd)
+         (complete-request chunk-spec)
+         (print-warning "Invalid command to speech module specifies the cmd slot multiple times."))
+        ;; allow a request of just speak <text> or subvocalize <text>
+        (t
+         (let ((speak-spec (chunk-spec-slot-spec chunk-spec 'speak))
+               (subv-spec (chunk-spec-slot-spec chunk-spec 'subvocalize)))
+           (if (and (= (length speak-spec) 1)
+                    (stringp (spec-slot-value (first speak-spec))))
+               (schedule-event-now 'speak :destination :speech 
+                                   :params (list :text (spec-slot-value (first speak-spec)) :request-spec chunk-spec) 
+                                   :module :speech :output 'low
+                                   :details (format nil "~a ~a ~a" 'speak :text (spec-slot-value (first speak-spec))))
+             (if (and (= (length subv-spec) 1)
+                      (stringp (spec-slot-value (first subv-spec))))
+                 (schedule-event-now 'subvocalize :destination :speech 
+                                     :params (list :text (spec-slot-value (first subv-spec)) :request-spec chunk-spec) 
+                                     :module :speech :output 'low
+                                     :details (format nil "~a ~a ~a" 'subvocalize :text (spec-slot-value (first speak-spec))))
+               (progn
+                 (complete-request chunk-spec)
+                 (print-warning "Invalid command to speech module does not specify a valid action."))))))))
+
     
 
 (defun reset-speech-module (instance)
   (reset-pm-module instance)
     
-  (chunk-type speech-command)
-  (chunk-type (speak (:include speech-command)) string)
-  (chunk-type (subvocalize (:include speech-command)) string)
+  (chunk-type speech-command (cmd "speech command"))
+  (chunk-type (speak (:include speech-command)) (cmd speak) string speak)
+  (chunk-type (subvocalize (:include speech-command)) (cmd subvocalize) string subvocalize)
   
-  (unless (chunk-type-p pm-constant)
-    (chunk-type pm-constant))
+  (dolist (c '(speak subvocalize))
+    (unless (chunk-p-fct c)
+      (define-chunks-fct `((,c isa ,c)))
+      (make-chunk-immutable c)))
   
-  (define-chunks (self isa pm-constant)))
+  (dolist (c '(self internal))
+    (unless (chunk-p-fct c)
+      (define-chunks-fct `((,c name ,c)))
+      (make-chunk-immutable c))))
 
 (defun params-speech-module (speech param)
   (if (consp param)
       (case (car param)
         (:syllable-rate
-         (setf (s-rate speech) (cdr param)))
+         (setf (s-rate speech) (safe-seconds->ms (cdr param) 'sgp))
+         (cdr param))
         (:char-per-syllable
          (setf (char-per-syllable speech) (cdr param)))
         (:subvocalize-detect-delay
-         (setf (subvocalize-delay speech) (cdr param)))
+         (setf (subvocalize-delay speech) (safe-seconds->ms (cdr param) 'sgp))
+         (cdr param))
         )
     (case param
        (:syllable-rate
-       (s-rate speech))
+       (ms->seconds (s-rate speech)))
       (:char-per-syllable
        (char-per-syllable speech))
       (:subvocalize-detect-delay
-       (subvocalize-delay speech)))))
+       (ms->seconds (subvocalize-delay speech))))))
 
 (define-module-fct :speech 
-    (list (list 'vocal nil nil '(modality preparation execution processor last-command)
-                  #'(lambda () 
-                       (print-module-status (get-module :speech)))))
+    (list (define-buffer-fct 'vocal :queries '(modality preparation execution processor last-command)
+            :status-fn (lambda () 
+                         (print-module-status (get-module :speech)))
+            :trackable t))
   (list 
     (define-parameter :syllable-rate
-     :valid-test #'nonneg 
+     :valid-test 'nonneg 
      :default-value 0.15
      :warning "a non-negative number"
      :documentation "Seconds per syllable.")
    (define-parameter :subvocalize-detect-delay
-     :valid-test #'nonneg 
+     :valid-test 'nonneg 
      :default-value 0.3
      :warning "a non-negative number"
      :documentation "Sound detect time for a subvocalized word.")
    (define-parameter :char-per-syllable
-     :valid-test #'posnum 
+     :valid-test 'posnum 
      :default-value 3
      :warning "a positive number"
-     :documentation "Characters per syllable.")
-   )
-  :version "2.2"
+     :documentation "Characters per syllable."))
+  :version "4.0"
   :documentation "A module to provide a model with the ability to speak"
-  :creation #'(lambda (x) 
-                (declare (ignore x)) (make-instance 'speech-module))
+  :creation (lambda (x) 
+              (declare (ignore x)) (make-instance 'speech-module))
   :reset #'reset-speech-module
   :query #'query-speech-module
   :request 'pm-module-request
@@ -306,7 +345,7 @@
                 (register-art-time it string time)))
          (print-warning "No Speech module found.  Cannot set articulation time.")))))
     
-(defun get-articulation-time (string)
+(defun get-articulation-time (string &optional time-in-ms)
   "Return the articulation time of a string."
   (verify-current-mp
    "No current meta-process.  Cannot get articulation time."
@@ -316,7 +355,7 @@
          (cond ((not (stringp string))
                 (print-warning "Must specify a string for which to get the articulation time."))
                (t
-                (get-art-time it string)))
+                (get-art-time it string time-in-ms)))
          (print-warning "No Speech module found.  Cannot get articulation time.")))))
 
 ;;; backward compatibility only
@@ -324,7 +363,6 @@
 (defun pm-register-articulation-time (string time)
   "Register the articulation time of a string."
   (register-articulation-time string time))
-
 
 
 #|

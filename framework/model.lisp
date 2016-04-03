@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : model.lisp
-;;; Version     : 1.0
+;;; Version     : 3.0
 ;;; 
 ;;; Description : Functions that support the abstraction of a model
 ;;; 
@@ -104,6 +104,45 @@
 ;;; 2013.01.07 Dan
 ;;;             : * Changed the test on cannot-define-model to be >0 instead of
 ;;;             :   just true.
+;;; 2014.02.24 Dan [2.0]
+;;;             : * Don't bother creating the chunk-type chunk since it's 
+;;;             :   automatic now.
+;;;             : * Largest chunk-type size is total slot count (not the most
+;;;             :   efficient method, but go with it for now).
+;;; 2014.05.16 Dan
+;;;             : * Added more default chunk types: constant-chunk and clear.
+;;;             :   constant-chunk specifies a name slot which can then be used
+;;;             :   to prevent chunks from merging to avoid oddities like free
+;;;             :   and busy merging!  Clear has one slot named clear with a
+;;;             :   default value of t and it can be used by modules that need
+;;;             :   a "clear" request without having to define it in the module.
+;;;             : * All the default chunks now use the name slot to prevent 
+;;;             :   possible merging.  The chunk-name is set in the slot to
+;;;             :   avoid that.  It does change the fan of those items relative
+;;;             :   to the older ACT-R versions if they're used in slots of DM
+;;;             :   chunks and spreading activation is on, but the fan of those
+;;;             :   things shouldn't have been important anyway.
+;;; 2014.06.25 Dan
+;;;             : * Change the definition for the type chunk since subtype info
+;;;             :   isn't kept anymore.
+;;;             : * Set the act-r-chunk-type-info-types list to (chunks) on a
+;;;             :   reset.
+;;; 2014.09.26 Dan
+;;;             : * Instead of maphashing over global-modules-table dolist over
+;;;             :   all-module-names because that guarantees ordering.
+;;; 2014.11.07 Dan
+;;;             : * Adding another default chunk-type to specify the default
+;;;             :   query slots as valid: (chunk-type query-slots state buffer error).
+;;; 2015.03.19 Dan
+;;;             : * Resetting a model now needs to clear the buffer flags as well. 
+;;;             : * Failure needs to be the name of a default chunk.
+;;; 2015.09.09 Dan [3.0]
+;;;             : * Model now keeps track of requests made to modules when asked
+;;;             :   and can report on whether or not a request has "completed".
+;;; 2015.12.16 Dan
+;;;             : * All of the "completing" functions now return t as long as
+;;;             :   there is a model and meta-process regardless of whether or 
+;;;             :   not the params matched something previously uncompleted.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -203,13 +242,7 @@
     (act-r-model-name (current-model-struct))))
 
 (defun largest-chunk-type-size ()
-  (act-r-model-largest-chunk-type (current-model-struct)))
-
-(defun new-chunk-type-size (size)
-  (let ((model (current-model-struct)))
-    (when (> size (act-r-model-largest-chunk-type model))
-      (setf (act-r-model-largest-chunk-type model) size))))
-
+  (act-r-chunk-type-info-size (act-r-model-chunk-types-info (current-model-struct))))
 
 
 (defvar *model-chunk-table-size* nil)
@@ -248,7 +281,6 @@
            (let ((new-model (make-act-r-model :name name))
                  (mp (current-mp)))
              
-             
              (when (or *model-chunk-table-size* *model-chunk-table-rehash-threshold*)
                (if *model-chunk-table-size*
                    (if *model-chunk-table-rehash-threshold*
@@ -275,41 +307,45 @@
              (when (> (length (format nil "~S" name)) (meta-p-model-name-len mp))
                (setf (meta-p-model-name-len mp) (length (format nil "~S" name))))
              
-             (create-model-default-chunk-types-and-chunks)
+             (create-model-default-chunk-types-and-chunks new-model)
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (setf (gethash module-name (act-r-model-modules-table new-model))
-                            (instantiate-module module-name name)))
-                      (global-modules-table))
+             (dolist (module-name (all-module-names))
+               (setf (gethash module-name (act-r-model-modules-table new-model))
+                 (instantiate-module module-name name)))
              
              ;; instantiate the buffers
              
-             (maphash #'(lambda (buffer-name buffer-struct)
-                          (let ((buffer (copy-act-r-buffer buffer-struct)))
-                            
-                            (when (act-r-buffer-multi buffer)
-                              (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5)))
-                            
-                            (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
+             (maphash (lambda (buffer-name buffer-struct)
+                        (let ((buffer (copy-act-r-buffer buffer-struct)))
+                          
+                          (when (act-r-buffer-multi buffer)
+                            (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5)))
+                          
+                          (dolist (x (act-r-buffer-requests buffer))
+                            (add-request-parameter x)
+                            (setf (act-r-buffer-requests-mask buffer) (logior (slot-name->mask x) (act-r-buffer-requests-mask buffer))))
+                          
+                          (dolist (x (act-r-buffer-queries buffer))
+                            (add-buffer-query x))
+                          
+                          (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
                       *buffers-table*)
              
+             ;; clear the tracked-requests
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (reset-module module-name))
-                      (global-modules-table))
+             (setf (act-r-model-tracked-requests new-model) nil)
+             
+             (dolist (module-name (all-module-names))
+               (reset-module module-name))
              
              
-             (maphash #'(lambda (parameter-name parameter)
-                          (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
+             (maphash (lambda (parameter-name parameter)
+                        (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
                       *act-r-parameters-table*)
              
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (secondary-reset-module module-name))
-                      (global-modules-table))
+             (dolist (module-name (all-module-names))
+               (secondary-reset-module module-name))
              
              (let ((errored nil))
                (dolist (form model-code-list)
@@ -341,19 +377,15 @@
                      
                      ;; remove the modules which were created
                      
-                     (maphash #'(lambda (module-name instance)
-                                  (declare (ignore instance))
-                                  (delete-module module-name))
-                              (global-modules-table))
+                     (dolist (module-name (all-module-names))
+                       (delete-module module-name))
                      
                      (return-from define-model-fct nil)))))
              
              (setf (act-r-model-code new-model) model-code-list)
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (tertiary-reset-module module-name))
-                      (global-modules-table))
+             (dolist (module-name (all-module-names))
+               (tertiary-reset-module module-name))
              
              (unless (= 1 (meta-p-model-count mp))
                (setf (meta-p-current-model mp) nil))
@@ -382,7 +414,6 @@
            (let ((new-model (make-act-r-model :name name))
                  (mp (current-mp)))
              
-             
              (when (or *model-chunk-table-size* *model-chunk-table-rehash-threshold*)
                (if *model-chunk-table-size*
                    (if *model-chunk-table-rehash-threshold*
@@ -409,51 +440,52 @@
              (when (> (length (format nil "~S" name)) (meta-p-model-name-len mp))
                (setf (meta-p-model-name-len mp) (length (format nil "~S" name))))
              
-             (create-model-default-chunk-types-and-chunks)
+             (create-model-default-chunk-types-and-chunks new-model)
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (setf (gethash module-name (act-r-model-modules-table new-model))
-                            (instantiate-module module-name name)))
-                      (global-modules-table))
+             (dolist (module-name (all-module-names))
+               (setf (gethash module-name (act-r-model-modules-table new-model))
+                 (instantiate-module module-name name)))
              
              ;; instantiate the buffers
              
-             (maphash #'(lambda (buffer-name buffer-struct)
-                          (let ((buffer (copy-act-r-buffer buffer-struct)))
-                            
-                            (when (act-r-buffer-multi buffer)
-                              (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5)))
-                            
-                            (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
+             (maphash (lambda (buffer-name buffer-struct)
+                        (let ((buffer (copy-act-r-buffer buffer-struct)))
+                          
+                          (when (act-r-buffer-multi buffer)
+                            (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5)))
+                          
+                          (dolist (x (act-r-buffer-requests buffer))
+                            (add-request-parameter x)
+                            (setf (act-r-buffer-requests-mask buffer) (logior (slot-name->mask x) (act-r-buffer-requests-mask buffer))))
+                          
+                          (dolist (x (act-r-buffer-queries buffer))
+                            (add-buffer-query x))
+                          
+                          (setf (gethash buffer-name (act-r-model-buffers new-model)) buffer)))
                       *buffers-table*)
              
+             ;; clear the tracked-requests
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (reset-module module-name))
-                      (global-modules-table))
+             (setf (act-r-model-tracked-requests new-model) nil)
              
+             (dolist (module-name (all-module-names))
+               (reset-module module-name))             
              
-             (maphash #'(lambda (parameter-name parameter)
-                          (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
+             (maphash (lambda (parameter-name parameter)
+                        (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
                       *act-r-parameters-table*)
              
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (secondary-reset-module module-name))
-                      (global-modules-table))
+             (dolist (module-name (all-module-names))
+               (secondary-reset-module module-name))
              
              (dolist (form model-code-list)
                (eval form))
              
              (setf (act-r-model-code new-model) model-code-list)
              
-             (maphash #'(lambda (module-name val)
-                          (declare (ignore val))
-                          (tertiary-reset-module module-name))
-                      (global-modules-table))
+             (dolist (module-name (all-module-names))
+               (tertiary-reset-module module-name))
              
              (unless (= 1 (meta-p-model-count mp))
                (setf (meta-p-current-model mp) nil))
@@ -461,16 +493,24 @@
              name))))))
   
   
-(defun create-model-default-chunk-types-and-chunks ()
-  (chunk-type-fct (list 'chunk))
-  (define-chunks-fct (list '(free isa chunk)
-                           '(busy isa chunk)
-                           '(error isa chunk)
-                           '(empty isa chunk)
-                           '(full isa chunk)
-                           '(requested isa chunk)
-                           '(unrequested isa chunk))))
+(defun create-model-default-chunk-types-and-chunks (model)
+  (let ((info (act-r-model-chunk-types-info model))
+        (c (make-act-r-chunk-type :name 'chunk :super-types (list 'chunk))))
+    
+    (setf (gethash 'chunk (act-r-chunk-type-info-table info)) c)
+    (setf (gethash 0 (act-r-chunk-type-info-distinct-types info)) (list (cons nil (list 'chunk))))
+    (setf (act-r-chunk-type-info-types info) (list 'chunk)))
   
+  (chunk-type constant-chunks name)
+  (chunk-type clear (clear t))
+  (chunk-type query-slots state buffer error)
+  
+  (dolist (x '(free busy error empty full failure requested unrequested))
+    (define-chunks-fct `((,x name ,x)))
+    (make-chunk-immutable x))
+  
+  (define-chunks (clear isa clear))
+  (make-chunk-immutable 'clear))
 
 
 (defmacro delete-model (&optional (model-name nil provided))
@@ -499,10 +539,8 @@
                   (remove model-name (meta-p-dynamics mp) :key #'(lambda (x) (evt-model (car x)))))
                 
                 (unwind-protect 
-                    (maphash #'(lambda (module-name instance)
-                                 (declare (ignore instance))
-                                 (delete-module module-name))
-                             (global-modules-table))
+                    (dolist (module-name (all-module-names))
+                      (delete-module module-name))
                   
                   (progn
                     (decf (meta-p-model-count mp))
@@ -580,8 +618,16 @@
     
     (cannot-define-model
      (unwind-protect
-         (progn
-           (clrhash (act-r-model-chunk-types-table model))
+         (let ((info (act-r-model-chunk-types-info model)))
+           ;; erase chunk-type info 
+           (clrhash (act-r-chunk-type-info-slot->index info))
+           (setf (act-r-chunk-type-info-index->slot info) (make-array (list 0) :adjustable t :fill-pointer t))
+           (clrhash (act-r-chunk-type-info-slot->mask info))
+           (setf (act-r-chunk-type-info-size info) 0)
+           (clrhash (act-r-chunk-type-info-distinct-types info))
+           (setf (act-r-chunk-type-info-extended-slots info) nil)
+           (clrhash (act-r-chunk-type-info-table info))
+           
            (clrhash (act-r-model-chunks-table model))
            (clrhash (act-r-model-chunk-ref-table model))
            
@@ -589,41 +635,98 @@
            (setf (act-r-model-dynamic-update model) t)
            (setf (act-r-model-delete-chunks model) nil)
            
-           (setf (act-r-model-largest-chunk-type model) 0)
+           (setf (act-r-model-tracked-requests model) nil)
            
-           (maphash #'(lambda (buffer-name buffer)
-                        (declare (ignore buffer-name))
-                        (setf (act-r-buffer-chunk buffer) nil)
-                        (when (act-r-buffer-multi buffer)
-                          (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5))))
+           (create-model-default-chunk-types-and-chunks model)
+           
+           (maphash (lambda (buffer-name buffer)
+                      (declare (ignore buffer-name))
+                      (setf (act-r-buffer-chunk buffer) nil)
+                      (when (act-r-buffer-multi buffer)
+                        (setf (act-r-buffer-chunk-set buffer) (make-hash-table :test 'eq :size 5)))
+                      (dolist (x (act-r-buffer-requests buffer))
+                        (add-request-parameter x)
+                        (setf (act-r-buffer-requests-mask buffer) (logior (slot-name->mask x) (act-r-buffer-requests-mask buffer))))
+                      (dolist (x (act-r-buffer-queries buffer))
+                        (add-buffer-query x))
+                      ;; clear any flags
+                      (setf (act-r-buffer-flags buffer) nil))
                     (act-r-model-buffers model))
+                      
+           (dolist (module-name (all-module-names))
+             (reset-module module-name))
            
-           (create-model-default-chunk-types-and-chunks)
-           
-           (maphash #'(lambda (module-name instance)
-                        (declare (ignore instance))
-                        (reset-module module-name))
-                    (global-modules-table))
-           
-           (maphash #'(lambda (parameter-name parameter)
-                        (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
+           (maphash (lambda (parameter-name parameter)
+                      (sgp-fct (list parameter-name (act-r-parameter-default parameter))))
                     *act-r-parameters-table*)
            
            
-           (maphash #'(lambda (module-name val)
-                        (declare (ignore val))
-                        (secondary-reset-module module-name))
-                    (global-modules-table))    
+           (dolist (module-name (all-module-names))
+             (secondary-reset-module module-name))
            
            (dolist (form (act-r-model-code model))
              (eval form))
            
-           (maphash #'(lambda (module-name val)
-                        (declare (ignore val))
-                        (tertiary-reset-module module-name))
-                    (global-modules-table)))
+           (dolist (module-name (all-module-names))
+             (tertiary-reset-module module-name)))
        
        (setf (meta-p-current-model mp) previous-model)))))
+
+;;; Functions for tracking and checking on requests
+
+(defstruct request-tracking buffer module spec)
+
+;; this is internal so ignore extra checking
+
+(defun track-request (buffer-instance spec)
+  (when (act-r-buffer-trackable buffer-instance)
+    (push (make-request-tracking :buffer (act-r-buffer-name buffer-instance)
+                                 :module (act-r-buffer-module buffer-instance)
+                                 :spec spec)
+          (act-r-model-tracked-requests (current-model-struct)))))
+
+;; these are all available to module/user code so protect accordingly
+
+(defun request-completed-p (spec)
+  (verify-current-mp  
+   "request-completed-p called with no current meta-process."
+   (verify-current-model
+    "request-completed-p called with no current model."
+    (unless (find spec (act-r-model-tracked-requests (current-model-struct)) :key 'request-tracking-spec :test 'eq)
+      t))))
+
+(defun complete-request (spec)
+  (verify-current-mp  
+   "complete-request called with no current meta-process."
+   (verify-current-model
+    "complete-request called with no current model."
+    (let ((cm (current-model-struct)))
+      (setf (act-r-model-tracked-requests cm)
+        (remove spec (act-r-model-tracked-requests cm) :key 'request-tracking-spec :test 'eq))
+      t))))
+
+(defun complete-all-buffer-requests (buffer-name)
+  (verify-current-mp  
+   "complete-all-buffer-requests called with no current meta-process."
+   (verify-current-model
+    "complete-all-buffer-requests called with no current model."
+    (let ((cm (current-model-struct)))
+      (setf (act-r-model-tracked-requests cm)
+        (remove buffer-name (act-r-model-tracked-requests cm) :key 'request-tracking-buffer :test 'eq))
+      t))))
+
+(defun complete-all-module-requests (module-name)
+  (verify-current-mp  
+   "complete-all-module-requests called with no current meta-process."
+   (verify-current-model
+    "complete-all-module-requests called with no current model."
+    (let ((cm (current-model-struct)))
+      (setf (act-r-model-tracked-requests cm)
+        (remove module-name (act-r-model-tracked-requests cm) :key 'request-tracking-module :test 'eq))
+      t))))
+
+
+
   
 
 #|

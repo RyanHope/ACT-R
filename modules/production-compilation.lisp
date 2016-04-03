@@ -13,9 +13,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : production-compilation.lisp
-;;; Version     : 1.5
+;;; Version     : 2.0
 ;;; 
-;;; Description : First pass at production compilation in ACT-R 6.
+;;; Description : Implements the production compilation mechnaism in ACT-R 6.
 ;;; 
 ;;; Bugs        : 
 ;;;
@@ -392,6 +392,15 @@
 ;;;             : * Fixed a bug with how the comment string for the compiled production
 ;;;             :   was set when there's a dropout buffer which only occurs in the
 ;;;             :   conditions of the second production.
+;;; 2014.05.07 Dan [2.0]
+;;;             : * Start the conversion to the typeless chunk operation and
+;;;             :   the modified production syntax.
+;;; 2014.05.19 Dan
+;;;             : * Removed the allow-subtypes keyword from check-consistency.
+;;; 2015.06.04 Dan
+;;;             : * Use safe-seconds->ms for recording the :tt value.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical in build-compilation-type-file to ACT-R.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -472,7 +481,8 @@
 ;;;    - RHS !bind!
 ;;;    - RHS !mv-bind!
 ;;;    - multiple LHS ='s for any one buffer.
-;;;    - No direct requests 
+;;;    - No indirect requests 
+;;;    - No overwrite actions
 ;;;    - No slot modifiers other than = in the conditions.
 ;;;   
 ;;;
@@ -577,7 +587,9 @@
 ;;; defun   specify-compilation-buffer-type-fct (buffer-name buffer-type)
 ;;;
 ;;; buffer-name must be the name of a valid buffer in the model.
-;;; buffer-type must be one of the symbols goal, retrieval, perceptual, motor.
+;;; buffer-type must be one of the symbols goal, imaginal, retrieval, perceptual, 
+;;; motor, or the symbol naming another type which is created using 
+;;; define-compilation-type.
 ;;;
 ;;; If the named buffer exists and the symbol for the buffer-type is valid this
 ;;; command will cause production compilation to treat the named buffer as a
@@ -596,7 +608,7 @@
 ;;; defun show-compilation-buffer-types ()
 ;;;
 ;;; This command will print out a table showing the current compilation buffer
-;;; type for all of the buffers in the system.  If there is no current module
+;;; type for each of the buffers in the system.  If there is no current module
 ;;; then it will print a warning.
 ;;; 
 ;;; It always returns nil.
@@ -648,16 +660,19 @@
 
 (extend-productions drop-out-buffers-map :default-value nil)
 
+;;; Cache the settings for checking and the compilation trace
 
 (extend-productions valid-1st-p :default-value :unset)
 (extend-productions valid-for-compilation :default-value :unset)
+(extend-productions invalid-compilation-reason :default-value :unset)
+(extend-productions redundant-variables :default-value :unset)
 
 (unsuppress-extension-warnings)
 
 ;;; Structure to hold a buffer-type's info instead of
 ;;; using separate tables.
 
-(defstruct comp-buffer-type name (table (make-hash-table :test #'equalp)) compose map consistency buffers pre-instantiate drop-out whynot-reason)
+(defstruct comp-buffer-type name (table (make-hash-table :test 'equalp)) compose map consistency buffers pre-instantiate drop-out whynot-reason)
 
 ;;; Globally store the possible composition types in a table
 ;;; where the key is the name and the value is a comp-buffer-type structure.
@@ -672,19 +687,21 @@
 
 ;;; Computed 
 
-(defvar *buffer-var-names* nil
-  "The variable names of all current buffers")
 
 (defstruct compilation-module
   trace
   epl
   previous
   previous-time
+  buffer-var-names
   (buffer-type-table (make-hash-table))
   ppm
   tt
   (composeable-table (make-hash-table :test #'equalp)))
 
+
+(defstruct previous-production
+  name bindings struct)
 
 (defmacro define-compilation-type (name table buffers mapping compose consistency pre-instantiate drop-out whynot)
   `(define-compilation-type-fct ',name ',table ',buffers ',mapping ',compose ',consistency ',pre-instantiate ',drop-out ',whynot))
@@ -809,11 +826,11 @@
   
   (clrhash (compilation-module-buffer-type-table instance))
   
-  (setf *buffer-var-names* nil)
+  (setf (compilation-module-buffer-var-names instance) nil)
   
   (dolist (buffer (buffers))
     
-    (push-last (intern (concatenate 'string "=" (string buffer))) *buffer-var-names*)
+    (push-last (intern (concatenate 'string "=" (string buffer))) (compilation-module-buffer-var-names instance))
     
     (let ((standard (gethash buffer *buffer-to-compilation-type-table*)))
       (if (and standard (gethash standard *valid-compilation-buffer-types*))
@@ -830,7 +847,7 @@
            
            (:pct (setf (compilation-module-trace prod) (cdr param)))
            (:tt 
-            (setf (compilation-module-tt prod) (seconds->ms (cdr param)))
+            (setf (compilation-module-tt prod) (safe-seconds->ms (cdr param) 'sgp))
             (cdr param))
            (:epl (setf (compilation-module-epl prod) (cdr param)))
            (:ppm (setf (compilation-module-ppm prod) (cdr param)))))
@@ -845,16 +862,16 @@
     nil
   (list (define-parameter :ppm :owner nil)
         (define-parameter :epl :default-value nil 
-          :valid-test #'tornil :warning "T or nil"
+          :valid-test 'tornil :warning "T or nil"
           :documentation "Enable Production Learning")
         (define-parameter :pct :default-value nil 
-          :valid-test #'tornil :warning "T or nil"
+          :valid-test 'tornil :warning "T or nil"
           :documentation "Production Compilation Trace")
         
         (define-parameter :tt :default-value 2.0
-          :valid-test #'posnum :warning "a positive number"
+          :valid-test 'posnum :warning "a positive number"
           :documentation "Threshold time"))
-  :version "1.5"
+  :version "2.0"
   :documentation "A module that assists the primary procedural module with compiling productions"
   :creation 'create-composition-module
   :reset 'reset-production-compilation
@@ -874,27 +891,35 @@
       (cond ((not (valid-compilation-production p-name production))
              (when (compilation-module-trace module)
                (model-output "  Production ~s is not valid for compilation" p-name)
-               (model-output "   because ~a" (invalid-compilation-reason production)))
+               (model-output "   because ~a" (invalid-compilation-reason p-name production)))
              (setf (compilation-module-previous module) nil))
             
             ((null (compilation-module-previous module))
              (when (compilation-module-trace module)
                (model-output "  No previous production to compose with."))
              (handle-check-valid-1st-p module p-name production))
+            
             ((> (- (mp-time-ms) (compilation-module-previous-time module))
                 (compilation-module-tt module))
              (when (compilation-module-trace module)
                (model-output "  Cannot compile ~s and ~s because the time between them exceeds the threshold time."
-                             (car (compilation-module-previous module))
+                             (previous-production-name (compilation-module-previous module))
                              p-name))
              (handle-check-valid-1st-p module p-name production))
-            ((null (composeable-productions-p module (get-production (car (compilation-module-previous module))) production))
+            
+            ((null (composeable-productions-p module (previous-production-struct (compilation-module-previous module)) production))
              (when (compilation-module-trace module)
-               (model-output "  Production ~s and ~s cannot be composed." (car (compilation-module-previous module)) p-name))
+               (model-output "  Production ~s and ~s cannot be composed." (previous-production-name (compilation-module-previous module)) p-name))
              (handle-check-valid-1st-p module p-name production))
+            
             (t
              (when (compilation-module-trace module)
-               (model-output "  Production ~s and ~s are being composed." (car (compilation-module-previous module)) p-name))
+               (model-output "  Production ~s and ~s are being composed." (previous-production-name (compilation-module-previous module)) p-name)
+               (when (redundant-variable-check (previous-production-name (compilation-module-previous module)) (previous-production-struct (compilation-module-previous module)))
+                 (model-output "    Production ~s has redundant variables in the conditions which may lead to unusual production compilation results." 
+                               (previous-production-name (compilation-module-previous module))))
+               (when (redundant-variable-check p-name production)
+                 (model-output "    Production ~s has redundant variables in the conditions which may lead to unusual production compilation results." p-name)))
              (compose-productions module production)
              (handle-check-valid-1st-p module p-name production))))))
 
@@ -904,100 +929,80 @@
   (let ((v (production-valid-for-compilation p-name)))
     (if (eq :unset v)
         (setf (production-valid-for-compilation p-name)
-          (not (or (find 'eval (production-lhs prod) :key #'cdar)
-                   (find 'eval (production-rhs prod) :key #'cdar)
-                   (find 'bind (production-lhs prod) :key #'cdar)
-                   (find 'bind (production-rhs prod) :key #'cdar)
-                   (find 'mv-bind (production-lhs prod) :key #'cdar)
-                   (find 'mv-bind (production-rhs prod) :key #'cdar)
-                   (find 'safe-bind (production-lhs prod) :key #'cdar)
-                   (check-for-duplicates #\= (production-lhs prod))
-                   (issues-direct-requests prod)
-                   (slot-modifers-other-than-= prod)
-                   (redundant-variable-check prod))))
+          (not (or (find 'eval (production-lhs prod) :key 'production-statement-target)
+                   (find 'eval (production-rhs prod) :key 'production-statement-target)
+                   (find 'bind (production-lhs prod) :key 'production-statement-target)
+                   (find 'bind (production-rhs prod) :key 'production-statement-target)
+                   (find 'mv-bind (production-lhs prod) :key 'production-statement-target)
+                   (find 'mv-bind (production-rhs prod) :key 'production-statement-target)
+                   (find 'safe-bind (production-lhs prod) :key 'production-statement-target)
+                   (find #\@ (production-rhs prod) :key 'production-statement-op)
+                   (indirect-action-buffer-name (production-rhs prod))
+                   (slot-modifers-other-than-= (production-lhs prod)))))
       v)))
 
 
-(defun invalid-compilation-reason (prod)
-  (cond ((or (find 'eval (production-lhs prod) :key #'cdar)
-             (find 'eval (production-rhs prod) :key #'cdar))
-         "it contains one or more !eval! operators")
-        ((or (find 'bind (production-lhs prod) :key #'cdar)
-             (find 'bind (production-rhs prod) :key #'cdar)
-             (find 'mv-bind (production-lhs prod) :key #'cdar)
-             (find 'mv-bind (production-rhs prod) :key #'cdar))
-         "it contains one or more !bind! operators")
-        ((find 'safe-bind (production-lhs prod) :key #'cdar)
-         "it contains one or more LHS !safe-bind! operators")
-        ((check-for-duplicates #\= (production-lhs prod))
-         (format nil "it has multiple LHS conditions for the ~a buffer" (duplicate-buffer-name #\= (production-lhs prod))))
-        ((issues-direct-requests prod)
-         (format nil "it makes a direct request to the ~a buffer" (direct-request-buffer-name prod)))
-        ((slot-modifers-other-than-= prod)
-         "it has conditions with modifiers on slot tests")
-        (t ;;(redundant-variable-check prod) -- that always returns nil and prints a warning now
-         "of unknown reason. (This should not happen. Please report this issue to Dan.)")))
-
-(defun check-for-duplicates (char items)
-  (let ((filtered (mapcar #'cdar 
-                    (remove char items :key #'caar 
-                            :test #'(lambda (x y)
-                                      (not (eql x y)))))))
-    (not (= (length filtered) 
-            (length (remove-duplicates filtered))))))
+(defun invalid-compilation-reason (p-name prod)
+  (let ((r (production-invalid-compilation-reason p-name)))
+    (if (eq :unset r)
+        (setf (production-invalid-compilation-reason p-name)
+          (cond ((or (find 'eval (production-lhs prod) :key 'production-statement-target)
+                     (find 'eval (production-rhs prod) :key 'production-statement-target))
+                 "it contains one or more !eval! operators")
+                ((or (find 'bind (production-lhs prod) :key 'production-statement-target)
+                     (find 'bind (production-rhs prod) :key 'production-statement-target)
+                     (find 'mv-bind (production-lhs prod) :key 'production-statement-target)
+                     (find 'mv-bind (production-rhs prod) :key 'production-statement-target))
+                 "it contains one or more !bind! operators")
+                ((find 'safe-bind (production-lhs prod) :key 'production-statement-target)
+                 "it contains one or more LHS !safe-bind! operators")
+                ((find #\@ (production-rhs prod) :key 'production-statement-op)
+                 "it contains one or more buffer overwrite actions.")
+                ((indirect-action-buffer-name (production-rhs prod))
+                 (format nil "it has an indirect action with the ~a buffer" (indirect-action-buffer-name (production-rhs prod))))
+                ((slot-modifers-other-than-= (production-lhs prod))
+                 "it has conditions with modifiers on slot tests")
+                (t 
+                 "of an unknown reason. (This should not happen. Please report this issue to Dan.)")))
+      r)))
 
 
-(defun duplicate-buffer-name (char items)
-  (let ((filtered (mapcar #'cdar 
-                    (remove char items :key #'caar 
-                            :test #'(lambda (x y)
-                                      (not (eql x y)))))))
+(defun duplicate-buffer-name (op statements)
+  (let ((filtered (mapcar 'production-statement-target
+                    (remove-if-not (lambda (x) 
+                                     (eql op x))
+                                   statements :key 'production-statement-op))))
     (car (remove-if-not (lambda (x) (> (count x filtered) 1)) filtered))))
 
 
-(defun issues-direct-requests (prod)
-  (let ((rep (produce-standard-representation prod)))
-    (find-if #'(lambda (y) 
-                 (unless (eq (first y) '!output!)
-                   (let ((x (second y)))
-                     (and (= (length x) 1)
-                          (not (listp (first x)))))))
-             (second rep))))
+(defun indirect-action-buffer-name (statements)
+  (awhen (find-if (lambda (x) 
+                    (and (find (production-statement-op x) '(#\= #\* #\+))
+                         (= (length (production-statement-definition x)) 1)))
+                  statements)
+         (production-statement-target it)))
 
-(defun direct-request-buffer-name (prod)
-  (let* ((rep (produce-standard-representation prod))
-         (request (find-if #'(lambda (y) 
-                               (unless (eq (first y) '!output!)
-                                 (let ((x (second y)))
-                                   (and (= (length x) 1)
-                                        (not (listp (first x)))))))
-                           (second rep)))
-         (buffer-action (princ-to-string (car request))))
-    (subseq buffer-action 1 (1- (length buffer-action)))))
-
-(defun slot-modifers-other-than-= (prod)
-  (let ((rep (produce-standard-representation prod)))
-    (dolist (condition (first rep))
-      (unless (or (eq (car condition) '!safe-eval!)
-                  (eq (car condition) '!safe-bind!))
-        
-        (dolist (tests (second condition))
-          (when (and (listp tests)
-                     (= (length tests) 3)
-                     (not (eql '= (car tests))))
-            (return-from slot-modifers-other-than-= t)))))))
+(defun slot-modifers-other-than-= (statements)
+  (some (lambda (y)
+          (and (production-statement-spec y)
+               (find-if-not (lambda (x)
+                              (eql x '=))
+                            (chunk-spec-slot-spec (production-statement-spec y)) :key 'first)))
+        statements))
 
 
-(defun redundant-variable-check (prod)
-  (let ((rep (produce-standard-representation prod)))
-    (dolist (condition (first rep) nil)
-      (when (char= #\= (aref (symbol-name (car condition)) 0))
-        (let ((tests (remove-duplicates (remove-if-not 'chunk-spec-variable-p (cdadr condition) :key 'third))))
-          ;(format t "Condition: ~S: ~S~%" condition tests)
-          (dolist (slot tests)
-            (when (> (count (second slot) tests :key #'second) 1)
-              (print-warning "Production ~s has redundant variables in the conditions which may lead to unusual production compilation results." (production-name prod))
-              (return-from redundant-variable-check nil))))))))
+(defun redundant-variable-check (p-name prod)
+  (let ((v (production-redundant-variables p-name)))
+    (if (eq :unset v)
+        (setf (production-redundant-variables p-name)
+          (some (lambda (x)
+                  (and (eq #\= (production-statement-op x))
+                       (some (lambda (y)
+                               (> (count-if 'chunk-spec-variable-p  (chunk-spec-slot-spec (production-statement-spec x) y) :key 'third) 1))
+                             (chunk-spec-slots (production-statement-spec x)))))
+                (production-lhs prod)))
+      v)))
+
 
 ;;; The test for valid-1st-p is that it have none of the following:
 ;;;    - RHS !stop!
@@ -1009,23 +1014,22 @@
   (let ((v (production-valid-1st-p p-name)))
     (if (eq :unset v)
         (setf (production-valid-1st-p p-name)
-          (not (or (find 'stop (production-rhs prod) :key #'cdar)
-                   (check-for-duplicates #\= (production-rhs prod))
-                   (check-for-duplicates #\+ (remove-if (lambda (x) (eq 'isa (caadr x))) (production-rhs prod)))
-                   (check-for-duplicates #\+ (remove-if-not (lambda (x) (eq 'isa (caadr x))) (production-rhs prod))))))
+          (not (or (find 'stop (production-rhs prod) :key 'production-statement-target)
+                   (duplicate-buffer-name #\= (production-rhs prod))
+                   (duplicate-buffer-name #\+ (production-rhs prod))
+                   (duplicate-buffer-name #\* (production-rhs prod)))))
       v)))
 
 
 (defun invalid-1st-p-reason (prod)
-  (cond ((find 'stop (production-rhs prod) :key #'cdar)
+  (cond ((find 'stop (production-rhs prod) :key 'production-statement-target)
          "it has a !stop! action")
-        ((check-for-duplicates #\= (production-rhs prod))
+        ((duplicate-buffer-name #\= (production-rhs prod))
          (format nil "it has multiple modification actions for the ~a buffer" (duplicate-buffer-name #\= (production-rhs prod))))
-        
-        ((check-for-duplicates #\+ (remove-if (lambda (x) (eq 'isa (caadr x))) (production-rhs prod)))
-         (format nil "it has multiple requests to the ~a buffer" (duplicate-buffer-name #\+ (remove-if (lambda (x) (eq 'isa (caadr x))) (production-rhs prod)))))
-        ((check-for-duplicates #\+ (remove-if-not (lambda (x) (eq 'isa (caadr x))) (production-rhs prod)))
-         (format nil "it has multiple modification requests to the ~a buffer" (duplicate-buffer-name #\+ (remove-if-not (lambda (x) (eq 'isa (caadr x))) (production-rhs prod)))))
+        ((duplicate-buffer-name #\+ (production-rhs prod))
+         (format nil "it has multiple requests to the ~a buffer" (duplicate-buffer-name #\+ (production-rhs prod))))
+        ((duplicate-buffer-name #\* (production-rhs prod))
+         (format nil "it has multiple modification requests to the ~a buffer" (duplicate-buffer-name #\* (production-rhs prod))))
         (t
          "of unknown reason. (This should not happen. Please report this issue to Dan.)")))
  
@@ -1033,14 +1037,15 @@
   (if (valid-1st-p p-name prod)
       (progn
         (setf (compilation-module-previous module)
-          (list (production-name prod)
-                (copy-tree (production-bindings prod))))
+          (make-previous-production :name p-name
+                                    :struct prod
+                                    :bindings (copy-tree (production-bindings prod))))
         (setf (compilation-module-previous-time module) (mp-time-ms))
         (when (compilation-module-trace module)
           (model-output "  Setting previous production to ~S." (production-name prod))))
     (progn
       (when (compilation-module-trace module)
-        (model-output "  Production ~s is not valid as a first production for compilation" (production-name prod))
+        (model-output "  Production ~s is not valid as a first production for compilation" p-name)
         (model-output "   because ~a" (invalid-1st-p-reason prod)))
       (setf (compilation-module-previous module) nil))))
 
@@ -1056,9 +1061,7 @@
           t)
          ((listp val)
           (when (compilation-module-trace module)
-            (if (first val)
-                (model-output "  Buffer ~S prevents composition of these productions~@[~%   because ~a~]" (first val) (second val))
-              (model-output "  ~a prevents composition of these productions" (second val)))))
+            (model-output "  Buffer ~S prevents composition of these productions~@[~%   because ~a~]" (first val) (second val))))
          (t
           (print-warning "Invalid value in composeable table -- contact Dan.")))
       (let ((val (determine-composable module p1 p2)))
@@ -1067,7 +1070,6 @@
 
 
 (defun determine-composable (module p1 p2)
-  
   (dolist (buffer (remove-duplicates (append (production-lhs-buffers p1)
                                              (production-lhs-buffers p2)
                                              (production-rhs-buffers p1)
@@ -1080,13 +1082,11 @@
            (index (vector p1-usage p2-usage))
            (value (gethash index table)))
       
-      (unless (and value 
-                   (or (eq value t) (funcall value buffer p1 p2)))
+      (unless (and value (or (eq value t) (funcall value buffer p1 p2)))
         (let ((reason (awhen (comp-buffer-type-whynot-reason type)
-                             (funcall it p1-usage p2-usage (and (not (eq value t)) value)))))
+                             (funcall it p1-usage p2-usage value))))
           (when (compilation-module-trace module)
-            (model-output "  Buffer ~S prevents composition of these productions~@[~%   because ~a~]" buffer reason)
-            )
+            (model-output "  Buffer ~S prevents composition of these productions~@[~%   because ~a~]" buffer reason))
           (return-from determine-composable (list buffer reason))))))
   
   
@@ -1095,104 +1095,90 @@
     (let ((type (gethash buffer (compilation-module-buffer-type-table module))))
       (when (comp-buffer-type-consistency type)
         (unless (funcall (comp-buffer-type-consistency type) buffer module p1 p2)
-          (model-output "  A failed consistency test for buffer ~a prevents composition of these productions" buffer)
-          (return-from determine-composable (list nil (format nil "A failed consistency test for buffer ~a" buffer))))))))
+          (when (compilation-module-trace module)
+            (model-output "  Buffer ~S prevents composition of these productions~%   because the consistency test failed" buffer))
+          (return-from determine-composable (list buffer "the consistency test failed")))))))
 
 
-(defun check-consistency (module action action-bindings condition cond-bindings &key allow-subtypes)
-  (cond ((consp (car action)) ;; it's a +
-         
-         (let* ((action-spec (define-chunk-spec-fct (replace-variables (second action) action-bindings)))
-                (action-map (chunk-spec-slot-spec action-spec))
-                (cond-spec (third condition))
-                (cond-map (replace-variables (fifth condition) cond-bindings))
-                (action-type (chunk-spec-chunk-type action-spec))
-                (cond-type (chunk-spec-chunk-type cond-spec)))
-           
-           (unless (or (eq action-type cond-type)
-                       (and allow-subtypes 
-                            (or (chunk-type-subtype-p-fct action-type cond-type)
-                                (chunk-type-subtype-p-fct cond-type action-type))))
-                                
-             (return-from check-consistency nil))
-           
-           (unless (compilation-module-ppm module)
-             (dolist (cond cond-map)
-               (let ((action (find (second cond) action-map :test #'(lambda (x y)
-                                                                      (and (eq (first y) '=)
-                                                                           (eq (second y) x))))))
-                 (when action
-                   (unless (chunk-slot-equal (third cond) (third action))
-                     (return-from check-consistency nil))))))))
-        (t ; this is the  = case
-         
-         (let* ((action-spec (define-chunk-spec-fct (replace-variables (append (list 'isa (car action)) (third action)) action-bindings)))
-                (action-map (chunk-spec-slot-spec action-spec))
-                (cond-spec (third condition))
-                (cond-map (replace-variables (fifth condition) cond-bindings))
-                (action-type (car action))
-                (cond-type (chunk-spec-chunk-type cond-spec)))
-           
-           (unless (or (eq action-type cond-type)
-                       (and allow-subtypes 
-                            (or (chunk-type-subtype-p-fct action-type cond-type)
-                                (chunk-type-subtype-p-fct cond-type action-type))))
-             (return-from check-consistency nil))
-           
-           (unless (compilation-module-ppm module)
-             (dolist (cond cond-map)
-               (let ((action (find (second cond) action-map :test #'(lambda (x y)
-                                                                      (and (eq (first y) '=)
-                                                                           (eq (second y) x))))))
-                 (when action
-                   (unless (chunk-slot-equal (third cond) (third action))
-                     (return-from check-consistency nil)))))))))
-  t)
+;;; Assumes that only = modifiers in the actions and condition 
+;;; and checks to see if every condition value matches what was
+;;; set in the previous action.
+
+(defun check-consistency (module action action-bindings condition cond-bindings)
+  (if (compilation-module-ppm module)
+      t
+    (let ((action-spec (instantiate-chunk-spec (production-statement-spec action) action-bindings))
+          (cond-spec (instantiate-chunk-spec (production-statement-spec condition) cond-bindings)))
+      (dolist (cond (chunk-spec-slot-spec cond-spec) t)
+        (let ((actions (when (slot-in-chunk-spec-p action-spec (spec-slot-name cond))
+                         (chunk-spec-slot-spec action-spec (spec-slot-name cond)))))
+          (when (and actions (notevery (lambda (x)
+                                         (chunk-slot-equal (spec-slot-value x) (spec-slot-value cond)))
+                                       actions))
+            (return-from check-consistency nil)))))))
 
 
 
 (defun get-buffer-index (production buffer)
   (unless (production-buffer-indices production)
     (setf (production-buffer-indices production)
-      (mapcar #'(lambda (buffer) (cons buffer 0))
+      (mapcar (lambda (buffer) (cons buffer 0))
         (remove-duplicates (append (get-buffers (production-lhs production))
                                    (get-buffers (production-rhs production))))))
     (dolist (x (production-buffer-indices production))
-      (when (find (cons #\= (car x)) (production-lhs production) :key #'car :test #'equal)
+      (when (find-if (lambda (y) 
+                       (and (eq (production-statement-op y) #\=)
+                            (eq (production-statement-target y) (car x))))
+                     (production-lhs production))
         (incf (cdr x) 8))
-      (when (find (cons #\? (car x)) (production-lhs production) :key #'car :test #'equal)
+      
+      (when (find-if (lambda (y) 
+                       (and (eq (production-statement-op y) #\?)
+                            (eq (production-statement-target y) (car x))))
+                     (production-lhs production))
         (incf (cdr x) 16))
-      (when (find (cons #\= (car x)) (production-rhs production) :key #'car :test #'equal)
+      
+      (when (find-if (lambda (y) 
+                       (and (eq (production-statement-op y) #\=)
+                            (eq (production-statement-target y) (car x))))
+                     (production-rhs production))
         (incf (cdr x) 1))
-      (when (find (cons #\- (car x)) (production-rhs production) :key #'car :test #'equal)
+      
+      (when (find-if (lambda (y) 
+                       (and (eq (production-statement-op y) #\-)
+                            (eq (production-statement-target y) (car x))))
+                     (production-rhs production))
         (incf (cdr x) 2))
-      (when (find (cons #\+ (car x)) (production-rhs production) :key #'car :test #'equal)
-        (let ((all (remove-if-not (lambda (y) (equal (cons #\+ (car x)) (car y))) (production-rhs production))))
-          (when (or (find 'isa all :key #'caadr) (find-if (lambda (x) (= (length (second x)) 1)) all))
-            (incf (cdr x) 4))
-          (when (find 'isa (remove-if (lambda (x) (= (length (second x)) 1)) all) :key #'caadr :test #'neq)
-            (incf (cdr x) 32))))))
+      
+      (when (find-if (lambda (y) 
+                       (and (eq (production-statement-op y) #\+)
+                            (eq (production-statement-target y) (car x))))
+                     (production-rhs production))
+        (incf (cdr x) 4))
+        
+      (when (find-if (lambda (y) 
+                       (and (eq (production-statement-op y) #\*)
+                            (eq (production-statement-target y) (car x))))
+                     (production-rhs production))
+        (incf (cdr x) 32))))
   
   (aif (cdr (assoc buffer (production-buffer-indices production)))
        it
        0))
 
+
 (defun get-buffers (items)
   (let ((res nil))
     (dolist (x items res)
-      (unless (eq #\! (caar x))
-        (push (cdar x) res)))))
-
-
+      (unless (eq #\! (production-statement-op x))
+        (push (production-statement-target x) res)))))
 
 (defun get-compilation-type-struct (buffer module)
   (gethash buffer (compilation-module-buffer-type-table module)))
 
 
 (defun compose-productions (module p2)
-  ;(print-warning "Composition process not yet operational")
-  
-  (let* ((p1 (get-production (first (compilation-module-previous module))))
+  (let* ((p1 (previous-production-struct (compilation-module-previous module)))
          (p1-s (produce-standard-representation p1))
          (p2-s (produce-standard-representation p2))
          (p1-variables (production-variables p1))
@@ -1212,8 +1198,8 @@
              (replace-variables (production-compilation-instan p2-name) new-bindings))
            
            (setf (production-drop-out-buffers-map p2-name)
-             (remove-if-not (lambda (x) (find x *buffer-var-names*))
-                            new-bindings  :key #'car)))
+             (remove-if-not (lambda (x) (find x (compilation-module-buffer-var-names module)))
+                            new-bindings :key 'car)))
     
     
     ;; To allow for proper mapping of variables and values between
@@ -1230,10 +1216,6 @@
     ;; reasons could lead to unusual results in the newly composed production).
     ;;
     
-    
-    ;(pprint p1-s)
-    ;(pprint p2-s)
-    
     (dolist (b (production-buffer-indices p1))
       (let* ((comp-type (get-compilation-type-struct (car b) module))
              (instantiate (comp-buffer-type-pre-instantiate comp-type)))
@@ -1242,129 +1224,98 @@
           
           (let* ((b= (intern (concatenate 'string "=" (string (car b)) ">")))
                  (b+ (intern (concatenate 'string "+" (string (car b)) ">")))
-                 (c2 (copy-tree (find b= (first p2-s) :key #'car)))
-                 (a1= (copy-tree (find b= (second p1-s) :key #'car)))
-                 (a1* (copy-tree (aif (find b+ (second p1-s) :key #'car)
-                                      (if (eq 'isa (caaadr it))
-                                          it nil)
-                                      nil)))
-                 (mod-vars (append (mapcan (lambda (x)
-                                             (when (chunk-spec-variable-p (car x))
-                                               (list (car x))))
-                                     (cadr a1=))
-                                   (mapcan (lambda (x)
-                                             (when (chunk-spec-variable-p (car x))
-                                               (list (car x))))
-                                     (cadr a1*))))
+                 (b* (intern (concatenate 'string "*" (string (car b)) ">")))
+                 (c2 (copy-tree (find b= (first p2-s) :key 'car)))
+                 (a1= (copy-tree (find b= (second p1-s) :key 'car)))
+                 (a1+ (copy-tree (find b+ (second p1-s) :key 'car)))
+                 (a1* (copy-tree (find b* (second p1-s) :key 'car)))
+                 ;; if there's a + action that overrides the = and * actions
+                 (mod-vars (if a1+
+                               (mapcan (lambda (x)
+                                         (when (chunk-spec-variable-p (spec-slot-name x))
+                                           (list (spec-slot-name x))))
+                                 (second a1+))
+                             (append (mapcan (lambda (x)
+                                               (when (chunk-spec-variable-p (spec-slot-name x))
+                                                 (list (spec-slot-name x))))
+                                       (second a1=))
+                                     (mapcan (lambda (x)
+                                               (when (chunk-spec-variable-p (spec-slot-name x))
+                                                 (list (spec-slot-name x))))
+                                       (second a1*)))))
                  (cond-vars (mapcan (lambda (x)
-                                      (when (chunk-spec-variable-p (second x))
-                                        (list (second x))))
-                              (cdadr c2))))
-            
-            ;
-            ;(pprint b=)
-            ;(pprint c2)
-            ;(pprint (cdadr c2))
-            ;(pprint a1=)
-            
-            ;(pprint mod-vars)
-            ;(pprint cond-vars)
-            
-            ;(pprint (second (compilation-module-previous 
-            ;                 (get-module production-compilation))))
-            ;(pprint p2-instans)
-            
-            
+                                      (when (chunk-spec-variable-p (spec-slot-name x))
+                                        (list (spec-slot-name x))))
+                              (second c2))))
+
             (cond ((and mod-vars cond-vars)
-                   (let* ((p1-instantiations (second (compilation-module-previous 
-                                                      (get-module production-compilation))))
-                          
-                          
-                          (s1 (remove-if-not (lambda (x) (find x mod-vars)) p1-instantiations :key #'car))
-                          (s2 (remove-if-not (lambda (x) (find x cond-vars)) (production-compilation-instan p2-name) :key #'car)))
+                   (let* ((p1-instantiations (previous-production-bindings (compilation-module-previous module)))
+                          (s1 (remove-if-not (lambda (x) (find x mod-vars)) p1-instantiations :key 'car))
+                          (s2 (remove-if-not (lambda (x) (find x cond-vars)) (production-compilation-instan p2-name) :key 'car)))
                      
-                     (dolist (mv s1)
-                       (dolist (cv (remove-if-not (lambda (x) (eq (cdr mv) x)) s2 :key #'cdr))
-                         
-                         (setf p1-s (replace-variables-special p1-s (list mv)))
-                         (setf p2-s (replace-variables-special p2-s (list cv)))))))
-                  ((and mod-vars (cdadr c2))  ;; variables in the modification and any slots tested in c2
-                   (let* ((p1-instantiations (second (compilation-module-previous 
-                                                      (get-module production-compilation))))
-                          
-                          
-                          (s1 (remove-if-not (lambda (x) (find x mod-vars)) p1-instantiations :key #'car)))
+                     (setf p1-s (replace-variables-special p1-s s1))
+                     (let ((cv (remove-if-not (lambda (x) (find x (mapcar 'cdr s1))) s2 :key 'cdr)))
+                       (setf p2-s (replace-variables-special p2-s cv)))))
+                  
+                  ((and mod-vars (second c2))  ;; variables in the modification and any slots tested in c2
+                   (let* ((p1-instantiations (previous-production-bindings (compilation-module-previous module)))
+                          (s1 (remove-if-not (lambda (x) (find x mod-vars)) p1-instantiations :key 'car)))
                      
-                     (dolist (mv s1)
-                       (setf p1-s (replace-variables-special p1-s (list mv))))))
+                     (setf p1-s (replace-variables-special p1-s s1))))
                   (cond-vars
-                   (let ((s2 (remove-if-not (lambda (x) (find x cond-vars)) (production-compilation-instan p2-name) :key #'car)))
-                     (dolist (cv s2)
-                       (setf p2-s (replace-variables-special p2-s (list cv)))))))))))
+                   (let ((s2 (remove-if-not (lambda (x) (find x cond-vars)) (production-compilation-instan p2-name) :key 'car)))
+                     (setf p2-s (replace-variables-special p2-s s2)))))))))
     
-    ;(pprint p1-s)
-    ;(pprint p2-s)
+    
     
     (let* ((mappings nil)
            (ppm (compilation-module-ppm module))
            (bindings (when ppm 
-                     (append (second (compilation-module-previous module))
-                             (production-compilation-instan (production-name p2))))))
+                       (append (previous-production-bindings (compilation-module-previous module))
+                               (production-compilation-instan (production-name p2))))))
       
-      (dolist (buffer (union (mapcar #'car (production-buffer-indices p1))
-                             (mapcar #'car (production-buffer-indices p2))))
-        ;(pprint buffer)
+      (dolist (buffer (union (mapcar 'car (production-buffer-indices p1))
+                             (mapcar 'car (production-buffer-indices p2))))
+        
         (let* ((comp-type (get-compilation-type-struct buffer module))
                (map-fn (comp-buffer-type-map comp-type)))
           
           (when map-fn
-             (setf mappings (append (funcall map-fn module p1 p1-s p2 p2-s buffer) mappings)))
-        ;(pprint mappings)
-        ))
+            (setf mappings (append (funcall map-fn module p1 p1-s p2 p2-s buffer) mappings)))))
       
-      ;(pprint mappings)
       
       ;;; Current mechanism for !safe-bind! on the RHS of P1 is to
       ;;; add its binding as a constant value and drop the bind.
-            
+      ;;; also add the bindings for all variables used in the bind's evaluation.      
       ;;; Here we add the binding to the mappings
       
       (dolist (x (second p1-s))
         (when (eq (car x) '!safe-bind!)
-          ;(pprint x)
+          
           (push-last (assoc (car (second x)) 
-                            (second (compilation-module-previous module)))
+                            (previous-production-bindings (compilation-module-previous module)))
                      mappings)
-          ;(pprint 'variables)
           (dolist (y (find-variables (cdr (second x))))
-            (push-last (assoc y (second (compilation-module-previous module)))
-                       mappings))
-          ;(pprint 'not-variables)
-          ))
+            (push-last (assoc y (previous-production-bindings (compilation-module-previous module)))
+                       mappings))))
       
       
       (setf mappings (remove-duplicates mappings))
-      (setf mappings (sort mappings #'< :key #'(lambda (x)
-                                                 (if (constant-value-p (cdr x))
-                                                     (if (constant-value-p (car x))
-                                                         1 
-                                                       2)
-                                                   0))))
+      (setf mappings (sort mappings #'< :key (lambda (x)
+                                               (if (constant-value-p (cdr x) module)
+                                                   (if (constant-value-p (car x) module)
+                                                       1 
+                                                     2)
+                                                 0))))
       
-      
-      ;(pprint mappings)
-      ;(pprint p1-s)
-      ;(pprint p2-s)
       
       (loop
         (let* ((mapping (pop mappings))
-               (const (and ppm (constant-value-p (cdr mapping)))))
+               (const (and ppm (constant-value-p (cdr mapping) module))))
           (when (null mapping) (return))
-          
           
           (when const
             (awhen (find (car mapping) bindings :key 'car)
-                   ;(format t "Changing mapping from :~s to: ~S~%" mapping it)
                    (setf mapping it)))
           
           ;; this doesn't replace constants which is a good thing...
@@ -1372,51 +1323,22 @@
           (setf p1-s (replace-variables-special p1-s (list mapping)))
           (setf p2-s (replace-variables-special p2-s (list mapping)))
           
-         ; (pprint const)
-          
-          
           (dolist (x mappings)
-            ;  Don't want to do any constant to constant substitutions...
-            ;  at least not with current plans
-            ;(if const
-             ;   (cond ((and (eq (car x) (car mapping)) (eq (cdr x) (car mapping))) ;; crazy case, but better be safe
-             ;          (pprint 1)
-             ;          (replace mappings (list (cons (cdr mapping) (cdr mapping))) :start1 (position x mappings :test #'equal)))
-             ;         ((eq (car x) (car mapping))
-             ;          (pprint 2)
-             ;          (replace mappings (list (cons (cdr mapping) (cdr x))) :start1 (position x mappings :test #'equal)))
-             ;         ((eq (cdr x) (car mapping))
-             ;          (pprint 3)
-             ;          (replace mappings (list (cons (car x) (cdr mapping))) :start1 (position x mappings :test #'equal)))
-             ;         )
-              (when (eq (car x) (car mapping))
-                (replace mappings (list (cons (cdr mapping) (cdr x))) :start1 (position x mappings :test #'equal)))
-            ;  )
-            )
-          
-         ; (pprint mapping)
-         ; (pprint p1-s)
-          ;(pprint p2-s)
-          ))
+            (when (eq (car x) (car mapping))
+              (replace mappings (list (cons (cdr mapping) (cdr x))) :start1 (position x mappings :test 'equal))))))
       
-      ;(pprint p1-s)
-      ;(pprint p2-s)
       
       (let ((p3-s (list nil nil)))
-        (dolist (buffer (union (mapcar #'car (production-buffer-indices p1))
-                               (mapcar #'car (production-buffer-indices p2))))
-          
-          ;(pprint buffer)
+        (dolist (buffer (union (mapcar 'car (production-buffer-indices p1))
+                               (mapcar 'car (production-buffer-indices p2))))
           
           (let* ((comp-type (get-compilation-type-struct buffer module))
                  (compose-fn (comp-buffer-type-compose comp-type)))
           
           (when compose-fn
              (let ((vals (funcall compose-fn p1 p1-s p2 p2-s buffer)))
-                 ;(pprint it)
-                 ;(pprint vals)
-                 (setf (first p3-s) (append (first p3-s) (first vals)))
-                 (setf (second p3-s) (append (second p3-s) (second vals)))))))
+               (setf (first p3-s) (append (first p3-s) (first vals)))
+               (setf (second p3-s) (append (second p3-s) (second vals)))))))
         
         
         ;; Copy over anything that isn't a buffer reference
@@ -1424,7 +1346,6 @@
         ;; Making sure that the p1 stuff comes before the
         ;; p2 stuff in the new production (since it's being
         ;; pushed it must go backwards)
-        
         
         (dolist (x (first p2-s))
           (when (find (car x) '(!safe-eval!))
@@ -1436,28 +1357,25 @@
         ;;; for now since that gets munged in the standard rep...
         
         (dolist (x (second p2-s))
-          (when (find (car x) '(!safe-bind!))
-            (push x (second p3-s))))
-        
-        (dolist (x (second p2-s))
           (when (find (car x) '(!safe-eval! !output!))
             (push x (second p3-s))))
         
+        (dolist (x (second p2-s))
+          (when (find (car x) '(!safe-bind!))
+            (push x (second p3-s))))
         
         (dolist (x (first p1-s))
           (when (find (car x) '(!safe-eval!))
-            (unless (find x (first p3-s) :test #'equal)
+            (unless (find x (first p3-s) :test 'equal)
               (push x (first p3-s)))))
         
         ;;; Here's where we remove the bind.
         
         (dolist (x (second p1-s))
           (when (find (car x) '(#|!safe-bind!|# !safe-eval! !output! !stop!))
-            (unless (find x (second p3-s) :test #'equal)
+            (unless (find x (second p3-s) :test 'equal)
               (push x (second p3-s)))))
         
-        
-        ;(pprint p3-s)
         
         ;; Double check that everything gets bound 
         ;; The assumption being that it had to come from the second
@@ -1465,84 +1383,59 @@
         ;; colapsing of conditions).  So, just replace it with
         ;; the instantiated value from p2 if there are any.
         
-        (let ((lhs-vars (find-variables (mapcar #'cdr (first p3-s))))
-              (rhs-vars (find-variables (mapcar #'cdr (second p3-s))))
-              (rhs-bindings (mapcar #'caadr (remove '!safe-bind! (second p3-s) :test-not #'eql :key #'car))))
-          
-          ; (pprint lhs-vars)
-          ; (pprint rhs-vars)
-          ; (pprint rhs-bindings)
+        (let ((lhs-vars (find-variables (mapcar 'cdr (first p3-s))))
+              (rhs-vars (find-variables (mapcar 'cdr (second p3-s))))
+              ;; the caadr pulls the variable name out of the standard rep for
+              ;; any safe-binds -- note the test-not...
+              (rhs-bindings (mapcar 'caadr (remove '!safe-bind! (second p3-s) :test-not 'eql :key 'car))))
           
           (dolist (v rhs-vars)
-            (unless (or (find v *buffer-var-names*) ;; don't want to bind the buffer refs...
+            (unless (or (find v (compilation-module-buffer-var-names module)) ;; don't want to bind the buffer refs...
                         (find v lhs-vars)
-                        (find v rhs-bindings)
-                        )
-              
-              ;(pprint v)
+                        (find v rhs-bindings))
               (setf (second p3-s) (replace-variables (second p3-s) (list (assoc v (production-compilation-instan p2-name))))))))
         
-        
-        ;(pprint p3-s)
-        
         (let ((post-conditions nil)
-              (new-p nil)
-              (dynamic nil))
-          
+              (new-p nil))
           
           (push (new-production-name) new-p)
           
           (push (format nil "~A & ~A~{~@[ - ~a~]~}"
                   (production-name p1) (production-name p2)
-                  (mapcan #'(lambda (x)
-                              (let ((comp-type (get-compilation-type-struct x module)))
-                                (when (and (comp-buffer-type-drop-out comp-type)
-                                           (numberp (cdr (assoc x (production-buffer-indices p1))))
-                                           (not (zerop (logand (cdr (assoc x (production-buffer-indices p1))) 4))))  ;; require the request bit be set in the first production's usage
-                                  (list (aif (chunk-copied-from-fct (cdr (assoc (read-from-string (format nil "=~a" x)) (production-bindings p2))))
-                                             it
-                                             (cdr (assoc (read-from-string (format nil "=~a" x)) (production-bindings p2))))))))
+                  (mapcan (lambda (x)
+                            (let ((comp-type (get-compilation-type-struct x module)))
+                              (when (and (comp-buffer-type-drop-out comp-type)
+                                         (numberp (cdr (assoc x (production-buffer-indices p1))))
+                                         (not (zerop (logand (cdr (assoc x (production-buffer-indices p1))) 4))))  ;; require the request bit be set in the first production's usage
+                                (list (aif (chunk-copied-from-fct (cdr (assoc (read-from-string (format nil "=~a" x)) (production-bindings p2))))
+                                           it
+                                           (cdr (assoc (read-from-string (format nil "=~a" x)) (production-bindings p2))))))))
                     (production-lhs-buffers p2)))
                 new-p)
           
           (dolist (condition (sort-conditions (first p3-s)))
             
-            ;(pprint condition)
-            
-            (if (find (car condition) '(!safe-bind! !safe-eval! !output! !stop!))
+            (if (find (car condition) '(!safe-eval!)) ;; the only special operator allowed for now
                 (progn
                   (push (car condition) post-conditions)
                   (push (first (second condition)) post-conditions))
-              
               (progn
                 (push (car condition) new-p)
                 (dolist (test (second condition))
-                  (when (and (= (length test) 3)
-                             (chunk-spec-variable-p (second test)))
-                    (setf dynamic t))
-                  
                   (dolist (x (if (and (= (length test) 3)
                                       (eq (car test) '=))
                                  (cdr test)
                                test))
-                    (push x new-p)))))
-            )
-          
+                    (push x new-p))))))
           
           (when post-conditions
             (setf new-p (append post-conditions new-p)))
           
-          
           (push '==> new-p)
-          
-          
+                    
           (dolist (action (sort-actions (second p3-s)))
             
-            ;(pprint action)
-            
             (push (car action) new-p)
-            
-            
             
             (cond ((find (car action) '(!safe-eval! !output!))
                    (push (first (second action)) new-p))
@@ -1556,27 +1449,17 @@
                    (push (first (second action)) new-p))
                   (t
                    (dolist (test (second action))
-                     
-                     (when (or (and (= (length test) 3)
-                                    (chunk-spec-variable-p (second test)))
-                               (and (= (length test) 2)
-                                    (chunk-spec-variable-p (first test))))
-                       (setf dynamic t))
-                     
                      (dolist (x (if (and (= (length test) 3)
                                          (eq (car test) '=))
                                     (cdr test)
                                   test))
                        (push x new-p))))))
           
-          ;(pprint (reverse new-p))
           
           (let ((procedural (get-module procedural)))
             (setf (procedural-delay-tree procedural) t)
             
-            (let* ((new-prod (if (and (or (production-dynamic p1) (production-dynamic p2)) dynamic) ;; double-check
-                                 (with-unchecked-p* (p*-fct  (reverse new-p)))
-                               (p-fct (reverse new-p))))
+            (let* ((new-prod (p-fct (reverse new-p)))
                    (p3 (get-production new-prod)))
               (setf (procedural-delay-tree procedural) nil)
               
@@ -1585,7 +1468,7 @@
 
 
 (defun update-params-for-compiled-production (p3 new-prod p1 p2 module procedural)
-  (let ((exists (check-for-duplicate-productions new-prod)))
+  (let ((exists (check-for-duplicate-productions p3 new-prod)))
     
     (cond ((null exists)
            ;; New production 
@@ -1648,16 +1531,16 @@
 (defun replace-variables-special (arg bindings)
   (let ((res (list nil nil)))
     (dolist (x (first arg))
-      (push-last  (if (or (eql (car x) '!safe-eval!)
-                          (eql (car x) '!safe-bind!))
-                      (replace-variables-for-eval x bindings)
-                    (replace-variables x bindings))
+      (push-last (if (or (eql (car x) '!safe-eval!)
+                         (eql (car x) '!safe-bind!))
+                     (replace-variables-for-eval x bindings)
+                   (replace-variables x bindings))
                  (first res)))
     (dolist (x (second arg))
-      (push-last  (if (or (eql (car x) '!safe-eval!)
-                          (eql (car x) '!safe-bind!))
-                      (replace-variables-for-eval x bindings)
-                    (replace-variables x bindings))
+      (push-last (if (or (eql (car x) '!safe-eval!)
+                         (eql (car x) '!safe-bind!))
+                     (replace-variables-for-eval x bindings)
+                   (replace-variables x bindings))
                  (second res)))
     res))
 
@@ -1665,25 +1548,22 @@
 
 (defun sort-conditions (conditions-list)
   (let ((new-conditions (copy-tree conditions-list)))
-    ;(pprint new-conditions)
-    (sort new-conditions #'string< :key #'(lambda (x)
-                                            (let ((val (string (car x))))
-                                              (if (eql #\! (aref val 0))
-                                                  "z"
-                                                val))))))
+    (sort new-conditions 'string< :key (lambda (x)
+                                         (let ((val (string (car x))))
+                                           (if (eql #\! (aref val 0))
+                                               "z"
+                                             val))))))
 
 (defun sort-actions (actions-list)
   (let ((new-actions (copy-tree actions-list)))
-    (stable-sort new-actions #'string> :key (lambda (x) (string (car x))))))
-
-(defun check-for-duplicate-productions (prod-name)
-  (let ((p (get-production prod-name)))
-    (dolist (old-p (all-productions) nil)
-      (unless (equal old-p prod-name)
-        (when (equivalent-productions-p (get-production old-p) p)
-          (return-from check-for-duplicate-productions old-p))))))
+    (stable-sort new-actions 'string> :key (lambda (x) (string (car x))))))
 
 
+(defun check-for-duplicate-productions (p name)
+  (dolist (old-p (all-productions) nil)
+    (unless (equal old-p name)
+      (when (equivalent-productions-p (get-production old-p) p)
+        (return-from check-for-duplicate-productions old-p)))))
 
 (defun equivalent-productions-p (p1 p2)
   ;; Check the easy stuff first to
@@ -1704,9 +1584,9 @@
              (equal (production-buffer-indices p1)
                     (production-buffer-indices p2)))
     
-    (let ((mappings1 (mapcar #'(lambda (x) (cons x '&&dummy&&))
+    (let ((mappings1 (mapcar (lambda (x) (cons x '&&dummy&&))
                        (remove-buffers (production-variables p1))))
-          (mappings2 (mapcar #'(lambda (x) (cons x '&&dummy&&))
+          (mappings2 (mapcar (lambda (x) (cons x '&&dummy&&))
                        (remove-buffers (production-variables p2))))
           (s1 (produce-standard-representation p1))
           (s2 (produce-standard-representation p2)))
@@ -1715,16 +1595,14 @@
       
       ;; Check the overall structure 
       (unless (= (length (union (replace-variables (copy-tree s1) mappings1)
-                                (replace-variables (copy-tree s2) mappings2) :test #'equalp))
+                                (replace-variables (copy-tree s2) mappings2) :test 'equalp))
                  (length s1))
-        
         (return-from equivalent-productions-p nil))
       
       
-      
-      (setf mappings1 (mapcar #'(lambda (x) (replace-variables (copy-tree s1) (cons (cons (car x) '&&VAR&&) (remove (car x) mappings1 :key #'car))))
+      (setf mappings1 (mapcar (lambda (x) (replace-variables (copy-tree s1) (cons (cons (car x) '&&VAR&&) (remove (car x) mappings1 :key 'car))))
                         mappings1))
-      (setf mappings2 (mapcar #'(lambda (x) (replace-variables (copy-tree s2) (cons (cons (car x) '&&VAR&&) (remove (car x) mappings2 :key #'car))))
+      (setf mappings2 (mapcar (lambda (x) (replace-variables (copy-tree s2) (cons (cons (car x) '&&VAR&&) (remove (car x) mappings2 :key 'car))))
                         mappings2))
       
       
@@ -1735,13 +1613,10 @@
       (setf mappings1 (remove-unneeded-variables mappings1))
       (setf mappings2 (remove-unneeded-variables mappings2))
       
-      
-      (unless (= (length (union mappings1 mappings2 :test #'equalp))
+      (unless (= (length (union mappings1 mappings2 :test 'equalp))
                  (length mappings1))
         (return-from equivalent-productions-p nil))
-      
       t)))
-
 
 (defun remove-unneeded-variables (mapping)
   (let ((res nil))
@@ -1754,8 +1629,8 @@
              (case (aref (string (car x)) 0)
                (#\! x)
                (t
-                (list (car x) (remove-if-not #'(lambda (y)
-                                                 (find '&&VAR&& y))
+                (list (car x) (remove-if-not (lambda (y)
+                                               (find '&&VAR&& y))
                                              (second x)))))
              conds)))
         (dolist (x (second var))
@@ -1764,13 +1639,12 @@
              (case (aref (string (car x)) 0)
                (#\! x)
                (t
-                (list (car x) (remove-if-not #'(lambda (y)
-                                                 (find '&&VAR&& y))
+                (list (car x) (remove-if-not (lambda (y)
+                                               (find '&&VAR&& y))
                                              (second x)))))
              acts)))
         (push (list conds acts) res)))
     res))
-
 
 
 (defun get-buffer-composition-type (buffer)
@@ -1783,7 +1657,7 @@
 
 (defun recursive-find (item list)
   (if (listp list)
-      (some #'(lambda (x) (recursive-find item x)) list)
+      (some (lambda (x) (recursive-find item x)) list)
     (eq item list)))
 
 
@@ -1805,11 +1679,11 @@
 
 (defun remove-buffers (vars)
   (let ((module (get-module production-compilation)))
-    (remove-if #'(lambda (x)
-                   (when (find x *buffer-var-names*)
-                     (let* ((buffer (intern (subseq (symbol-name x) 1)))
-                            (buffer-type (get-compilation-type-struct buffer module)))
-                       (comp-buffer-type-drop-out buffer-type))))
+    (remove-if (lambda (x)
+                 (when (find x (compilation-module-buffer-var-names module))
+                   (let* ((buffer (intern (subseq (symbol-name x) 1)))
+                          (buffer-type (get-compilation-type-struct buffer module)))
+                     (comp-buffer-type-drop-out buffer-type))))
                vars)))
 
 
@@ -1823,28 +1697,24 @@
              (lhs nil)
              (rhs nil))
          (dolist (c (production-lhs production))
-           (push (list (convert-cmd (car c))
-                       (case (caar c)
-                         (#\= (append (list (subseq (second c) 0 2)) (sort (copy-tree (fifth c)) #'string< :key #'slot-to-string)))
-                         (#\? (sort (copy-tree (append (third c) (fourth c))) #'string< :key #'slot-to-string))
-                         (#\! (second c))))
+           (push (list (convert-cmd c)
+                       (case (production-statement-op c)
+                         (#\! (production-statement-definition c))
+                         (t (sort (chunk-spec-slot-spec (production-statement-spec c)) 'string< :key 'slot-to-string))))
                  lhs))
          (dolist (a (production-rhs production))
-           (push (list (convert-cmd (car a))
-                       (cond ((null (second a)) nil)
-                             ((eq #\! (caar a))
-                              (second a))
-                             ((= (length (second a)) 1)
-                              (second a))
-                             ((eq (car (second a)) 'isa)
-                              (append (list (subseq (second a) 0 2)) (sort (copy-tree (chunk-spec-slot-spec (define-variable-chunk-spec-fct (second a))))
-                                                                           #'string< :key #'slot-to-string)))
-                             (t ;; modification either = or +
-                              (sort (modification-pairs (second a))
-                                    #'string< :key #'slot-to-string))))
+           (push (list (convert-cmd a)
+                       (cond ((null (production-statement-definition a)) 
+                              nil)
+                             ((or
+                               (eq #\! (production-statement-op a))
+                               (= (length (production-statement-definition a)) 1))
+                              (production-statement-definition a))
+                             (t 
+                              (sort (chunk-spec-slot-spec (production-statement-spec a)) 'string< :key 'slot-to-string))))
                  rhs))
-         (push (sort rhs #'string< :key #'(lambda (x) (string (car x)))) parse)
-         (push (sort lhs #'string< :key #'(lambda (x) (string (car x)))) parse)
+         (push (sort rhs 'string< :key (lambda (x) (string (car x)))) parse)
+         (push (sort lhs 'string< :key (lambda (x) (string (car x)))) parse)
          
          (setf (production-standard-rep production) parse))))
 
@@ -1852,77 +1722,49 @@
   "Converts a list of items to a string with the gaps replaced with %%%"
   (format nil "~{~A%%%~}" slot-list))
 
-(defun convert-cmd (cmd-cons)
-  "Converts a cons of command identifier and command to the production symbol"
-  (read-from-string (if (eq #\! (car cmd-cons))
-                        (format nil "!~a!" (cdr cmd-cons))
-                      (format nil "~c~a>" (car cmd-cons) (cdr cmd-cons)))))
+(defun convert-cmd (statement)
+  "Converts a statement to the production symbol"
+  (read-from-string (format nil "~c~a~c" (production-statement-op statement) 
+                      (production-statement-target statement)
+                      (if (eq #\! (production-statement-op statement)) #\! #\>))))
 
-(defun modification-pairs (mod-list)  
-  (let ((res nil))
-    (while mod-list
-      (push-last (list (pop mod-list) (pop mod-list)) res))
-    res))
 
 
 (defun buffer+-union (a1 a2)
-  (dolist (mod (second a2))
-    (when (find-if #'(lambda (x)
-                       (and (eq (car x) '=)
-                            (eq (second x) (car mod))))
-                   (second a1))
-      (setf (second a1) (remove-if #'(lambda (x)
-                                       (and (eq (car x) '=)
-                                            (eq (second x) (car mod))))
-                                   (second a1))))
-    (setf (second a1) (append (second a1) (list (list '= (first mod) (second mod))))))
-  a1)
+  (let* ((a2-slots (mapcar 'spec-slot-name (second a2)))
+         (a1-remain (remove-if (lambda (x)
+                                 (and (eq (spec-slot-op x) '=)
+                                      (find (spec-slot-name x) a2-slots)))
+                               (second a1))))
+    (list (first a1) (append a1-remain (second a2)))))
 
-
-(defun buffer=-union (a1 a2)
-  (dolist (mod (second a2))
-    (when (find (car mod) (second a1) :key #'car)
-      (setf (second a1) (remove (car mod) (second a1) :key #'car)))
-    (setf (second a1) (append (second a1) (list mod))))
-  a1)
-
-(defun buffer-condition-union (c1 c2 a1)
   
+
+(defun buffer=-union (a1 a2) ;; same as above now since + and = are represented the same
+  (let* ((a2-slots (mapcar 'spec-slot-name (second a2)))
+         (a1-remain (remove-if (lambda (x)
+                                 (and (eq (spec-slot-op x) '=)
+                                      (find (spec-slot-name x) a2-slots)))
+                               (second a1))))
+    (list (first a1) (append a1-remain (second a2)))))
+  
+
+(defun buffer-condition-union (c1 c2 a1) ;; c1 + (c2-a1)
   (when (or c1 c2)
     (if (null c2)
         c1
-      (let ((c1-type (second (caadr c1)))
-            (c2-type (second (caadr c2))))
-      
-      ;; remove the isa test from c2
-        (unless (null c1) 
-          (setf (second c2) (remove 'isa (second c2) :key #'first)))
-        
-       ; (pprint c2)
-        
-        ;; First remove those elements of c2 set in a1
-        (dolist (mod (second a1))
-          (when (find-if #'(lambda (x)
-                             (eq (second x) (car mod)))
-                         (second c2))
-            (setf (second c2) (remove-if #'(lambda (x)
-                                             (eq (second x) (car mod)))
-                                         (second c2)))))
+      (let* ((a1-slots (mapcar 'spec-slot-name (second a1)))
+             (c2-remain (remove-if (lambda (x)
+                                     (find (spec-slot-name x) a1-slots))
+                                   (second c2))))
         (if (null c1)
-            c2
-          ;; Add the remaining elements of c2 to c1 and set the type to the
-          ;; more specific of the two
-          (let ((slots (remove-duplicates (append (cdr (second c1)) (second c2)) :test #'equal)))
-            (list (car c1) (append (list (list 'isa (if (chunk-type-subtype-p-fct c1-type c2-type)
-                                                        c1-type
-                                                      c2-type)))
-                                   slots))))))))
+            (list (first c2) c2-remain)
+          (list (first c1) (remove-duplicates (append (second c1) c2-remain) :test 'equal)))))))
 
 
-
-(defun constant-value-p (val)
+(defun constant-value-p (val module)
   (or (not (chunk-spec-variable-p val))
-      (find val *buffer-var-names*)))
+      (find val (compilation-module-buffer-var-names module))))
 
 
 
@@ -1954,12 +1796,12 @@
 (defun show-compilation-buffer-types ()
   (let ((module (get-module production-compilation)))
     (if module
-        (let ((len (apply #'max (mapcar #'(lambda (x)
-                                            (length (string x)))
-                                  (buffers)))))
+        (let ((len (apply 'max (mapcar (lambda (x)
+                                         (length (string x)))
+                                 (buffers)))))
           (command-output "  ~va        Type" len "Buffer")
-          (maphash #'(lambda (buffer type)
-                       (command-output "~va        ~a" len buffer (comp-buffer-type-name type)))
+          (maphash (lambda (buffer type)
+                     (command-output "~va        ~a" len buffer (comp-buffer-type-name type)))
                    (compilation-module-buffer-type-table module)))
       (print-warning "No production compilation module found"))))
 
@@ -2002,7 +1844,7 @@
       
       (let* (map compose consistency pre-instan buffers table drop-out whynot
               (style (read f))
-              (pathname (translate-logical-pathname (format nil "ACT-R6:tools;~(~a~)-compilation.lisp" style))))
+              (pathname (translate-logical-pathname (format nil "ACT-R:tools;~(~a~)-compilation.lisp" style))))
         
         (with-open-file (outfile pathname :direction :output :if-exists :overwrite :if-does-not-exist :create)
         

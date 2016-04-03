@@ -1,10 +1,13 @@
-#!wish
+#!/bin/sh
+# start with wish instead \
+ exec wish "$0"
+
 # This was formerly in the splash-screen.tcl init file
 # This script opens a window with the Powered by ONR Logo in it
 # centered on the screen for 3 seconds or until it's clicked 
 
 # read the image from the file
-image create photo onr_logo -file logo.gif
+image create photo onr_logo -file [file join [pwd] "logo.gif"]
 
 #create a window for it with no border and hide it
 toplevel .splash

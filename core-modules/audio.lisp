@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Mike Byrne & Dan Bothell
@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : audio.lisp
-;;; Version     : 2.3
+;;; Version     : 4.0
 ;;; 
 ;;; Description : Source for RPM's Audition Module
 ;;; 
@@ -23,18 +23,25 @@
 ;;;             : * [X] Add a set-audioloc-defaults command like the set-visloc-
 ;;;             :       default to give more control over stuffing so that
 ;;;             :       the :hear-newest-only parameter can go away.
-;;;             : * [ ] Change the request function so that modifiers and ranges
+;;;             : * [X] Change the request function so that modifiers and ranges
 ;;;             :       are accepted and add pitch as an option (alternatively
 ;;;             :       convert the audicon over to holding chunks and use the
 ;;;             :       more general chunk matching tools...)
 ;;;             : * [ ] Should it automatically stuff aural-location when there
 ;;;             :       are events in the audicon and the buffer is cleared 
 ;;;             :       instead of waiting for a change before doing so?
-;;;             : * [ ] Deal with possible long run timing issues due to 
+;;;             : * [X] Deal with possible long run timing issues due to 
 ;;;             :       floating point imprecision since detection time involves 
 ;;;             :       an addition of a "current" time which could be too big
 ;;;             :       to represent milliseconds with a delay that's likely to be
 ;;;             :       in the 50-200ms range.
+;;;             : * [ ] There's a problem with using the ID and EVENT slots to
+;;;             :       point to the original chunk since that means it has to
+;;;             :       stay around (can't just delete it when done).  The right
+;;;             :       solution is to work like vision where the object chunk
+;;;             :       refers to the actual location chunk in the buffer and the
+;;;             :       location chunk doesn't have a "self link" which will 
+;;;             :       require changing how things map back to the module chunks.
 ;;; ----- History -----
 ;;; 
 ;;; 2005.01.07 mdb [act6a1]
@@ -248,64 +255,132 @@
 ;;;             :   by attend-sound to set the offset and duration of the chunk
 ;;;             :   in the aural-location buffer if it's still there when the 
 ;;;             :   attended sound stops.
+;;; 2013.10.02 Dan
+;;;             : * Commented out the optimize proclaim since that persists and
+;;;             :   may or may not be useful anyway.
+;;; 2014.03.17 Dan [3.0]
+;;;             : * Changed the query-buffer call to be consistent with the new
+;;;             :   internal code.
+;;; 2014.05.16 Dan
+;;;             : * Continue the conversion to type-less chunks.
+;;;             : * First step is to switch over to testing the chunks in the audicon!
+;;;             : * Print-audicon sorts the events by onset time (lowest first).
+;;; 2014.05.19 Dan
+;;;             : * New-other-sound now allows for specifying additional slots and
+;;;             :   values for the event and/or the sound chunks.  They are provided
+;;;             :   as 3 element lists after all the optional parameters.  The first
+;;;             :   item in the list is either :evt, :sound, or :both to indicate
+;;;             :   which chunk gets the slot and value specified with the second 
+;;;             :   and third items respectively.
+;;;             : * Testing the chunks in the audicon instead of the sound-event
+;;;             :   object allows for +aural-location to specify things more freely:
+;;;             :   slots can be specified more than once, any operator is allowed,
+;;;             :   user specified slots for an event can be provided, and higest and
+;;;             :   lowest can be used for any slot.
+;;; 2014.05.30 Dan
+;;;             : * Use the test-for-clear-request function in pm-module-request.
+;;;             : * Use an isa sound/audio-event when creating the chunks so that
+;;;             :   the "backward" slots exist when needed.
+;;; 2014.08.13 Dan
+;;;             : * Either I can't use the name of the audicon chunk in the ID
+;;;             :   and EVENT slots or I can't delete that chunk when it leaves
+;;;             :   the audicon!  I think the right solution is to get rid of 
+;;;             :   the ID slot and have the EVENT refer to the actual audio-event
+;;;             :   chunk that's in the buffer, but that requires a lot of reworking
+;;;             :   things (like the internals of vision so that things can refer
+;;;             :   to the original internal module chunk).  So, for now
+;;; 2014.10.30 Dan [3.1]
+;;;             : * I guess that should have said "for now leave it alone and
+;;;             :   don't delete the chunks".
+;;;             : * Eliminating the previously depricated :hear-newest-only
+;;;             :   parameter.
+;;;             : * Changed the last-command value for an aural-location request
+;;;             :   from audio-event to find-sound.
+;;;             : * Added an event to the queue when a set-audloc-default request
+;;;             :   is processed.
+;;;             : * Added some more chunks to those defined by the module.
+;;; 2015.03.20 Dan
+;;;             : * Failures now set the buffer failure flags using set-buffer-failure.
+;;; 2015.03.23 Dan
+;;;             : * Specify whether a find-sound-failure is requested or not i.e.
+;;;             :   if it's stuffed then that's not requested.
+;;; 2015.04.22 Dan [3.2]
+;;;             : * Add the unstuff-aural-location parameter which will cause 
+;;;             :   stuffed chunks to be removed either after a time indicated,
+;;;             :   when the corresponding sound leaves the audicon if it is t,
+;;;             :   or pushed out by a new stuffed chunk.
+;;; 2015.06.02 Dan [3.3]
+;;;             : * Report onset and offset times in milliseconds now to avoid
+;;;             :   potential issues with float conversions and also allow the
+;;;             :   new-*-sound functions to specify onset in ms by providing a
+;;;             :   new optional parameter to each which if given as t means 
+;;;             :   the onset time is ms instead of s.
+;;; 2015.06.04 Dan
+;;;             : * Convert all the parameters that are seconds to ms when they're 
+;;;             :   set so it doesn't need to do so everywhere they are used.
+;;;             : * Use the ms return from get-articulation-time now too.
+;;;             : * All scheduled events specify time-in-ms.
+;;; 2015.06.16 Dan
+;;;             : * Fixed a bug in one of the calls to schedule-event-now that
+;;;             :   was replacing a relative 0.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;;             : * Changed default value of unstuff-aural-location to t.
+;;; 2015.07.29 Dan [3.4]
+;;;             : * Changed the way the check-unstuff-buffer action is scheduled
+;;;             :   because that's now the precondition and unstuff-buffer is the
+;;;             :   actual action.
+;;;             : * Splitting the unstuff- parameter into two parameters:
+;;;             :   :unstuff-aural-location can be nil, t, or # and indicates
+;;;             :     whether to take a stuffed chunk out of the buffer and
+;;;             :     defaults to t.
+;;;             :   :overstuff-aural-location determines whether or not to 
+;;;             :     stuff a new chunk overtop of a previously stuffed chunk
+;;;             :     and defaults to nil.
+;;;             : * When an unstuff is scheduled save it so that it can be
+;;;             :   deleted if another gets scheduled.
+;;; 2015.07.30 Dan
+;;;             : * Fixed a bug with the unstuffing time because it was computed
+;;;             :   as an absolute time but scheduled as relative when set to t.
+;;; 2015.07.31 Dan
+;;;             : * Changed the default values for unstuff and overstuff.  They
+;;;             :   are now nil and t respectively because that seems to work
+;;;             :   better for the way audio gets used which is not as frequent
+;;;             :   as speech output which triggers audio percepts so don't want
+;;;             :   a potentially unused system affecting performance.
+;;; 2015.08.17 Dan
+;;;             : * Changed the randomize-time calls which were used with times
+;;;             :   in ms to randomize-time-ms.
+;;; 2015.09.17 Dan [4.0]
+;;;             : * Making the aural buffer trackable and having it complete
+;;;             :   requests.
+;;;             : * Adding the last-aural-request slot to audio-module to hold
+;;;             :   the request for completion.
+;;; 2015.09.22 Dan
+;;;             : * Fixed some syntax issues with the previous changes.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(require-compiled "DMI" "ACT-R6:support;dmi")
-(require-compiled "GENERAL-PM" "ACT-R6:support;general-pm")
+(require-compiled "GENERAL-PM" "ACT-R-support:general-pm")
 
-;#+:allegro (eval-when (:compile-toplevel :Load-toplevel :execute)
-;             (setf *enable-package-locked-errors* nil))
-
-(eval-when (:compile-toplevel :Load-toplevel :execute)
-  (proclaim '(optimize (speed 3) (space 0))))
-
-(declaim (ftype (function (t) t) get-articulation-time))
-
+(declaim (ftype (function (t &optional t) t) get-articulation-time))
 
 (defclass audio-module (attn-module)
   ((audicon :accessor audicon :initarg :audicon :initform nil)
-   (digit-detect-delay :accessor digit-detect-delay :initarg :digit-dtct-dly
-                       :initform 0.300)
-   (digit-recode-delay :accessor digit-recode-delay :initarg :digit-rec-dly
-                       :initform 0.500)
-   (digit-duration :accessor digit-duration :initarg :digit-duration 
-                   :initform 0.600)
-   (tone-detect-delay :accessor tone-detect-delay :initarg :tone-dtct-dly
-                      :initform 0.050)
-   (tone-recode-delay :accessor tone-recode-delay :initarg :tone-rec-dly 
-                      :initform 0.285)
-   (sound-decay-time :accessor decay-time :initarg :decay-time
-                     :initform 3.000)
-   (default-spec :accessor default-spec :initform (list :attended nil)))
+   (digit-detect-delay :accessor digit-detect-delay :initarg :digit-dtct-dly :initform 300)
+   (digit-recode-delay :accessor digit-recode-delay :initarg :digit-rec-dly :initform 500)
+   (digit-duration :accessor digit-duration :initarg :digit-duration :initform 600)
+   (tone-detect-delay :accessor tone-detect-delay :initarg :tone-dtct-dly :initform 50)
+   (tone-recode-delay :accessor tone-recode-delay :initarg :tone-rec-dly :initform 285)
+   (sound-decay-time :accessor decay-time :initarg :decay-time :initform 3000)
+   (default-spec :accessor default-spec :initform nil)
+   (last-aural-request :accessor last-aural-request :initform nil))
    (:default-initargs
-       :version-string "2.4"
+     :version-string "4.0"
      :name :AUDIO))
-
-
-#|
-(defmethod reset-module :after ((aud-mod audio-module))
-  (setf (audicon aud-mod) nil))
-|#
-
-(defmethod initialize-instance :after ((aud-mod audio-module) &key)
-#|
-  (setf (state-dmo aud-mod)
-        (make-dme 'audio-state 'module-state
-                  '(module :audio modality free processor free preparation free
-                    execution free)
-                  :where :external))
-
-|#  )
-
-
-(defmethod silent-events ((aud-mod audio-module))
-  (awhen (next-detectable-sound aud-mod (mp-time))
-    (schedule-event-relative it 'detectable-audicon
-                             :destination :audio  :module :audio )))
 
 
 ;;;; ---------------------------------------------------------------------- ;;;;
@@ -313,8 +388,7 @@
 ;;;; ---------------------------------------------------------------------- ;;;;
 
 (defclass sound-event ()
-  ((onset :accessor onset :initarg :onset 
-          :initform (mp-time-ms))
+  ((onset :accessor onset :initarg :onset :initform (mp-time-ms))
    (offset :accessor offset :initarg :offset :initform nil)
    (string :accessor snd-string :initarg :string :initform nil)
    (duration :accessor duration :initarg :duration :initform 0)
@@ -327,15 +401,17 @@
    (ename :accessor ename :initform (new-name-fct "AUDIO-EVENT"))
    (recode :accessor recode :initarg :recode :initform nil)
    (pitch :accessor pitch :initform 'middle :initarg :pitch)
-   (snd-dmo :accessor snd-dmo :initform nil)
-   (evt-dmo :accessor evt-dmo :initform nil)
+   (other-features :accessor other-features :initform nil :initarg :other-features)
    ))
 
 
 (defmethod initialize-instance :after ((self sound-event) &key)
   (unless (offset self)
     (when (and (numberp (onset self)) (numberp (duration self)))
-      (setf (offset self) (+ (onset self) (duration self))))))
+      (setf (offset self) (+ (onset self) (duration self)))))
+  ;; Create the chunks up front
+  (define-chunks-fct (list (list (sname self) 'isa 'sound)))
+  (define-chunks-fct (list (list (ename self) 'isa 'audio-event))))
 
 (defgeneric detect-at-time (evt)
   (:documentation "Returns the time at which an event becomes detectable."))
@@ -363,9 +439,9 @@
   ()
   (:default-initargs
     :kind 'DIGIT
-    :duration  (seconds->ms (randomize-time (digit-duration (get-module :audio))))
-    :delay (seconds->ms (randomize-time (digit-detect-delay (get-module :audio))))
-    :recode (seconds->ms (digit-recode-delay (get-module :audio)))
+    :duration  (randomize-time-ms (digit-duration (get-module :audio)))
+    :delay (randomize-time-ms (digit-detect-delay (get-module :audio)))
+    :recode (digit-recode-delay (get-module :audio))
     :sname (new-name-fct "DIGIT")))
 
 
@@ -384,8 +460,8 @@
     :string ""
     :kind 'TONE
     :content 1000
-    :delay (seconds->ms (randomize-time (tone-detect-delay (get-module :audio))))
-    :recode (seconds->ms (tone-recode-delay (get-module :audio)))
+    :delay (randomize-time-ms (tone-detect-delay (get-module :audio)))
+    :recode (tone-recode-delay (get-module :audio))
     :sname (new-name-fct "TONE")))
 
 
@@ -398,7 +474,7 @@
   ()
   (:default-initargs
     :kind 'WORD
-    :delay (seconds->ms (randomize-time (digit-detect-delay (get-module :audio))))
+    :delay (randomize-time-ms (digit-detect-delay (get-module :audio)))
     :sname (new-name-fct "WORD")
     :duration 0
     :recode nil
@@ -407,7 +483,7 @@
 (defmethod initialize-instance :after ((self word-sound-evt) &key)
   (when (or (null (duration self)) (zerop (duration self)))
     (setf (duration self)
-          (seconds->ms (get-articulation-time (snd-string self)))))
+          (get-articulation-time (snd-string self) t)))
   (unless (recode self)
     (setf (recode self)
           ;; change the value below to make "hearing" faster
@@ -418,44 +494,36 @@
   (setf (offset self) (+ (onset self) (duration self)))
   )
 
-(defclass sound-event-spec (sound-event spec)
-  ()
-  (:default-initargs
-    :check-slots #(onset kind attended-p pitch location)
-    :onset :IGNORE
-    :kind :IGNORE
-    :attended-p :IGNORE
-    :pitch :IGNORE
-    :offset :IGNORE
-    :location :IGNORE
-    ))
-
 
 ;;;; ---------------------------------------------------------------------- ;;;;
 ;;;; Toplevel commands.
 ;;;; ---------------------------------------------------------------------- ;;;;
 
-;;; DAN
-;;; Need to have the buffer stuffing still happen for aural-location because
-;;; unit 3's sperling model depends on it.
+
+(defgeneric new-sound-event (evt)
+  (:documentation "Handles the bookkeeping when a new sound event is created."))
+
+;; handle the buffer stuffing
+
+(defun stuff-sound-buffer (audio-mod) 
+  (let ((chunk (buffer-read 'aural-location)))
+    (when (or (null chunk)
+              (and (overstuff-loc audio-mod)
+                   ; This would seem ideal, but the old chunk may have
+                   ; left the audicon already.  So just check that it's
+                   ; unmodified and stuffed because that should be
+                   ; sufficient.
+                   ; (find (chunk-copied-from-fct chunk) (audicon audio-mod) :key 'ename) 
+                   (multiple-value-bind (x unmodified-copy) (chunk-copied-from-fct chunk) (declare (ignore x)) unmodified-copy)
+                   (query-buffer 'aural-location '(buffer unrequested))))
+              (find-sound audio-mod (default-spec audio-mod) :stuffed t))))
 
 (defmethod new-sound-event :around ((evt sound-event))
   (let ((evt (call-next-method)))
     (when evt
-      (schedule-event (detect-at-time evt) 'stuff-sound-buffer
-                      :module :audio
-                      :destination :audio
-                      :output nil
-                      :time-in-ms t)
+      (schedule-event (detect-at-time evt) 'stuff-sound-buffer :module :audio
+                      :destination :audio :output nil :time-in-ms t)
       t)))
-
-
-(defun stuff-sound-buffer  (audio-mod) 
-  (unless (buffer-read 'aural-location)
-    (apply 'find-sound `(,audio-mod ,@(default-spec audio-mod) :stuffed t))))
-
-(defgeneric new-sound-event (evt)
-  (:documentation "Handles the bookkeeping when a new sound event is created."))
 
 (defmethod new-sound-event ((evt sound-event))
   (verify-current-mp 
@@ -464,12 +532,12 @@
     "No current model found.  Cannot create a new sound."
     (aif (get-module :audio)
          (progn
-           (push evt (audicon it))
+           (push-last evt (audicon it))
            evt)
          (print-warning "No Audio module found.  Cannot create a new sound.")))))
 
 
-(defun new-digit-sound (digit &optional (onset (mp-time)))
+(defun new-digit-sound (digit &optional onset time-in-ms)
   "Creates and adds a digit sound <digit>, a number, starting optionally at <onset>."
   (verify-current-mp 
    "No meta-process found.  Cannot create a new sound."
@@ -477,13 +545,17 @@
     "No current model found.  Cannot create a new sound."
     (cond ((not (numberp digit))
            (print-warning "Digit must be a number.  No new digit sound created."))
-          ((not (numberp onset))
+          ((not (or (null onset) (numberp onset)))
            (print-warning "Onset must be a number.  No new digit sound created."))
           (t
-           (new-sound-event (make-instance 'digit-sound-evt :onset (seconds->ms onset) :string digit)))))))
+           (new-sound-event (make-instance 'digit-sound-evt 
+                              :onset (cond ((null onset) (mp-time-ms))
+                                           ((null time-in-ms) (safe-seconds->ms onset 'new-digit-sound))
+                                           (t onset))
+                              :string digit)))))))
 
 
-(defun new-tone-sound (freq duration &optional (onset (mp-time)))
+(defun new-tone-sound (freq duration &optional onset time-in-ms)
   "Creates and adds a tone sound of <freq>, starting optionally at <onset>."
   (verify-current-mp 
    "No meta-process found.  Cannot create a new sound."
@@ -493,14 +565,18 @@
            (print-warning "Freq must be a number.  No new tone sound created."))
           ((not (numberp duration))
            (print-warning "Duration must be a number.  No new tone sound created."))
-          ((not (numberp onset))
+          ((not (or (null onset) (numberp onset)))
            (print-warning "Onset must be a number.  No new tone sound created."))
           (t
-           (new-sound-event (make-instance 'tone-sound-evt :onset (seconds->ms onset) 
-                              :duration (seconds->ms duration) :content freq)))))))
+           (new-sound-event (make-instance 'tone-sound-evt 
+                              :onset (cond ((null onset) (mp-time-ms))
+                                           ((null time-in-ms) (safe-seconds->ms onset 'new-tone-sound))
+                                           (t onset)) 
+                              :duration (safe-seconds->ms duration 'new-tone-sound) 
+                              :content freq)))))))
 
 (defun new-other-sound (content duration delay recode 
-                        &optional (onset (mp-time)) (location 'external) (kind 'speech))
+                        &optional onset (location 'external) (kind 'speech) time-in-ms &rest other-features)
   "Creates and adds a sound <content>, lasting <duration>, with content delay <delay>, with recode time <recode>, starting optionally at <onset>."
   (verify-current-mp 
    "No meta-process found.  Cannot create a new sound."
@@ -512,15 +588,26 @@
            (print-warning "Delay must be a number.  No new sound created."))
           ((not (numberp recode))
            (print-warning "Recode must be a number.  No new sound created."))
-          ((not (numberp onset))
+          ((not (or (null onset) (numberp onset)))
            (print-warning "Onset must be a number.  No new sound created."))
+          ((not (every (lambda (x) (and (= (length x) 3) (or (eq (car x) :evt) (eq (car x) :sound) (eq (car x) :both)))) other-features))
+           (print-warning "Other features must be lists of length 3 starting with one of: :evt, :sound, or :both.  No new sound created."))
           (t
-           (new-sound-event (make-instance 'sound-event :onset (seconds->ms onset) 
-                              :duration (seconds->ms duration) :content content 
-                              :delay (seconds->ms delay) :recode (seconds->ms recode) :location location
-                              :kind kind)))))))
+           (dolist (o other-features)
+             (unless (valid-slot-name (second o))
+               (extend-possible-slots (second o))))
+           (new-sound-event (make-instance 'sound-event 
+                              :onset (cond ((null onset) (mp-time-ms))
+                                           ((null time-in-ms) (safe-seconds->ms onset 'new-other-sound))
+                                           (t onset))
+                              :duration (safe-seconds->ms duration 'new-other-sound) 
+                              :content content 
+                              :delay (safe-seconds->ms delay 'new-other-sound) 
+                              :recode (safe-seconds->ms recode 'new-other-sound) 
+                              :location location
+                              :kind kind :other-features other-features)))))))
 
-(defun new-word-sound (word &optional (onset (mp-time)) (location 'external))
+(defun new-word-sound (word &optional onset (location 'external) time-in-ms)
   "Creates and adds a word with optional onset time."
   (verify-current-mp 
    "No meta-process found.  Cannot create a new sound."
@@ -528,95 +615,125 @@
     "No current model found.  Cannot create a new sound."
     (cond ((not (stringp word))
            (print-warning "Word must be a string.  No new word sound created."))
-          ((not (numberp onset))
+          ((not (or (null onset) (numberp onset)))
            (print-warning "Onset must be a number.  No new word sound created."))
           (t
-           (new-sound-event (make-instance 'word-sound-evt :onset (seconds->ms onset) 
+           (new-sound-event (make-instance 'word-sound-evt 
+                              :onset (cond ((null onset) (mp-time-ms))
+                                           ((null time-in-ms) (safe-seconds->ms onset 'new-word-sound))
+                                           (t onset)) 
                               :string word :location location)))))))
 
 
+(defun update-sound-evt (evt)
+  (mod-chunk-fct (ename evt)
+                 (append `(onset ,(onset evt)
+                           location ,(location evt)
+                           kind ,(kind evt)
+                           id ,(ename evt)
+                           pitch ,(pitch evt))
+                         (when (finished-p evt)
+                           `(offset ,(offset evt)
+                             duration ,(ms->seconds (- (offset evt) (onset evt)))))
+                         (mapcan (lambda (x)
+                                   (when (or (eq (car x) :evt) (eq (car x) :both))
+                                     (copy-list (cdr x))))
+                           (other-features evt)))))
+                                             
+                                             
 ;;; FIND-SOUND      [Method]
 ;;; Date        : 97.08.18, delta 99.08.30
 ;;; Description : Parallels the Vision Module's FIND-LOCATION, this one finds
-;;;             : audio events (not sounds) and returns a PS-specific DME.
+;;;             : audio events (not sounds).
 
-(defgeneric find-sound (aud-mod &key attended kind onset pitch)
-  (:documentation  "Given a set of specifications, return a sound event which matches."))
+(defgeneric find-sound (aud-mod spec &key stuffed)
+  (:documentation  "Given a chunk-spec return a sound event which matches."))
 
-(defmethod find-sound ((aud-mod audio-module) &key (attended :IGNORE) 
-                       (kind :IGNORE) onset pitch (location :ignore)
-                       (stuffed nil) (finished :ignore))
-  (let ((event-ls nil)
-        (found-evt nil)
-        (spec (make-instance 'sound-event-spec
-                :attended-p attended  :kind kind :location location
-                :onset (if (or (null onset) (symbolp onset)) 
-                           :IGNORE onset)
-                :pitch (if (or (null pitch) (symbolp pitch)) 
-                           :IGNORE pitch)))
-        (events-to-test (cond ((eq finished :ignore)
-                               (detectable-audicon aud-mod))
-                              ((null finished)
-                               (remove-if 'finished-p (detectable-audicon aud-mod)))
-                              ((eq t finished)
-                               (remove-if-not 'finished-p (detectable-audicon aud-mod)))
-                              (t
-                               (model-warning "Invalid :finished parameter ~s to find-sound being ignored" finished)
-                               (detectable-audicon aud-mod)))))
+(defmethod find-sound ((aud-mod audio-module) spec &key (stuffed nil))
+  (let* ((slots (chunk-spec-slot-spec spec))
+         (finished-spec (find :finished slots :key 'spec-slot-name))
+         (attended-spec (find :attended slots :key 'spec-slot-name))
+         (relative-slots nil)
+         (event-ls (detectable-audicon aud-mod)))
     
-    (setf (loc-failure aud-mod) nil)
+    ;; filter by attended - spec-slot-op must be =
+    (when attended-spec
+      (setf event-ls (remove-if-not (lambda (x) 
+                                      (eq (attended-p x) (spec-slot-value attended-spec)))
+                                    event-ls)))
+    ;; filter by finished - spec-slot-op must be =
+    (when finished-spec
+      (setf event-ls (remove-if-not (lambda (x) 
+                                      (eq (finished-p x) (spec-slot-value finished-spec)))
+                                    event-ls)))
     
-    ;; find features matching the spec
-    (setf event-ls (objs-match-spec events-to-test spec))
-    ;; some filtering
-    (case onset
-      (lowest (setf event-ls (objs-min-slotval event-ls 'onset)))
-      (highest (setf event-ls (objs-max-slotval event-ls 'onset))))
-    (case pitch
-      (lowest (setf event-ls (objs-min-slotval event-ls 'pitch)))
-      (highest (setf event-ls (objs-min-slotval event-ls 'pitch))))
-    (if event-ls
-        (progn
-          (setf found-evt (random-item event-ls))
-          (when found-evt
-            (unless (evt-dmo found-evt)
-              (event->dmo found-evt))
+    (dolist (x slots)
+      (when (or (eq (spec-slot-value x) 'lowest)
+                (eq (spec-slot-value x) 'highest))
+        (setf slots (remove x slots))
+        (push-last x relative-slots)))
+    
+    (let ((matching-chunks (find-matching-chunks (slot-specs-to-chunk-spec slots)
+                                                 :chunks (mapcar 'update-sound-evt event-ls)
+                                                 :variable-char #\&)))
+      
+      (dolist (x relative-slots)
+        (let ((value nil)
+              (op (spec-slot-op x))
+              (slot (spec-slot-name x))
+              (test (spec-slot-value x)))
+          
+          (dolist (y matching-chunks)
+            (let ((cur-val (fast-chunk-slot-value-fct y slot)))
+              (unless (numberp cur-val)
+                (setf value :fail)
+                (print-warning "Cannot apply ~S constraint because not all chunks have a numerical value." x)
+                (return))
+              (when (or (null value) 
+                        (and (eq test 'lowest)
+                             (< cur-val value))
+                        (and (eq test 'highest)
+                             (> cur-val value)))
+                (setf value cur-val))))
+          
+          (unless (eq value :fail)
+            (setf matching-chunks (find-matching-chunks (define-chunk-spec-fct (list op slot value)) :chunks matching-chunks)))))
+      
+      (setf (loc-failure aud-mod) nil)
+      
+      (if matching-chunks
+          (let ((chunk (random-item matching-chunks)))
+            (if (and stuffed (buffer-read 'aural-location))
+                (schedule-overwrite-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested nil :priority 10)
+              (schedule-set-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested (not stuffed) :priority 10))
             
-            ;;DAN
-            ;; instead of returning it set it into the aural-location buffer
-            ;; (dmo-to-psdme (evt-dmo found-evt))
-            
-            (schedule-set-buffer-chunk 'aural-location 
-                                       (dmo-to-psdme (evt-dmo found-evt))
-                                       0 :module :audio 
-                                       :requested (not stuffed)
-                                       
-                                       ; Need this so that stuffing 
-                                       ; can get things in before procedural
-                                       ; can run conflict-resolution
-                                       :priority 10)
-            
-            ;; If the object is finished 
-            ;;   set the offset and duration slots if they haven't already been 
-            ;;   set (which could happen if the event is found again after it has finished)
-            
-            (when (finished-p found-evt)
-              (unless (get-attribute (evt-dmo found-evt) 'offset)
-                (set-attributes (evt-dmo found-evt) `(offset ,(ms->seconds (offset found-evt)))))
-              (unless (get-attribute (evt-dmo found-evt) 'duration)
-                (set-attributes (evt-dmo found-evt) `(duration ,(ms->seconds (- (offset found-evt) (onset found-evt)))))))))
-      (schedule-event-relative 0 'find-sound-failure :module :audio :destination :audio :output 'medium :details "find-sound-failure"))))
+            (when (and stuffed (unstuff-loc aud-mod))
+              (let ((event (find chunk event-ls :key 'ename)))
+                
+                (awhen (unstuff-event aud-mod)
+                       (delete-event it))
+                
+                (setf (unstuff-event aud-mod) 
+                  (if (numberp (unstuff-loc aud-mod)) 
+                      (schedule-event-relative (unstuff-loc aud-mod) 'unstuff-buffer :maintenance t :params (list 'aural-location chunk) 
+                                               :destination :audio :output nil :time-in-ms t :priority :min
+                                               :precondition 'check-unstuff-buffer)
+                    (schedule-event (+ (offset event) (decay-time aud-mod)) 'unstuff-buffer :maintenance t :params (list 'aural-location chunk) 
+                                    :destination :audio :output nil :time-in-ms t :priority :min
+                                    :precondition 'check-unstuff-buffer))))))
+        (schedule-event-now 'find-sound-failure :params (list stuffed) :module :audio :destination :audio :output 'medium :details "find-sound-failure")))))
 
-
-(defun audio-event-ended (dmo)
+  
+(defun audio-event-ended (evt)
   (let ((buffer-chunk (buffer-read 'aural-location)))
-    (when (and buffer-chunk (eq (chunk-slot-value-fct buffer-chunk 'id) (dmo-to-psdme (evt-dmo dmo))))
-      (set-chunk-slot-value-fct buffer-chunk 'offset (ms->seconds (offset dmo)))
-      (set-chunk-slot-value-fct buffer-chunk 'duration (ms->seconds (- (offset dmo) (onset dmo)))))))
+    (when (and buffer-chunk (eq (chunk-slot-value-fct buffer-chunk 'id) (ename evt)))
+      (set-chunk-slot-value-fct buffer-chunk 'offset (offset evt))
+      (set-chunk-slot-value-fct buffer-chunk 'duration (ms->seconds (- (offset evt) (onset evt)))))))
 
-(defun find-sound-failure (audio)
+(defun find-sound-failure (audio stuffed)
   "function to indicate a failure in the trace and set the error flag"
   (setf (loc-failure audio) t)
+  (set-buffer-failure 'aural-location :ignore-if-full t :requested (not stuffed))
   nil)
 
 
@@ -630,146 +747,74 @@
   (:documentation  "Shift auditory attention to the given sound event."))
 
 (defmethod attend-sound ((aud-mod audio-module) &key event)
-  (if (eq (exec-s aud-mod) 'BUSY)
-    (model-warning "Auditory attention shift requested at ~S while one was already in progress." (mp-time))
-    (progn
+  (cond ((eq (exec-s aud-mod) 'BUSY)
+         (model-warning "Auditory attention shift requested at ~S while one was already in progress." (mp-time))
+         (complete-request (last-aural-request aud-mod)))
+         
+         
+        (t              ; Keep using an id slot in the audio-event to keep the connection
+         (let ((s-event (find (chunk-slot-value-fct event 'id) (current-audicon aud-mod)
+                              :test (lambda (x y) (eq x (ename y))))))
+           
+           (setf (attend-failure aud-mod) nil)
+           (change-state aud-mod :exec 'busy)
+           
+           (if s-event ;; add in a test to make sure - could have a failure
+               (progn
+                 (setf (attended-p s-event) t)
+                 (setf (current-marker aud-mod) s-event)
+                 
+                 ;; when attending to the event schedule an event to fill in the offset and
+                 ;; duration for when it ends if they aren't already filled
+                 
+                 (unless (and (chunk-slot-value-fct (ename s-event) 'offset) (chunk-slot-value-fct (ename s-event) 'duration))
+                   (schedule-event (offset s-event) 'audio-event-ended :module :audio :priority 9 :output 'high :params (list s-event)
+                                   :time-in-ms t :details (format nil "~s ~s" 'audio-event-ended (ename s-event))))
+                 
+                 (schedule-event-relative (randomize-time-ms (recode s-event))
+                                          'audio-encoding-complete
+                                          :module :audio
+                                          :destination :audio
+                                          :params (list s-event)
+                                          :time-in-ms t))
+             ;; assume digit delay for a failure
+             (schedule-event-relative (randomize-time-ms (digit-recode-delay aud-mod))
+                                      'attend-sound-failure
+                                      :time-in-ms t 
+                                      :module :audio
+                                      :destination :audio
+                                      :output 'medium
+                                      :details "attend-sound-failure"))))))
   
-    ;DAN 
-    ; This won't work because the event that comes in is going to
-    ; have a different name than the one that went into the audicon
-    ; because it will be the name of the copy from the buffer.
-    ; 
-    ;(let ((s-event (find event (audicon aud-mod)
-    ;                       :test #'(lambda (x y) (eq x (ename y))))))
-    
-    ; For now, using an id slot in the audio-event to keep the connection
-    
-    (let ((s-event (find (chunk-slot-value-fct event 'id) (current-audicon aud-mod)
-                         :test #'(lambda (x y) (eq x (ename y))))))
-      
-      (setf (attend-failure aud-mod) nil)
-      (change-state aud-mod :exec 'busy)
-      
-      (if s-event ;; add in a test to make sure - could have a failure
-          (progn
-            (setf (attended-p s-event) t)
-            (setf (current-marker aud-mod) s-event)
-            
-            ;; when attending to the event schedule an event to fill in the offset and
-            ;; duration for when it ends if they aren't already filled
-            
-            (unless (and (get-attribute (evt-dmo s-event) 'offset) (get-attribute (evt-dmo s-event) 'duration))
-              (schedule-event (offset s-event) 'audio-event-ended :module :audio :priority 9 :output 'high :params (list s-event)
-                              :time-in-ms t :details (format nil "~s ~s" 'audio-event-ended (dmo-to-psdme (evt-dmo s-event)))))
-            
-            (schedule-event-relative (round (randomize-time (recode s-event)))
-                                     'audio-encoding-complete
-                                     :module :audio
-                                     :destination :audio
-                                     :params (list s-event)
-                                     :time-in-ms t))
-        (progn
-          ;; assume digit delay for a failure
-          (schedule-event-relative (randomize-time (digit-recode-delay aud-mod))
-                                   'attend-sound-failure
-                                   :module :audio
-                                   :destination :audio
-                                   :output 'medium
-                                   :details "attend-sound-failure")))))))
-
-
+  
 (defun attend-sound-failure (audio)
   "Flag that an error occured"
   (setf (attend-failure audio) t)
-  (change-state audio :exec 'free))
-
-#|
-;;; LISTEN-FOR      [Method]
-;;; Date        : 97.08.18, delta 99.08.30
-;;; Description : Combination of FIND and ATTEND.  Does a FIND, and it if
-;;;             : finds anything, immediately attends it.
-
-(defgeneric listen-for (aud-mod &key onset kind attended pitch)
-  (:documentation  "Checks the audicon for appropriate sounds.  If one is found, attend to it."))
-
-(defmethod listen-for ((aud-mod audio-module) &key onset (kind :ignore) 
-                         (attended :ignore) pitch)
-  (multiple-value-bind (psdme found-evt)
-                       (find-sound aud-mod :attended attended :kind kind
-                                   :onset onset :pitch pitch)
-    (declare (ignore psdme))
-    (when found-evt
-      (attend-event aud-mod found-evt))))
-|#
-
-;;;; ---------------------------------------------------------------------- ;;;;
-;;;; support for toplevel commands
-;;;; ---------------------------------------------------------------------- ;;;;
-
-
-;;; ATTEND-EVENT      [Method]
-;;; Date        : 97.04.11
-;;; Description : When a sound is found by LISTEN-FOR, this may get called on
-;;;             : the event.  This method handles state-setting and queueing
-;;;             : of the appropriate actions.  Two situations are possible
-;;;             : with the sound event:  the content is not yet available 
-;;;             : [that is, the content-delay for the event has not passed]
-;;;             : or it is.  If not, set preparation to busy until content
-;;;             : becomes available.  Then, after recode time, actually add
-;;;             : the item to declarative memory.
-
-(defgeneric attend-event (aud-mod sevt)
-  (:documentation  "When LISTEN-FOR picks up an event, this handles it."))
-
-(defmethod attend-event ((aud-mod audio-module) (sevt sound-event))
-  (let ((curr-time (mp-time-ms))
-        (detect-time (+ (onset sevt) (delay sevt))))
-    (setf (current-marker aud-mod) sevt)
-    (cond ((< curr-time detect-time)  		; sound not yet 'bufferized'
-           (change-state aud-mod :prep 'busy)
-           (schedule-event-relative (- detect-time curr-time) 'change-state :destination :audio :module :audio :params '(:exec busy :prep free) :time-in-ms t)
-           (schedule-event-relative (- (+ detect-time (round (randomize-time (recode sevt)))) curr-time) 'audio-encoding-complete :destination :audio :module :audio :params (list sevt) :time-in-ms t)
-           )
-          (t
-           (change-state aud-mod :exec 'busy)
-           (schedule-event-relative (round (randomize-time (recode sevt))) 'audio-encoding-complete :destination :audio :module :audio :params (list sevt) :time-in-ms t)))))
-
+  (set-buffer-failure 'aural)
+  (change-state audio :exec 'free)
+  (complete-request (last-aural-request audio)))
 
 
 (defgeneric audio-encoding-complete (aud-mod sevt)
-  ;DAN
-  ;(:documentation  "Actually add a sound to declarative memory."))
   (:documentation  "Put the sound into the aural buffer."))
-
 
 (defmethod audio-encoding-complete ((aud-mod audio-module) (sevt sound-event))
   (change-state aud-mod :exec 'free)
   (setf (attended-p sevt) t)
-  (unless (snd-dmo sevt)
+  
+  (complete-request (last-aural-request aud-mod))
+  (mod-chunk-fct (sname sevt)
+                 (append `(content ,(content sevt)
+                                   kind ,(kind sevt)
+                                   event ,(ename sevt)) ;; use the ename since it's constant but won't match the "chunk" in the aural-loc buffer
+                         (mapcan (lambda (x)
+                                   (when (or (eq (car x) :sound) (eq (car x) :both))
+                                     (copy-list (cdr x))))
+                           (other-features sevt))))
+  
+  (schedule-set-buffer-chunk 'aural (sname sevt) 0 :time-in-ms t :module :audio)
     
-    ;; DAN
-    ;; Similar to the issue in find-sound, the name of the
-    ;; audio event doesn't match the actual chunk name that
-    ;; was in the aural-location buffer so setting event
-    ;; to the ename of svet is going to cause problems
-    ;; since that slot value isn't going to match a chunk in DM.
-    ;; For now, the solution is that the id slot of the event
-    ;; is what's constant.
-    
-    (let ((the-dmo
-           (make-dme (sname sevt) 'sound 
-                     `(kind ,(kind sevt) content ,(content sevt)
-                            event ,(chunk-slot-value-fct (ename sevt) 'id))
-                     :where :external)))
-      (setf (snd-dmo sevt) the-dmo)))
-  
-  ;; DAN 
-  ;; set the aural buffer
-  
-  (schedule-set-buffer-chunk 'aural (sname sevt) 0 :module :audio)
-  
-  
-  (set-attended aud-mod (snd-dmo sevt)))
+  (set-attended aud-mod (sname sevt)))
 
 (defmethod clear :after ((aud-mod audio-module))
   (setf (loc-failure aud-mod) nil)
@@ -782,41 +827,26 @@
 
 
 (defgeneric purge-old-sounds (aud-mod)
-  (:documentation  "Removes sounds that have decayed from the audicon"))
+  (:documentation  "Removes sounds that have decayed from the audicon but can't delete corresponding event chunks"))
 
 (defmethod purge-old-sounds ((aud-mod audio-module))
-  (setf (audicon aud-mod)
-        (remove-if #'(lambda (e) (< (+ (offset e) (seconds->ms (decay-time aud-mod)))
-                                     (mp-time-ms)))
-                   (audicon aud-mod))))
-
-
-(defun earliest-onset (evt-lis)
-  "Returns the sound event in the list with earliest onset."
-  (let ((best (onset (first evt-lis)))
-        (outlis (list (first evt-lis))))
-    (dolist (evt (rest evt-lis) outlis)
-      (cond ((= (onset evt) best) (push evt outlis))
-            ((< (onset evt) best) (setf best (onset evt))
-             (setf outlis (list evt)))))))
-
-
-(defun latest-onset (evt-lis)
-  "Returns the sound event in the list with latest onset."
-  (let ((best (onset (first evt-lis)))
-        (outlis (list (first evt-lis))))
-    (dolist (evt (rest evt-lis) outlis)
-      (cond ((= (onset evt) best) (push evt outlis))
-            ((> (onset evt) best) (setf best (onset evt))
-             (setf outlis (list evt)))))))
-
+  (let ((new-audicon nil))
+    (setf (audicon aud-mod)
+      (dolist (e (audicon aud-mod) new-audicon)
+        (if (< (+ (offset e) (decay-time aud-mod)) (mp-time-ms))
+            (progn
+              ;(when (chunk-p-fct (ename e))
+              ;  (delete-chunk-fct (ename e)))
+              (when (chunk-p-fct (sname e))
+                (delete-chunk-fct (sname e))))
+          (push-last e new-audicon))))))
 
 (defgeneric current-audicon (aud-mod)
   (:documentation  "Returns the audicon, assuming all events that currently exist are in there."))
 
 (defmethod current-audicon ((aud-mod audio-module))
   (purge-old-sounds aud-mod)
-  (remove-if #'(lambda (x) (> (onset x) (mp-time-ms))) (audicon aud-mod)))
+  (remove-if (lambda (x) (> (onset x) (mp-time-ms))) (audicon aud-mod)))
 
 
 (defgeneric detectable-audicon (aud-mod)
@@ -824,39 +854,7 @@
 
 (defmethod detectable-audicon ((aud-mod audio-module))
   (purge-old-sounds aud-mod)
-  (remove-if #'(lambda (x) (not (detectable-p x))) (audicon aud-mod)))
-
-
-
-(defgeneric event->dmo (evt)
-  (:documentation  "Translate a sound event to the corresponding DMO."))
-
-(defmethod event->dmo ((evt sound-event))
-  (let ((dmo
-         (make-dme (ename evt) 'audio-event 
-                   `(onset ,(ms->seconds (onset evt))
-                              location ,(location evt) kind ,(kind evt)
-                              ;;DAN 
-                              ; adding this at least for now to deal with the
-                              ; fact that chunk names change in the buffers
-                              id ,(ename evt)
-                              )
-                   :where :external)))
-    (when (finished-p evt)
-      (set-attributes dmo `(offset ,(ms->seconds (offset evt))))
-      (set-attributes dmo `(duration ,(ms->seconds (- (offset evt) (onset evt))))))
-    (setf (evt-dmo evt) dmo)))
-
-
-(defgeneric next-detectable-sound (aud-mod current-time)
-  (:documentation  "Return the time when the next sound in the audicon is detectable."))
-
-(defmethod next-detectable-sound ((aud-mod audio-module) current-time)
-  (let ((onsets (mapcar #'detect-at-time (audicon aud-mod))))
-    (setf onsets (sort onsets #'<))
-    (dolist (event-time onsets nil)
-      (when (> event-time current-time)
-        (return-from next-detectable-sound event-time)))))
+  (remove-if (lambda (x) (not (detectable-p x))) (audicon aud-mod)))
 
 
 
@@ -865,37 +863,32 @@
 ;;;; ---------------------------------------------------------------------- ;;;;
 
 (defun reset-audio-module (instance)
+  
   (reset-pm-module instance)
 
   (chunk-type audio-event onset offset duration pitch kind location id)
+  (chunk-type (set-audloc-default (:include audio-event)) (set-audloc-default t))
   (chunk-type sound kind content event)
-  (chunk-type audio-command)
-  
-  ;;DAN
-  ; I think this needs to happen here
   
   (setf (audicon instance) nil)
-  ;(setf (stuffed instance) nil)
-  
-  ;; handle the failure flags
-  
   (setf (loc-failure instance) nil)
   (setf (attend-failure instance) nil)
+  (setf (last-aural-request instance) nil)
   
+  (dolist (c '(digit speech tone word highest lowest sound find-sound set-audloc-default internal external self high middle low))
+    (unless (chunk-p-fct c)
+      (define-chunks-fct (list (list c 'name c)))
+      (make-chunk-immutable c)))
   
-  (define-chunks
-    (digit isa chunk)
-    (speech isa chunk)
-    (tone isa chunk)
-    (word isa chunk)))
-
+  (setf (default-spec instance)
+    (define-chunk-spec :attended nil)))
 
 
 (defun query-audio-module (aud-mod buffer slot value)
   (case buffer
     (aural
      (if (member slot '(preparation execution processor modality))
-       (generic-state-query aud-mod buffer slot value)
+         (generic-state-query aud-mod buffer slot value)
        (case slot
          (state
           (case value
@@ -904,13 +897,9 @@
             (free
              (eq (mode-s aud-mod) 'free))
             (error
-             (attend-failure aud-mod))
-            (t (print-warning 
-                "Invalid query made of the ~S buffer with slot ~S and value ~S" 
-                buffer slot value))))
-         (t (print-warning 
-                "Invalid query made of the ~S buffer with slot ~S and value ~S" 
-                buffer slot value)))))
+                (attend-failure aud-mod))
+            (t (print-warning "Invalid query made of the ~S buffer with slot ~S and value ~S" buffer slot value))))
+         (t (print-warning "Invalid query made of the ~S buffer with slot ~S and value ~S" buffer slot value)))))
     (aural-location
      (case slot
        (state
@@ -918,189 +907,189 @@
           (busy nil) ;; aural-location requests are always free
           (free t)
           (error (loc-failure aud-mod))
-          (t (model-warning 
-              "Invalid query made of the ~S buffer with slot ~S and value ~S" 
-              buffer slot value))))
+          (t (model-warning "Invalid query made of the ~S buffer with slot ~S and value ~S" buffer slot value))))
        (attended
         (awhen (buffer-read 'aural-location)
                (let ((s-event (find (chunk-slot-value-fct it 'id) 
                                     (audicon aud-mod)
-                                    :test #'(lambda (x y) (eq x (ename y))))))
+                                    :test (lambda (x y) (eq x (ename y))))))
                  (when s-event
                    (eq value (attended-p s-event))))))
        (finished
         (awhen (buffer-read 'aural-location)
                (let ((s-event (find (chunk-slot-value-fct it 'id) 
                                     (audicon aud-mod)
-                                    :test #'(lambda (x y) (eq x (ename y))))))
+                                    :test (lambda (x y) (eq x (ename y))))))
                  (when s-event
                    (eq value (finished-p s-event))))))))))
                  
-         
 
+(defmethod pm-module-last-cmd-name ((aud-mod audio-module) buffer-name chunk-spec)
+  (case buffer-name
+    (aural-location (if (chunk-spec-slot-spec chunk-spec 'set-audloc-default) 
+                        'set-audloc-default
+                      'find-sound))
+    (aural 'sound)))
 
 (defmethod pm-module-request ((aud-mod audio-module) buffer-name chunk-spec)
-  ;(declare (ignore aud-mod))
+  
   (case buffer-name
     (aural
-     (case (chunk-spec-chunk-type chunk-spec)
-       (clear
-        (schedule-event-relative 0 'clear :module :audio :destination :audio :output 'medium))
-       (sound
-        (let ((event (when (slot-in-chunk-spec-p chunk-spec 'event) 
-                        (verify-single-explicit-value 
-                         (chunk-spec-slot-spec chunk-spec 'event) 
-                         :audio 'sound 'event))))
-          (when event
-            (schedule-event-relative 0 'attend-sound
-                                     :params (list :event event)
-                                     :module :audio  :destination :audio
-                                     :details (mkstr 'attend-sound " " event)
-                                     :output 'medium))))
-       ;; should we support LISTEN-FOR anymore?  Hmm...
-       (t
-        (print-warning "Invalid command ~a sent to the aural buffer" (chunk-spec-chunk-type chunk-spec)))))
+     (if (test-for-clear-request chunk-spec)
+         (schedule-event-now 'clear :module :audio :destination :audio :output 'medium)
+       (let ((event-spec (chunk-spec-slot-spec chunk-spec 'event)))
+         (cond ((and (= (length event-spec) 1)
+                     (eq '= (spec-slot-op (first event-spec)))
+                     (chunk-p-fct (spec-slot-value (first event-spec))))
+                
+                (setf (last-aural-request aud-mod) chunk-spec)
+
+                (schedule-event-now 'attend-sound
+                                 :params (list :event (spec-slot-value (first event-spec)))
+                                 :module :audio  :destination :audio
+                                 :details (mkstr 'attend-sound " " (spec-slot-value (first event-spec)))
+                                 :output 'medium))
+               (t
+                (complete-request chunk-spec)
+                (print-warning "Invalid command to the aural buffer does not describe a valid action"))))))
     (aural-location
-     (case (chunk-spec-chunk-type chunk-spec)
-       (;; DAN 
-        ;;aural-location
-        audio-event
-        (let ((attended (if (slot-in-chunk-spec-p chunk-spec :attended) 
-                            (verify-single-explicit-value 
-                             (chunk-spec-slot-spec chunk-spec :attended) 
-                             :audio 'aural-location :attended)
-                          :IGNORE))
-              (finished (if (slot-in-chunk-spec-p chunk-spec :finished) 
-                            (verify-single-explicit-value 
-                             (chunk-spec-slot-spec chunk-spec :finished) 
-                             :audio 'aural-location :finished)
-                            :IGNORE))
-              (kind (if (slot-in-chunk-spec-p chunk-spec 'kind) 
-                       (verify-single-explicit-value 
-                        (chunk-spec-slot-spec chunk-spec 'kind) 
-                        :audio 'aural-location 'kind)
-                       :IGNORE))
-              (location (if (slot-in-chunk-spec-p chunk-spec 'location) 
-                            (verify-single-explicit-value 
-                             (chunk-spec-slot-spec chunk-spec 'location) 
-                             :audio 'aural-location 'location)
-                            :IGNORE))
-              (onset (when (slot-in-chunk-spec-p chunk-spec 'onset) 
-                        (verify-single-explicit-value 
-                         (chunk-spec-slot-spec chunk-spec 'onset) 
-                         :audio 'aural-location 'onset))))
-          ;(setf (stuffed aud-mod) nil)
-          (schedule-event-relative 0 'find-sound :module :audio 
-                                   :output 'medium
-                                   :destination :audio 
-                                   :details ;(format nil "~s" 'find-sound)
-                                   (mkstr 'find-sound)
-                                   :params (list :kind kind :attended attended 
-                                                 :location location
-                                                 :onset onset
-                                                 :finished finished
-                                                 ;; Dan 
-                                                 ;; this isn't a valid
-                                                 ;; keyword for find-sound
-                                                 ;:offset offset
-                                                 ))))
-       (t
-        (print-warning "Invalid command ~a sent to the aural-location buffer" 
-                       (chunk-spec-chunk-type chunk-spec)))))))
- 
+     (cond ((> (length (chunk-spec-slot-spec chunk-spec :attended)) 1)
+            (print-warning ":attended specification only allowed once in an aural-location request."))
+           ((> (length (chunk-spec-slot-spec chunk-spec :finished)) 1)
+            (print-warning ":finished specification only allowed once in an aural-location request."))
+           ((chunk-spec-slot-spec chunk-spec 'set-audloc-default)
+            (let* ((specs (chunk-spec-slot-spec chunk-spec 'set-audloc-default))
+                   (spec (first specs)))
+              (cond ((> (length specs) 1)
+                     (print-warning "set-audloc-default slot can only be specified once in an aural-location request."))
+                    ((not (eq '= (spec-slot-op spec)))
+                     (print-warning "set-audloc-default slot must use the = test in an aural-location request."))
+                    (t
+                     (schedule-event-now 'set-audloc-default-fct 
+                                         :params (list (apply 'append (remove-if (lambda (x) (eq (spec-slot-name x) 'set-audloc-default))
+                                                                                 (chunk-spec-slot-spec chunk-spec))))
+                                         :output 'medium :module :audio :details (mkstr 'set-audloc-default))))))
+           (t
+            (schedule-event-now 'find-sound :module :audio 
+                                     :output 'medium
+                                     :destination :audio 
+                                     :details (mkstr 'find-sound)
+                                     :params (list chunk-spec)))))))
+
 
 
 (defun params-audio-module (aud-mod param)
   (if (consp param)
     (case (first param)
       (:digit-detect-delay
-       (setf (digit-detect-delay aud-mod) (rest param)))
+       (setf (digit-detect-delay aud-mod) (safe-seconds->ms (rest param) 'sgp))
+       (rest param))
       (:digit-duration
-       (setf (digit-duration aud-mod) (rest param)))
+       (setf (digit-duration aud-mod) (safe-seconds->ms (rest param) 'sgp))
+       (rest param))
       (:digit-recode-delay
-       (setf (digit-recode-delay aud-mod) (rest param)))
+       (setf (digit-recode-delay aud-mod) (safe-seconds->ms (rest param) 'sgp))
+       (rest param))
       (:sound-decay-time 
-       (setf (decay-time aud-mod) (rest param)))
+       (setf (decay-time aud-mod) (safe-seconds->ms (rest param) 'sgp))
+       (rest param))
       (:tone-detect-delay
-       (setf (tone-detect-delay aud-mod) (rest param)))
+       (setf (tone-detect-delay aud-mod) (safe-seconds->ms (rest param) 'sgp))
+       (rest param))
       (:tone-recode-delay
-       (setf (tone-recode-delay aud-mod) (rest param)))
-      (:hear-newest-only
-       (when (rest param)
-         (print-warning ":hear-newest-only parameter is depricated - use set-audloc-default instead"))))
+       (setf (tone-recode-delay aud-mod) (safe-seconds->ms (rest param) 'sgp))
+       (rest param))
+      (:unstuff-aural-location
+       (setf (unstuff-loc aud-mod)
+         (if (numberp (cdr param))
+             (safe-seconds->ms (cdr param))
+           (cdr param)))
+       (cdr param))
+      (:overstuff-aural-location
+       (setf (overstuff-loc aud-mod) (cdr param))))
     (case param
       (:digit-detect-delay
-       (digit-detect-delay aud-mod))
+       (ms->seconds (digit-detect-delay aud-mod)))
       (:digit-duration
-       (digit-duration aud-mod))
+       (ms->seconds (digit-duration aud-mod)))
       (:digit-recode-delay
-       (digit-recode-delay aud-mod))
+       (ms->seconds (digit-recode-delay aud-mod)))
       (:sound-decay-time 
-       (decay-time aud-mod))
+       (ms->seconds (decay-time aud-mod)))
       (:tone-detect-delay
-       (tone-detect-delay aud-mod))
+       (ms->seconds (tone-detect-delay aud-mod)))
       (:tone-recode-delay
-       (tone-recode-delay aud-mod))
-      (:hear-newest-only
-       nil))))
+       (ms->seconds (tone-recode-delay aud-mod)))
+      (:unstuff-aural-location
+       (if (numberp (unstuff-loc aud-mod))
+           (ms->seconds (unstuff-loc aud-mod))
+         (unstuff-loc aud-mod)))
+      (:overstuff-aural-location
+       (overstuff-loc aud-mod)))))
       
 
 (define-module-fct :audio 
-    (list (list 'aural-location nil '(:attended :finished) 
-                '(attended finished)
-                           #'(lambda ()
-                               (command-output "  attended nil          : ~S" (query-buffer 'aural-location '((attended . nil))))
-                               (command-output "  attended t            : ~S" (query-buffer 'aural-location '((attended . t))))
-                               (command-output "  finished nil          : ~S" (query-buffer 'aural-location '((finished . nil))))
-                               (command-output "  finished t            : ~S" (query-buffer 'aural-location '((finished . t))))))
-          (list 'aural nil nil '(modality preparation execution processor) 
-                  #'(lambda () (print-module-status (get-module :audio)))))
+    (list (define-buffer-fct 'aural-location 
+            :request-params '(:attended :finished) 
+            :queries '(attended finished)
+            :status-fn (lambda ()
+                         (command-output "  attended nil          : ~S" (query-buffer 'aural-location '(attended  nil)))
+                         (command-output "  attended t            : ~S" (query-buffer 'aural-location '(attended  t)))
+                         (command-output "  finished nil          : ~S" (query-buffer 'aural-location '(finished  nil)))
+                         (command-output "  finished t            : ~S" (query-buffer 'aural-location '(finished  t)))))
+          (define-buffer-fct 'aural 
+            :queries '(modality preparation execution processor) 
+            :status-fn (lambda () (print-module-status (get-module :audio)))
+            :trackable t))
   (list 
    (define-parameter :digit-detect-delay
-     :valid-test #'nonneg
+     :valid-test 'nonneg
      :default-value 0.3
      :warning "a non-negative number"
      :documentation "Lag between onset and detectability for digits")
    (define-parameter :digit-duration
-     :valid-test #'nonneg
+     :valid-test 'nonneg
      :default-value 0.6
      :warning "a non-negative number"
      :documentation "Default duration for digit sounds.")
    (define-parameter :digit-recode-delay
-     :valid-test #'nonneg
+     :valid-test 'nonneg
      :default-value 0.5
      :warning "a non-negative number"
      :documentation "Recoding delay for digit sound content.")
    (define-parameter :sound-decay-time
-     :valid-test #'nonneg
+     :valid-test 'nonneg
      :default-value 3.0
      :warning "a non-negative number"
      :documentation "The amount of time after a sound has finished it takes for the sound to be deleted from the audicon")
    (define-parameter :tone-detect-delay
-     :valid-test #'nonneg
+     :valid-test 'nonneg
      :default-value 0.05
      :warning "a non-negative number"
      :documentation "Lag between sound onset and detectability for tones")
    (define-parameter :tone-recode-delay
-     :valid-test #'nonneg
+     :valid-test 'nonneg
      :default-value 0.285
      :warning "a non-negative number"
      :documentation "Recoding delay for tone sound content.")
-   (define-parameter :hear-newest-only
-     :valid-test #'tornil
+   (define-parameter :unstuff-aural-location
+     :valid-test (lambda (x) (or (tornil x) (numberp x)))
      :default-value nil
+     :warning "T, NIL, or a number"
+     :documentation "Whether chunks stuffed into the aural-location buffer should be automatically cleared by the module if unused")
+   (define-parameter :overstuff-aural-location
+     :valid-test 'tornil
+     :default-value t
      :warning "T or nil"
-     :documentation "Whether to stuff only the newest unattended audio-event from the audicon into the aural-location buffer."))
-  :version "2.4"
+     :documentation "Whether a chunk previously stuffed into the aural-location buffer can be overwritten by a new chunk to be stuffed"))
+  :version "4.0"
   :documentation "A module which gives the model an auditory attentional system"
-  :creation #'(lambda (x) (declare (ignore x))
-               (make-instance 'audio-module))
+  :creation (lambda (x) (declare (ignore x))
+              (make-instance 'audio-module))
   :reset #'reset-audio-module
   :query #'query-audio-module
   :request #'pm-module-request
-  :params #'params-audio-module
-  ;:update #'update-module
-  )
+  :params #'params-audio-module)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; User Commands
@@ -1110,32 +1099,27 @@
   (let ((module (get-module :audio)))
     (if module
         (progn
-          (format t "~%Sound event    Att  Detectable  Kind           Content           location     onset     offset  Sound ID")
-          (format t "~%-----------    ---  ----------  -------------  ----------------  --------     -----     ------  --------")
+          (command-output "Sound event    Att  Detectable  Kind           Content           location     onset     offset  Sound ID")
+          (command-output "-----------    ---  ----------  -------------  ----------------  --------     -----     ------  --------")
           
-          (dolist (x (current-audicon module))
+          (dolist (x (sort (copy-list (current-audicon module)) #'< :key 'onset))
             (print-audio-feature x))) 
       (print-warning "No audio module found"))))
-
-
 
 (defgeneric print-audio-feature (feat)
   (:documentation  "Print out an ASCII representation of the audicon."))
 
-
 (defmethod print-audio-feature ((feat sound-event))
-  (format t "~%~15a~5A~12A~15A~18s~10a~8,3f   ~8,3f  ~a"
-    (ename feat)
-    (attended-p feat)
-    (detectable-p feat)
-    (kind feat)
-    (content feat)
-    (location feat)
-    (ms->seconds (onset feat))
-    (ms->seconds (offset feat))
-    ;(snd-string feat)
-    (sname feat)))
-
+  (command-output "~15a~5A~12A~15A~18s~10a~8d   ~8d  ~a"
+                  (ename feat)
+                  (attended-p feat)
+                  (detectable-p feat)
+                  (kind feat)
+                  (content feat)
+                  (location feat)
+                  (onset feat)
+                  (offset feat)
+                  (sname feat)))
 
 (defmacro set-audloc-default (&rest params)
   "Macro to set the default specification for aural location buffer stuffing."
@@ -1147,38 +1131,20 @@
    "No current meta-process.  Cannot set audloc defaults."
    (verify-current-model 
     "No current model.  Cannot set audloc defaults."
-    (if (get-module :audio)
-        (if params
-            (let ((specs (verify-audio-specs params)))
-              (if specs
-                  (progn
-                    (setf (default-spec (get-module :audio)) specs)
-                    t)
-                (print-warning "No valid specs provided so defaults are unchanged.")))
-          (progn
-            (setf (default-spec (get-module :audio)) nil)
-            t))
-      (print-warning "No audio module found.  Cannot set audloc defaults.")))))
+    (aif (get-module :audio)
+         (let* ((spec (funcall 'define-chunk-spec-fct params))
+                (attended (when spec (chunk-spec-slot-spec spec :attended)))
+                (finished (when spec (chunk-spec-slot-spec spec :finished))))
+           (if (or (> (length attended) 1)
+                   (> (length finished) 1))
+               (progn
+                 (print-warning "The :attended and :finished specification for set-audloc-default can only be specified at most once.")
+                 (print-warning "Audloc defaults not changed."))
+             (if spec
+                 (progn (setf (default-spec it) spec) t)
+               (print-warning "Invalid chunk specification.  Default audloc not changed."))))
+         (print-warning "No audio module found.  Cannot set audloc defaults.")))))
 
-(defun verify-audio-specs (params)
-  (if (oddp (length params))
-      (print-warning "Odd number of elements provided cannot set audloc defaults")
-    (do* ((result nil)
-          (used nil)
-          (items params (cddr items))
-          (keyword (first items) (first items))
-          (value (second items) (second items)))
-         ((null items) result)
-      (if (member keyword '(:kind :attended :onset :pitch :location :finished))
-        (if (member keyword used)
-          (print-warning "Each property can only be used once.  Ignoring duplicate setting ~s ~s."
-                         keyword value)
-        (progn
-          (push keyword used)
-          (push value result)
-          (push keyword result)))
-        
-        (print-warning "Property ~s is not valid as an audio spec.  It is being ignored." keyword)))))
 
 #|
 This library is free software; you can redistribute it and/or

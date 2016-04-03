@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : scheduling.lisp
-;;; Version     : 1.5
+;;; Version     : 3.0
 ;;; 
 ;;; Description : Event creation and scheduling and schedule running functions.
 ;;; 
@@ -308,6 +308,48 @@
 ;;; 2013.01.04 Dan
 ;;;             : * Add cannot-define-model to run-sched-queue and send-run-terminated-events 
 ;;;             :   to avoid problems.
+;;; 2014.02.21 Dan
+;;;             : * Add a warning to the top of every run.
+;;; 2014.07.17 Dan
+;;;             : * Removed the warning.
+;;; 2015.06.04 Dan
+;;;             : * Use safe-seconds->ms for all the run and schedule time 
+;;;             :   conversions.
+;;; 2015.06.05 Dan
+;;;             : * Finally adding a schedule-event-now function that does what
+;;;             :   the name suggests to replace all the ...-relative 0 calls.
+;;; 2015.06.09 Dan
+;;;             : * The "clean up" run-full-time at the end of run now computes
+;;;             :   the difference in ms and creates a rational to avoid floats.
+;;; 2015.07.29 Dan [2.0]
+;;;             : * Add the option of a precondition to an event.  It must be a
+;;;             :   function and will be passed the same parameters as the action.
+;;;             :   If an event has a precondition when it is the "next" event
+;;;             :   which could occur the precondition is first tested.  If that
+;;;             :   returns nil then the event is removed from the queue without
+;;;             :   performing its action.  No output will be generated for the 
+;;;             :   trace for an event with a failed precondition at this point,
+;;;             :   and only maintenance events will be allowed to have preconditions
+;;;             :   for now.  This is being added because the "unstuff" actions
+;;;             :   for perceptual modules shouldn't advance the clock if there
+;;;             :   isn't a chunk that needs to be unstuffed, but the module
+;;;             :   can't remove the scheduled event because the buffer can be
+;;;             :   modified by "anything" and thus it can't know until it needs
+;;;             :   to try.
+;;; 2015.08.25 Dan
+;;;             : * Use the real-time-scale when updating the clock so that both
+;;;             :   the clock and slack get the appropriate shift in time.
+;;;             : * New system parameter :real-time-sleep-threshold which sets
+;;;             :   the min time for sleeping in the default real time slack hook.
+;;;             : * Run function's real-time parameter can be specified as a number
+;;;             :   in addition to t.  If it is a number then that over rides
+;;;             :   the current real-time-scale parameter.
+;;; 2015.09.14 [3.0]
+;;;             : * Not really a change to the code, but making the current
+;;;             :   process of scheduling equal priority items after any existing
+;;;             :   items of that priority the specified mechanism i.e. that's
+;;;             :   what the docs say now so it shouldn't be changed in the
+;;;             :   future.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -346,6 +388,40 @@
   (awhen (current-mp)
          (meta-p-running it)))
 
+(defun skip-unnecessary-events (mp)
+  (let ((cm (meta-p-current-model mp)))
+    (unwind-protect 
+        (do* ((events (meta-p-events mp) (cdr events))
+              (next-event (car events) (car events))
+              (unnecessary (and next-event
+                                (evt-precondition next-event)
+                                
+                                (progn
+                                  (when (evt-model next-event)
+                                    (setf (meta-p-current-model mp) 
+                                      (gethash (evt-model next-event) (meta-p-models mp))))
+                                  (null (if (evt-destination next-event)
+                                            (apply (evt-precondition next-event) 
+                                                   (append (list (get-module-fct (evt-destination next-event))) 
+                                                           (evt-params next-event)))
+                                          (apply (evt-precondition next-event) (evt-params next-event))))))
+                           (and next-event
+                                (evt-precondition next-event)
+                                
+                                (progn
+                                  (when (evt-model next-event)
+                                    (setf (meta-p-current-model mp) 
+                                      (gethash (evt-model next-event) (meta-p-models mp))))
+                                  (null (if (evt-destination next-event)
+                                            (apply (evt-precondition next-event) 
+                                                   (append (list (get-module-fct (evt-destination next-event))) 
+                                                           (evt-params next-event)))
+                                          (apply (evt-precondition next-event) (evt-params next-event))))))))
+             ((not unnecessary) t)
+          (pop (meta-p-events mp)))
+      (setf (meta-p-current-model mp) cm))))
+              
+
 (defun run-sched-queue (mp stop-condition &key (real-time nil))
   "The internal function that steps through events sending them to be
     executed until a condtion is met"
@@ -376,13 +452,12 @@
          (setf (meta-p-break mp) nil)
          
          (while (and (not (meta-p-break mp))
+                     (skip-unnecessary-events mp)
                      (meta-p-events mp)
                      (not (funcall stop-condition 
                                    mp 
                                    (evt-mstime (first (meta-p-events mp)))
                                    event-count)))           
-           
-           
            
            (if (and 
                 (meta-p-max-time-delta mp)
@@ -502,14 +577,6 @@
 ;;; This function takes three parameters which are a meta-process, the next
 ;;; time as it stands now, and whether or not it's to run in real-time.
 ;;;
-;;; The meta-process's time is updated to the specified time and then if the
-;;; meta-process's mp-real-time-p slot is non-nil it spins until the appropriate 
-;;; amount of time has passed.
-;;;
-;;; The spin should probably call sleep, or perhaps a machine specific 
-;;; event handler so that it could be swapped out and doesn't swamp the
-;;; processor because that could be an issue for multiple models in a real time
-;;; environment.
 
 (defun set-mp-clock (mp time real-time)
   "Update the time of a meta-process and maybe spin for the necessary real time"
@@ -517,24 +584,31 @@
   (if real-time
     (progn
     
-      (do* ((current-real-time (funcall (meta-p-time-function mp))
+      (do* ((scale (if (posnum real-time) real-time (meta-p-real-time-scale mp)))
+            (current-real-time (funcall (meta-p-time-function mp))
                                (funcall (meta-p-time-function mp)))
             (delta-model (- (evt-mstime (car (meta-p-events mp))) (meta-p-start-time mp))
                          (- (evt-mstime (car (meta-p-events mp))) (meta-p-start-time mp)))
-            (delta-real (seconds->ms (/ (- current-real-time (meta-p-start-real-time mp))
-                                        (meta-p-units-per-second mp)))
-                        (seconds->ms (/ (- current-real-time (meta-p-start-real-time mp))
-                                        (meta-p-units-per-second mp)))))
+            (delta-real (seconds->ms (* scale (/ (- current-real-time (meta-p-start-real-time mp))
+                                                                       (meta-p-units-per-second mp))))
+                        (seconds->ms (* scale (/ (- current-real-time (meta-p-start-real-time mp))
+                                                                       (meta-p-units-per-second mp))))))
            ((>= delta-real delta-model))
-        (funcall (meta-p-slack-function mp) (ms->seconds (- delta-model delta-real)) (evt-time (car (meta-p-events mp)))))
+        (funcall (meta-p-slack-function mp) (/ (ms->seconds (- delta-model delta-real)) scale) (evt-time (car (meta-p-events mp)))))
       
       (setf (meta-p-time mp) (evt-mstime (car (meta-p-events mp)))))
     (setf (meta-p-time mp) time)))
   
 
+(defvar *real-time-sleep-threshold*)
+
+(create-system-parameter :real-time-sleep-threshold :valid-test 'posnum :default-value .15 :warning "positive number"
+                         :documentation "smallest time in seconds for which the sleep function will be called in the default real time slack-hook" 
+                         :handler (simple-system-param-handler *real-time-sleep-threshold*))
+
 (defun real-time-slack (delta next-time)
   (declare (ignore next-time))
-  (when (> delta .150)
+  (when (>= delta *real-time-sleep-threshold*)
     (sleep delta)))
 
 
@@ -571,7 +645,7 @@
        (print-warning "Recursive call to a running function not allowed.  Must wait for a 'run' to complete before 'running' again.")
      (if (not (and (numberp run-time) (> run-time 0)))
          (print-warning "run-time must be a number greater than zero.")
-       (let ((ms-time (seconds->ms run-time)))
+       (let ((ms-time (safe-seconds->ms run-time 'run)))
          (flet ((test (mp next-time count)
                     (declare (ignore count))
                     (> (- next-time (meta-p-start-time mp)) ms-time)))
@@ -590,7 +664,7 @@
                                                    :output t
                                                    :mp (current-meta-process))))
                    (progn
-                     (run-full-time (- run-time (ms->seconds time)) :real-time nil)
+                     (run-full-time #|(- run-time (ms->seconds time))|# (/ (- ms-time time) 1000) :real-time nil)
                      (setf time ms-time)))
                (meta-p-output (format-event (make-act-r-event 
                                              :mstime (meta-p-time (current-mp))
@@ -641,7 +715,7 @@
      (if (not (and (numberp run-time) (> run-time 0)))
          (print-warning "run-time must be a number greater than zero.")
        
-       (let ((msend-time (+ (seconds->ms run-time) (meta-p-time (current-mp)))))
+       (let ((msend-time (+ (safe-seconds->ms run-time 'run-full-time) (meta-p-time (current-mp)))))
          (flet ((test (mp next-time count)
                       (declare (ignore count) (ignore mp))
                       (> next-time msend-time)))
@@ -682,7 +756,7 @@
        (print-warning "Recursive call to a running function not allowed.  Must wait for a 'run' to complete before 'running' again.")
      (if (not (and (numberp end-time) (> end-time 0)))
          (print-warning "end-time must be a number greater than zero.")
-       (let ((ms-end-time (seconds->ms end-time)))
+       (let ((ms-end-time (safe-seconds->ms end-time 'run-until-time)))
          
          (if (<= ms-end-time (meta-p-time (current-mp)))
              (progn
@@ -705,7 +779,7 @@
                                  :time-in-ms t
                                  :output nil)
                (with-model-eval (first (mp-models)) ;; just pick the first one
-                 (schedule-event end-time 'dummy-event-function 
+                 (schedule-event ms-end-time 'dummy-event-function 
                                  :maintenance t 
                                  :priority :min 
                                  :details "A dummy event to guarantee a run until time"
@@ -813,7 +887,8 @@
                             (module :none) (destination nil)
                             (priority 0) (params nil) 
                             (details nil) (output t)
-                            (time-in-ms nil))
+                            (time-in-ms nil)
+                            (precondition nil))
   (verify-current-mp  
    "schedule-event called with no current meta-process."
    (verify-current-model
@@ -831,6 +906,11 @@
              (print-warning "params must be a list."))
             ((and time-in-ms (not (integerp time)))
              (print-warning "When time-in-ms is true the time must be an integer."))
+            ((and precondition (not maintenance))
+             (print-warning "Only maintenance events may have a precondition."))
+            ((or (and precondition (not (or (functionp precondition) (fboundp precondition))))
+                 (and (symbolp precondition) (macro-function precondition)))
+             (print-warning "Precondition must be a function, but ~s provided." precondition))
             (t
              (let ((new-event (funcall (if maintenance
                                            #'make-act-r-maintenance-event
@@ -838,12 +918,13 @@
                                        :mp (meta-p-name mp)
                                        :model (current-model)
                                        :module module
-                                       :mstime (if time-in-ms time (seconds->ms time))
+                                       :mstime (if time-in-ms time (safe-seconds->ms time 'sechedule-event))
                                        :priority priority
                                        :action action
                                        :params params
                                        :details details
                                        :output output
+                                       :precondition precondition
                                        :destination destination)))
                
                (insert-queue-event mp new-event)
@@ -853,11 +934,6 @@
                
                new-event)))))))
 
-
-(defun schedule-maintenance-event (time action &rest r)
-  (declare (ignore time action r))
-  (print-warning "The schedule-maintenance functions no longer exist.")
-  (print-warning "Instead there is now a maintenance keyword accepted by the regular schedule-* functions."))
 
 
 ;;; insert-queue-event
@@ -892,6 +968,11 @@
                 (eq :left (compare-events event (car queue))))
             (splice-into-list-des (meta-p-events mp) pos event))))))
 
+
+;;; This comparison rule is now the specified operation!
+;;; If this is changed for some reason the same ordering needs
+;;; to be maintained -- always schedule the new event after 
+;;; existing events with the same priority.
 
 (defun compare-events (new-event old-event)
   (if (or (> (evt-mstime new-event) (evt-mstime old-event))
@@ -984,7 +1065,8 @@
                                            (module :none) (destination nil)
                                            (priority 0) (params nil) 
                                            (details nil) (output t)
-                                           (time-in-ms nil))
+                                           (time-in-ms nil)
+                                           (precondition nil))
   (verify-current-mp  
    "schedule-event-relative called with no current meta-process."
    (verify-current-model
@@ -1003,6 +1085,11 @@
              (print-warning "params must be a list."))
             ((and time-in-ms (not (integerp time-delay)))
              (print-warning "When time-in-ms is true the time-delay must be an integer."))
+            ((and precondition (not maintenance))
+             (print-warning "Only maintenance events may have a precondition."))
+            ((or (and precondition (not (or (functionp precondition) (fboundp precondition))))
+                 (and (symbolp precondition) (macro-function precondition)))
+             (print-warning "Precondition must be a function, but ~s provided." precondition))
             (t
              (let ((new-event 
                     (funcall (if maintenance
@@ -1012,12 +1099,13 @@
                              :model (current-model) 
                              :module module
                              :mstime (+ (meta-p-time mp) 
-                                        (if time-in-ms time-delay (seconds->ms time-delay)))
+                                        (if time-in-ms time-delay (safe-seconds->ms time-delay 'schedule-event-relative)))
                              :priority priority
                              :action action
                              :params params
                              :details details
                              :output output
+                             :precondition precondition
                              :destination destination)))
                
                (insert-queue-event mp new-event)
@@ -1028,13 +1116,53 @@
                new-event)))))))
 
 
-(defun schedule-maintenance-event-relative (time-delay action &rest r)
-  (declare (ignore time-delay action r))
-  (print-warning "The schedule-maintenance functions no longer exist.")
-  (print-warning "Instead there is now a maintenance keyword accepted by the regular schedule-* functions."))
-
-
-
+(defun schedule-event-now (action &key (maintenance nil)
+                                  (module :none) (destination nil)
+                                  (priority 0) (params nil) 
+                                  (details nil) (output t)
+                                  (precondition nil))
+  (verify-current-mp  
+   "schedule-event-now called with no current meta-process."
+   (verify-current-model
+    "schedule-event-now called with no current model."
+    (let ((mp (current-mp)))
+      (cond ((not (or (functionp action) (fboundp action)))
+             (print-warning 
+              "Can't schedule ~S not a function or function name." action))
+            ((and (symbolp action) (macro-function action))
+             (print-warning "Can't schedule ~S because it is a macro and not a function." action))
+            ((not (or (numberp priority) (eq priority :min) (eq priority :max)))
+             (print-warning "Priority must be a number or :min or :max."))
+            ((not (listp params))
+             (print-warning "params must be a list."))
+            ((and precondition (not maintenance))
+             (print-warning "Only maintenance events may have a precondition."))
+            ((or (and precondition (not (or (functionp precondition) (fboundp precondition))))
+                 (and (symbolp precondition) (macro-function precondition)))
+             (print-warning "Precondition must be a function, but ~s provided." precondition))
+            (t
+             (let ((new-event 
+                    (funcall (if maintenance
+                                 #'make-act-r-maintenance-event
+                               #'make-act-r-event)
+                             :mp (meta-p-name mp)
+                             :model (current-model) 
+                             :module module
+                             :mstime (meta-p-time mp) 
+                             :priority priority
+                             :action action
+                             :params params
+                             :details details
+                             :output output
+                             :precondition precondition
+                             :destination destination)))
+               
+               (insert-queue-event mp new-event)
+               
+               (when (or (meta-p-delayed mp) (meta-p-dynamics mp))
+                 (update-waiting-events mp new-event))
+               
+               new-event)))))))
 
 
 (defun schedule-event-after-module (after-module action 
@@ -1043,7 +1171,8 @@
                                                  (params nil) (details nil) 
                                                  (output t) (delay t)
                                                  (include-maintenance nil)
-                                                 (dynamic nil))
+                                                 (dynamic nil)
+                                                 (precondition nil))
   (let ((first-val
          (verify-current-mp  
           "schedule-event-after-module called with no current meta-process."
@@ -1058,6 +1187,11 @@
                     (print-warning "Can't schedule ~S because it is a macro and not a function." action))
                    ((not (listp params))
                     (print-warning "params must be a list."))
+                   ((and precondition (not maintenance))
+                    (print-warning "Only maintenance events may have a precondition."))
+                   ((or (and precondition (not (or (functionp precondition) (fboundp precondition))))
+                        (and (symbolp precondition) (macro-function precondition)))
+                    (print-warning "Precondition must be a function, but ~s provided." precondition))
                    (t
                     (let* ((new-event 
                             (funcall (if maintenance
@@ -1071,6 +1205,7 @@
                                      :params params
                                      :details details
                                      :output output
+                                     :precondition precondition
                                      :destination destination
                                      :dynamic (and dynamic (meta-p-allow-dynamics mp))
                                      :wait-condition 
@@ -1127,7 +1262,8 @@
                                     (params nil) (details nil) 
                                     (output t) (delay t)
                                     (include-maintenance nil)
-                                    (dynamic nil))
+                                    (dynamic nil)
+                                    (precondition nil))
 
   (let ((first-val
          (verify-current-mp  
@@ -1141,6 +1277,11 @@
                     (print-warning "Can't schedule ~S because it is a macro and not a function." action))
                    ((not (listp params))
                     (print-warning "params must be a list."))
+                   ((and precondition (not maintenance))
+                    (print-warning "Only maintenance events may have a precondition."))
+                   ((or (and precondition (not (or (functionp precondition) (fboundp precondition))))
+                        (and (symbolp precondition) (macro-function precondition)))
+                    (print-warning "Precondition must be a function, but ~s provided." precondition))
                    (t
                     (let* ((new-event 
                             (funcall (if maintenance
@@ -1154,6 +1295,7 @@
                                      :params params
                                      :details details
                                      :output output
+                                     :precondition precondition
                                      :destination destination
                                      :dynamic (and dynamic (meta-p-allow-dynamics mp))
                                      :wait-condition (list :any include-maintenance)))
@@ -1250,11 +1392,11 @@
                       :mp (meta-p-name mp)
                       :module :none
                       :model (current-model) 
-                      :mstime (+ (meta-p-time mp) (if time-in-ms initial-delay (seconds->ms initial-delay)))
+                      :mstime (+ (meta-p-time mp) (if time-in-ms initial-delay (safe-seconds->ms initial-delay 'schedule-periodic-event)))
                       :priority priority
                       :action 'periodic-action
                       :params 
-                      (list id real-event (if time-in-ms period (seconds->ms period))
+                      (list id real-event (if time-in-ms period (safe-seconds->ms period 'schedule-periodic-event))
                             priority)
                       :output nil
                       :details 
@@ -1322,7 +1464,7 @@
             (print-warning "When time-in-ms is true the time must be an integer."))
            (t
             (let ((new-event (make-act-r-break-event :mp (meta-p-name mp)
-                                                     :mstime (if time-in-ms time (seconds->ms time))
+                                                     :mstime (if time-in-ms time (safe-seconds->ms time 'schedule-break))
                                                      :params (list mp)
                                                      :priority priority
                                                      :details details)))
@@ -1335,8 +1477,7 @@
               new-event))))))
 
 
-(defun schedule-break-relative (time-delay 
-                                &key (priority :max) (details nil)(time-in-ms nil))
+(defun schedule-break-relative (time-delay &key (priority :max) (details nil)(time-in-ms nil))
   (verify-current-mp  
    "schedule-break-relative called with no current meta-process."
    (let ((mp (current-mp)))
@@ -1349,7 +1490,7 @@
            (t
             (let ((new-event (make-act-r-break-event 
                               :mp (meta-p-name mp)
-                              :mstime (+ (meta-p-time mp) (if time-in-ms time-delay (seconds->ms time-delay)))
+                              :mstime (+ (meta-p-time mp) (if time-in-ms time-delay (safe-seconds->ms time-delay 'schedule-break-relative)))
                               :params (list mp)
                               :priority priority
                               :details details)))
@@ -1361,8 +1502,7 @@
               
               new-event))))))
 
-(defun schedule-break-after-module (after-module 
-                                    &key (details nil) (delay t)(dynamic nil))
+(defun schedule-break-after-module (after-module &key (details nil) (delay t)(dynamic nil))
   
   (let ((first-val
          (verify-current-mp  

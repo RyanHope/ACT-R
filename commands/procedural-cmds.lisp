@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : procedural-cmds.lisp
-;;; Version     : 1.2
+;;; Version     : 2.0
 ;;; 
 ;;; Description : User functions for the procedural module.
 ;;; 
@@ -305,6 +305,29 @@
 ;;; 2011.04.28 Dan
 ;;;             : * Added some declaims to avoid compiler warnings about 
 ;;;             :   undefined functions and removed some unneeded let variables.
+;;; 2013.08.05 Dan
+;;;             : * Clear the hashtables for the style warnings in clear-productions.
+;;; 2013.08.09 Dan
+;;;             : * Added the command decalare-buffer-usage to avoid style
+;;;             :   warnings when chunks are being set through code or otherwise
+;;;             :   not in the initial model definition.
+;;; 2013.08.12 Dan
+;;;             : * Changed declare-buffer-usage to return t/nil.
+;;; 2013.10.18 Dan
+;;;             : * Finally fixed the typo in test-and-perfrom.
+;;; 2013.11.14 Dan
+;;;             : * Changed declare-buffer-usage to also allow suppressing the
+;;;             :   "modified without use" style warnings by adding the slots to
+;;;             :   the procedural-cond-style-usage-table as well.
+;;; 2014.04.07 Dan
+;;;             : * Changed calls to failure-reason-string to not pass procedural.
+;;; 2014.05.11 Dan [2.0]
+;;;             : * Updates to be consistent with the no chunk-type mechanisms.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2015.09.11 Dan
+;;;             : * Add the require for productions here eventhough the procedural
+;;;             :   module will have certainly loaded it already.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -334,8 +357,8 @@
 (declaim (ftype (function () t) minimum-utility))
 (declaim (ftype (function (t) t) production-utility))
 
-
-(require-compiled "PRODUCTION-PARSING" "ACT-R6:support;production-parsing-support")
+(require-compiled "PRODUCTIONS" "ACT-R-support:productions")
+(require-compiled "PRODUCTION-PARSING" "ACT-R-support:production-parsing-support")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; The user functions mostly from ACT-R 5
@@ -353,7 +376,7 @@
     (if prod
         (let ((res nil)
               (p (if (null productions) 
-                     (mapcar #'production-name (productions-list prod))
+                     (mapcar 'production-name (productions-list prod))
                    productions)))
           (dolist (p-name p)
             (let ((production (get-production-internal p-name prod)))
@@ -370,6 +393,13 @@
     (if prod
         (progn
           (print-warning "Clearing the productions is not recommended")
+          
+          (clrhash (procedural-cond-style-usage-table prod))
+          (clrhash (procedural-req-style-usage-table prod))
+          (clrhash (procedural-mod-style-usage-table prod))
+          (clrhash (procedural-retrieval-cond-style-usage-table prod))
+          (clrhash (procedural-retrieval-req-style-usage-table prod))
+
           (dolist (p (productions-list prod))
             (remove-production p prod)))
       (print-warning "No procedural module was found."))))
@@ -490,16 +520,15 @@
                     (print-production production)
                     
                     (command-output "It fails because: ")
-                    (command-output (failure-reason-string (production-failure-condition production) procedural production))))))))
+                    (command-output (failure-reason-string (production-failure-condition production) production))))))))
         conflict-set)
     (print-warning "Whynot called with no current model.")))
 
 
 (defun production-failure-reason (p-name)
-  (let ((procedural (get-module procedural))
-        (production (get-production p-name)))
+  (let ((production (get-production p-name)))
     (if (and production (production-failure-condition production))
-        (failure-reason-string (production-failure-condition production) procedural production)
+        (failure-reason-string (production-failure-condition production) production)
       "")))
 
 (defun pmatches ()
@@ -543,10 +572,10 @@
       (unless (production-disabled production)
                 
         (when (and (conflict-tests procedural (production-constants production) production 'test-constant-condition :report nil)
-                   (conflict-tests procedural (production-binds production) production 'test-and-perfrom-bindings :report nil)
+                   (conflict-tests procedural (production-binds production) production 'test-and-perform-bindings :report nil)
                    (conflict-tests procedural (production-others production) production 'test-other-condition :report nil)
                    (conflict-tests procedural (production-searches production) production 'test-search-buffers :report nil)
-                   (conflict-tests procedural (production-search-binds production) production 'test-and-perfrom-bindings :report nil)
+                   (conflict-tests procedural (production-search-binds production) production 'test-and-perform-bindings :report nil)
                    (conflict-tests procedural (production-search-others production) production 'test-other-condition :report nil)
                    ) 
           
@@ -588,7 +617,7 @@
 (defun p-fct (definition)
   (let ((prod (get-module procedural)))  
     (if (procedural-p prod)  
-        (create-production prod definition nil) 
+        (create-production prod definition) 
       (print-warning "No procedural modulue found cannot create production."))))
 
 
@@ -600,8 +629,37 @@
 
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; A command to avoid style warnings.
 
+(defmacro declare-buffer-usage (buffer type &rest slots)
+  `(declare-buffer-usage-fct ',buffer ',type ',slots))
 
+(defun declare-buffer-usage-fct (buffer type &optional slots)
+  (let ((procedural (get-module procedural)))
+    (if procedural
+        (cond ((not (find buffer (buffers)))
+               (print-warning "Cannot declare usage for ~S because it does not name a buffer in the model." buffer))
+              ((not (chunk-type-p-fct type))
+               (print-warning "Cannot declare usage for buffer ~s because ~s does not name a chunk-type in the model." buffer type))
+              ((not (or (eq slots :all)
+                        (and (listp slots) (= (length slots) 1) (eq (car slots) :all))
+                        (every (lambda (x)
+                                 (valid-chunk-type-slot type x))
+                               slots)))
+               (print-warning "Cannot declare usage for buffer ~s because the slots (~{~s~^ ~}) are not valid for chunk-type ~s." 
+                              buffer (remove-if (lambda (x) 
+                                                  (valid-chunk-type-slot type x))
+                                                slots)
+                              type))
+              (t
+               (when (or (eq slots :all)
+                         (and (listp slots) (= (length slots) 1) (eq (car slots) :all)))
+                   (setf slots (chunk-type-possible-slot-names-fct type)))
+               (dolist (s slots) (push s (gethash buffer (procedural-cond-style-usage-table procedural))))
+               (dolist (s slots) (push s (gethash buffer (procedural-init-chunk-slots procedural))))
+               t))
+      (print-warning "No procedural module found.  Cannot declare buffer usage."))))
 
 
 

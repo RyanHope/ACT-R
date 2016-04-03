@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : save-chunks-and-productions.lisp
-;;; Version     : 1.0a2
+;;; Version     : 2.0a1
 ;;; 
 ;;; Description : Saves a model's declarative and procedural components to a file
 ;;;             : which can be loaded later as a model.
@@ -33,20 +33,27 @@
 ;;;             : * Realized that the sort based on subtype status isn't right
 ;;;             :   since it doesn't work for unrelated types because sort may
 ;;;             :   not test every pair together.
+;;; 2014.06.17 Dan [2.0a1]
+;;;             : * Update to work with the typeless chunk mechanisms.
+;;; 2014.06.26 Dan
+;;;             : * More fixes to work right with the new chunk mechanism.
+;;;             : * Actually create and write out a setting for any chunks that
+;;;             :   are in buffers now.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
 ;;; Add a new command which allows a model's current declarative memory, set of
-;;; productions, general parameters related to declarative and procedural, and the
-;;; appropriate chunk and proceduction parameters to be written out to a model file.
+;;; productions, general parameters related to declarative and procedural, the
+;;; appropriate chunk and proceduction parameters, and all the chunks currently
+;;; in buffers to be written out to a model file.
 ;;; 
 ;;; That does not capture all of the current state because it does not record 
-;;; chunks which are in buffers, It does not record internal information from 
-;;; any module (nothing from the perceptual or motor modules is recorded nor are
-;;; things like finsts in declarative), events on the meta-process queue are not
-;;; stored in any way, nor are any commands or settings which are in the original 
-;;; model (other than sgp settings for some declarative and procedural settings).  
+;;; internal information from any module (nothing from the perceptual or motor 
+;;; modules is recorded nor are things like finsts in declarative), events 
+;;; currently on the meta-process queue are not saved in any way, nor are any 
+;;; extra commands or settings which are in the original model (other than sgp 
+;;; settings for some declarative and procedural settings).  
 ;;; 
 ;;; So the assumptions are that the module is "stopped" (no ongoing actions) before 
 ;;; saving the state and it's up to the modeler to manually add any other settings 
@@ -112,21 +119,21 @@ PROCEDURAL module
 ;;; model which was saved i.e. if you run a model, save it, then run it some more
 ;;; uncommenting the seed in the saved version then loading that and running it
 ;;; will produce the same results as the you had with the run after the save.
-
+;;; 
 ;;; The appropriate declarative parameters among the following will be written out based 
 ;;; on the :mp, :bll, and :ol settings using sdp:
-
-:creation-time
-:reference-count
-:reference-list
-:similarities
-
+;;; 
+;;; :creation-time
+;;; :reference-count
+;;; :reference-list
+;;; :similarities
+;;; 
 ;;; When writing out the creation-time and reference-list the times will be
 ;;; adjusted to a zero reference since the model time will be back to 0 when
 ;;; reloaded.  If one wants to avoid the re-referencing of those times then
 ;;; the optional parameter to save-chunks-and-productions needs to be specified
 ;;; as nil.
-
+;;; 
 ;;; For productions the :u and :at values will always be written out.  A non-nil 
 ;;; :reward will be saved if utility learning is enabled.  If production 
 ;;; compilation is enabled then an additional production parameter which is not
@@ -134,8 +141,7 @@ PROCEDURAL module
 ;;; reason for that last setting is because the utility learning differs for
 ;;; productions which were "original" vs learned and without the setting all
 ;;; the productions loaded would be marked as originals.
-
-
+;;; 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Public API:
@@ -176,18 +182,18 @@ PROCEDURAL module
 (defparameter *critical-params* '((:MD -1.0) (:RT 0.0) (:LE 1.0) (:MS 0.0) (:MP NIL) (:PAS NIL) (:MAS NIL) (:ANS NIL)
                                   (:BLC 0.0) (:LF 1.0) (:BLL NIL) (:ESC NIL) (:ER NIL) (:OL T) (:IU 0) (:UL NIL)
                                   (:ALPHA 0.2) (:UT NIL) (:NU 0) (:EGS 0.0) (:EPL NIL) (:TT 2.0) (:DAT 0.05) (:PPM NIL)))
-  
 
-(defun order-chunk-types (type-list)
-  (let* ((root-types (remove-if (lambda (x) (> (length (chunk-type-supertypes-fct x)) 1)) type-list))
-         (families (mapcar 'list root-types))
-         (others (set-difference type-list root-types)))
-    (dolist (x others)
-      (nconc (find-if (lambda (y) (chunk-type-subtype-p-fct x (car y))) families) (list x)))
-    (do ((res nil)
-         (fams families (cdr fams)))
-        ((null fams) (flatten res))
-      (push (sort (car fams) #'< :key (lambda (x) (length (chunk-type-supertypes-fct x)))) res))))
+(defun pprint-save-chunk (chunk-name)
+  (let ((chunk (get-chunk chunk-name)))
+    (when chunk
+      (command-output
+       (format nil "  (~S~%~@[~S~%~]    ISA CHUNK~%~{~{     ~s  ~s~}~^~%~})"
+         chunk-name
+         (act-r-chunk-documentation chunk)
+         (mapcar (lambda (slot) 
+                   (list (car slot) (cdr slot)))
+           (sort (copy-tree (act-r-chunk-slot-value-lists chunk)) #'< :key (lambda (x) (slot-name->index (car x))))))))))
+    
 
 (defun save-chunks-and-productions (file-name &optional (zero-ref t))
   
@@ -195,159 +201,168 @@ PROCEDURAL module
         (productions (no-output (pp)))
         (cmdt (car (no-output (sgp :cmdt)))))
     
-    ;;; Use the command trace to write things out since it will 
-    ;;; handle the opening of the file and pprint-chunks and pp will then work
-    ;;; "automatically".
-    
-    (sgp-fct (list :cmdt file-name))
-    
-    ;;; Write out a comment indicating what and when
-    
-    (multiple-value-bind (sec min hour date month year) (get-decoded-time)
-      (command-output ";;; Saved version of model ~s at run time ~f on ~d/~d/~d ~d:~2,'0d:~2,'0d"
-                      (current-model) (mp-time) year month date hour min sec))
-    
-    ;;; assume that a clear-all is appropriate for a model file
-    
-    (command-output "~%(clear-all)")
-    
-    ;;; write this as a model so it could theoretically just be loaded
-    
-    (command-output "~%(define-model ~s-saved" (current-model))
-    
-    ;;; Start with the general parameters
-    
-    (command-output "~%(sgp ")
-    
-    (dolist (param *critical-params*)
-      (unless (equalp (second param) (car (no-output (sgp-fct (list (first param))))))
-        (command-output "~s ~s" (first param) (car (no-output (sgp-fct (list (first param))))))))
-    
-    (command-output ")")
-    
-    ;;; Write out the current seed in a comment if continuing exactly is desired
-    
-    (command-output "~%;;; (sgp :seed ~s)~%" (no-output (car (sgp :seed))))
-    
-    ;;; Determine which chunk-types are added in the model and sort them for printing
-    ;;; so super types are defined first
-    
-    (let* ((dummy-name (gensym))
-           (default-types (prog2
-                            (define-model-fct dummy-name nil)
-                            (with-model-eval dummy-name
-                                (no-output (chunk-type)))
-                            (delete-model-fct dummy-name)))
-           ;; group them into subtype clusters
-           (model-types (order-chunk-types (set-difference (no-output (chunk-type)) default-types))))
-      
-      (dolist (ct model-types)
-        (aif (chunk-type-static-p-fct ct)
-            (if (> (length (chunk-type-supertypes-fct ct)) 1)
-                (command-output "(chunk-type (~a (:include ~a)) ~@[~s~]" ct it (chunk-type-documentation-fct ct))
-              (command-output "(chunk-type (~a (:static t)) ~@[~s~]" ct (chunk-type-documentation-fct ct)))
+    (unwind-protect 
+        (progn
           
-          (if (> (length (chunk-type-supertypes-fct ct)) 1)
-              (command-output "(chunk-type (~a (:include ~a)) ~@[~s~]" ct (second (chunk-type-supertypes-fct ct))
-                              (chunk-type-documentation-fct ct))
-            (command-output "(chunk-type ~a ~@[~s~]" ct (chunk-type-documentation-fct ct))))
+          ;;; Use the command trace to write things out since it will 
+          ;;; handle the opening of the file and pprint-chunks and pp will then work
+          ;;; "automatically".
           
-        (dolist (slot (chunk-type-slot-names-fct ct))
-          (aif (chunk-type-slot-default-fct ct slot)
-               (command-output "  (~a ~s)" slot it)
-               (command-output "  ~a" slot)))
-        
-        (command-output ")")))
-    
-    ;; Now write out all of the declarative chunks
-    
-    (command-output "(add-dm ")
-    (dolist (x (reverse chunks))
-      (command-output "(")
-      (pprint-chunks-fct (list x))
-      (command-output ")"))
-    (command-output ")")
-    
-    (command-output "")
-    (command-output "")
-      
-
-    ;;; If declarative options are enabled write out the necessary parameters
-    
-    (let ((esc (no-output (car (sgp :esc))))
-          (mp (no-output (car (sgp :mp))))
-          (bll (no-output (car (sgp :bll))))
-          (ol (no-output (car (sgp :ol))))
-          (params nil))
+          (sgp-fct (list :cmdt file-name))
           
-      (when (and esc (or mp bll))
+          ;;; Write out a comment indicating what and when
+          
+          (multiple-value-bind (sec min hour date month year) (get-decoded-time)
+            (command-output ";;; Saved version of model ~s at run time ~f on ~d/~d/~d ~d:~2,'0d:~2,'0d"
+                            (current-model) (mp-time) year month date hour min sec))
+          
+          ;;; assume that a clear-all is appropriate for a model file
+          
+          (command-output "~%(clear-all)")
+          
+          ;;; write this as a model so it could theoretically just be loaded
+          
+          (command-output "~%(define-model ~s-saved" (current-model))
+          
+          ;;; Start with the general parameters
+          
+          (command-output "~%(sgp ")
+          
+          (dolist (param *critical-params*)
+            (unless (equalp (second param) (car (no-output (sgp-fct (list (first param))))))
+              (command-output "~s ~s" (first param) (car (no-output (sgp-fct (list (first param))))))))
+          
+          (command-output ")")
+          
+          ;;; Write out the current seed in a comment if continuing exactly is desired
+          
+          (command-output "~%;;; (sgp :seed ~s)~%" (no-output (car (sgp :seed))))
+          
+          ;;; Determine which chunk-types are added in the model and write them
+          ;;; out (the order from all-chunk-type-names is safe for any inherited types).
+          ;;; Use the underlying chunk-type structure to make things easier.
+          
+          (let* ((dummy-name (gensym))
+                 (default-types (prog2
+                                  (define-model-fct dummy-name nil)
+                                    (with-model-eval dummy-name
+                                      (all-chunk-type-names))
+                                  (delete-model-fct dummy-name)))
+                 (model-types (mapcar 'get-chunk-type (remove-if (lambda (x) (find x default-types)) (all-chunk-type-names)))))
+            
+            (dolist (ct model-types)
+              (aif (act-r-chunk-type-parents ct)
+                   (command-output "(chunk-type (~a ~{(:include ~a)~}) ~@[~s~]" (act-r-chunk-type-name ct) it (act-r-chunk-type-documentation ct))
+                   (command-output "(chunk-type ~a ~@[~s~]" (act-r-chunk-type-name ct) (act-r-chunk-type-documentation ct)))
+              
+              (dolist (slot (act-r-chunk-type-slots ct))
+                ;; don't output the backward compatible slots because they're generated automatically
+                (let ((slot-name-string (symbol-name (chunk-type-slot-name slot))))
+                  (unless (and (>= (length slot-name-string) 22) (string-equal "ACT-R-6-BACKWARD-SLOT-" (subseq (symbol-name (chunk-type-slot-name slot)) 0 22)))
+                    (command-output "  ~s" slot))))
+              
+              (command-output ")")))
+          
+          ;; Now write out all of the declarative chunks
+          
+          (command-output "(add-dm ")
+          
+          (dolist (x (reverse chunks))
+            (pprint-save-chunk x))
+            
+          (command-output ")")
+          
+          (command-output "")
+          (command-output "")
+          
+          ;;; If declarative options are enabled write out the necessary parameters
+          
+          (let ((esc (no-output (car (sgp :esc))))
+                (mp (no-output (car (sgp :mp))))
+                (bll (no-output (car (sgp :bll))))
+                (ol (no-output (car (sgp :ol))))
+                (params nil))
+            
+            (when (and esc (or mp bll))
+              
+              (when mp (push :similarities params))
+              
+              (cond ((null bll)
+                     ;;; no extra params needed
+                     )
+                    ((null ol)
+                     ;;; need creation and list
+                     (push :reference-list params)
+                     (push :creation-time params))
+                    ((numberp ol)
+                     (push :reference-list params)
+                     (push :reference-count params)
+                     (push :creation-time params))
+                    (t ;;; :ol is t
+                     (push :reference-count params)
+                     (push :creation-time params)))
+              
+              (dolist (c chunks)
+                (command-output "(sdp ~a" c)
+                (dolist (param params)
+                  (let ((val (caar (no-output (sdp-fct (list c param))))))
+                    (case param
+                      (:similarities 
+                       (command-output "  ~s (~{~s~})" param val))
+                      (:creation-time
+                       (command-output "  ~s ~f" param (if zero-ref (- val (mp-time)) val)))
+                      (:reference-count
+                       (command-output "  ~s ~d" param val))
+                      (:reference-list
+                       (command-output "  ~s (~{~F~^ ~})" param (if zero-ref (mapcar (lambda (x) (- x (mp-time))) val) val))))))
+                (command-output ")"))))
+          
+          (command-output "")
+          (command-output "")
+          
+          ;; write out productions
+          
+          (pp)
+      
+          (command-output "")
+          (command-output "")
+      
+          ;;; Write out the production parameters
+      
+          (let ((params (no-output (spp :name :u :at :reward)))
+                (ul (car (no-output (sgp :ul)))))
         
-        (when mp (push :similarities params))
-        
-        (cond ((null bll)
-               ;;; no extra params needed
-               )
-              ((null ol)
-               ;;; need creation and list
-               (push :reference-list params)
-               (push :creation-time params))
-              ((numberp ol)
-               (push :reference-list params)
-               (push :reference-count params)
-               (push :creation-time params))
-              (t ;;; :ol is t
-               (push :reference-count params)
-               (push :creation-time params)))
-        
-        (dolist (c chunks)
-          (command-output "(sdp ~a" c)
-          (dolist (param params)
-            (let ((val (caar (no-output (sdp-fct (list c param))))))
-              (case param
-                (:similarities 
-                 (command-output "  ~s (~{~s~})" param val))
-                (:creation-time
-                 (command-output "  ~s ~f" param (if zero-ref (- val (mp-time)) val)))
-                (:reference-count
-                 (command-output "  ~s ~d" param val))
-                (:reference-list
-                 (command-output "  ~s (~{~F~^ ~})" param (if zero-ref (mapcar (lambda (x) (- x (mp-time))) val) val))))))
-          (command-output ")")))
+            ;;; always :u and :at then :reward if utility learning is enabled
+            
+            (dolist (x params)
+              (command-output "(spp ~a :u ~f :at ~f~@[ :reward ~s~])" (first x) (second x) (third x) (and ul (fourth x))))
+            
+            ;;; If utility learning and production compilation are on save which
+            ;;; productions were learned along the way
+            
+            (when (and ul (car (no-output (sgp :epl))))
+              (dolist (x productions)
+                (unless (production-user-created x)
+                  (command-output "(setf (production-user-created '~a) nil)" x)))))
+          
+          ;;; If there's a chunk in a buffer create that chunk and put it into
+          ;;; the buffer, using goal-focus for the goal buffer.
+          
+          (dolist (buffer (buffers))
+            (awhen (buffer-read buffer)
+                   (command-output "")
+                   (command-output "")
       
-      ;; write out the productions 
-      
-      (command-output "")
-      (command-output "")
-      
-      
-      (pp)
-      
-      (command-output "")
-      (command-output "")
-      
-      ;;; Write out the production parameters
-      
-      (let ((params (no-output (spp :name :u :at :reward)))
-            (ul (car (no-output (sgp :ul)))))
-        
-        ;;; always :u and :at then :reward if utility learning is enabled
-        
-        (dolist (x params)
-          (command-output "(spp ~a :u ~f :at ~f)" (first x) (second x) (third x))
-          (when (and ul (fourth x))
-            (command-output "(spp ~a :reward ~s)" (first x) (fourth x))))
-        
-        ;;; If utility learning and production compilation are on save which
-        ;;; productions were learned along the way
-        
-        (when (and ul (car (no-output (sgp :epl))))
-          (dolist (x productions)
-            (unless (production-user-created x)
-              (command-output "(setf (production-user-created '~a) nil)" x)))))
-      
-      ;;; write out the closing of the model
-      
-      (command-output ")")
+                   (command-output "(define-chunks")
+                   (pprint-save-chunk it)
+                   (command-output ")")
+                   (if (eq buffer 'goal)
+                       (command-output "(goal-focus ~s)" it)
+                     (command-output "(set-buffer-chunk '~s '~s)" buffer it))))
+          
+          ;;; write out the closing of the model
+          
+          (command-output ")"))
       
       ;;; set the command trace back to where it was
       

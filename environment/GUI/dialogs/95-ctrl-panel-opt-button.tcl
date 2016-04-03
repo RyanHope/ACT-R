@@ -114,7 +114,7 @@ proc apply_options {} {
   # If multi-models is enabled warn that a restart is needed
 
   if {$options_array(multiple_models) != $current_options(multiple_models)} {
-    tk_messageBox -icon warning -message "You must save the settings and then reconnect ACT-R to the environment (by calling stop-environment and then start-environment) to change multiple model support." \
+    tk_messageBox -icon warning -message "You must save the settings and then reconnect ACT-R to the environment (by calling stop-environment and then start-environment when using the ACT-R sources or by quitting and restarting the standalone ACT-R version) to change multiple model support." \
                   -type ok -title "Changing multiple models support"
   }
 

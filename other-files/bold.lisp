@@ -13,16 +13,19 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Filename    : bold.lisp
-;;; Version     : 2.0
+;;; Version     : 3.0
 ;;;
 ;;; Description : Computes predictions of the BOLD response based on activity
 ;;;               of the buffers in a module.
 ;;;
 ;;; Bugs        :
 ;;;
-;;; To do       : [ ] Consider a change from seconds to milliseconds for the
+;;; To do       : [x] Consider a change from seconds to milliseconds for the
 ;;;             :     internal data since buffer-record-ms-time is now a 
 ;;;             :     replacement for buffer-record-time-stamp.
+;;;             :     - A compromise is to still use seconds, but represent
+;;;             :     them with rationals to avoid any loss of accuracy until
+;;;             :     they get "used" in some floating point calculation.
 ;;;
 ;;; ----- History -----
 ;;;
@@ -161,6 +164,97 @@
 ;;;             : * Changed the environment data cache to an equalp hashtable
 ;;;             :   since the keys are now a cons of the handler name and the
 ;;;             :   window to prevent issues with multi-environment settings.
+;;; 2013.12.12 Dan
+;;;             : * Actually changed the :bold-scale parameter to 1 like it
+;;;             :   said in the 2.0 update.
+;;; 2014.08.01 Dan [3.0]
+;;;             : * Cleaning up some issues with the BOLD calculation:
+;;;             :   - The implementation of the gammapdf function here is
+;;;             :     computing with an exponent of (a+1) instead of a.
+;;;             :     That's why the default used to be 5 which would match
+;;;             :     up with the value 6 used in the SPM calculations.
+;;;             :     Now it computes using the right value i.e. if the
+;;;             :     :bold-exp parameter is set to 6 the gammapdf is computed
+;;;             :     with an exponent of 6.
+;;;             :   - The default values are thus now being set as follows:
+;;;             :
+;;;             :      :bold-exp 6
+;;;             :      :bold-scale 1 
+;;;             :      :neg-bold-exp 16 
+;;;             :      :neg-bold-scale 1 
+;;;             :      :bold-positive 6 
+;;;             :      :bold-negative 1
+;;;             :    
+;;;             :     with a negative component by default.
+;;;             :   - The way that positive and negative values were combined
+;;;             :     previously was scaling values based on the difference 
+;;;             :     between the factors.  Now it's simply scaling
+;;;             :     them and subtracting the negative:
+;;;             :     (:bold-positive * positive-value)/(max :bold-positive :bold-negative) -
+;;;             :     (:bold-negative * negative-value)/(max :bold-positive :bold-negative)
+;;;             :   - The sliding window for efficiency (the :bold-settle 
+;;;             :     parameter) now uses the "off" time of the signal to determine
+;;;             :     the window so that it still captures activity which starts
+;;;             :     outside of the window but continues into the window.
+;;;             :   - Renamed a bunch of functions and parameters for the internal 
+;;;             :     code so that it may be easier to follow what's happening.
+;;;             :   - If there's a currently busy module when computing the 
+;;;             :     trace lists don't drop it anymore -- consider it closed at
+;;;             :     the current time.
+;;; 2014.08.05 Dan
+;;;             : * When splitting a demand longer than the increment into pieces
+;;;             :   do it with equal length segments instead of blocks increment
+;;;             :   long plus the remainder.
+;;;             : * The :bold-inc is now 2 instead of 1.5.
+;;; 2014.08.06 Dan
+;;;             : * In order to maintain consistency with existing models a new
+;;;             :   parameter is being added, :bold-param-mode.  If it is set
+;;;             :   to act-r (the default) then the parameter settings will still
+;;;             :   be handled as they were before (exponent needing to be set to
+;;;             :   1 less than "desired" and scaling based on the difference between
+;;;             :   the factors).  If it is set to spm then the parameters will be
+;;;             :   handled as described above in the 3.0 update.
+;;;             : * The default values will be set based on the act-r mode:
+;;;             :
+;;;             :      :bold-exp 5
+;;;             :      :bold-scale 1 
+;;;             :      :neg-bold-exp 15
+;;;             :      :neg-bold-scale 1 
+;;;             :      :bold-positive 6 
+;;;             :      :bold-negative 1
+;;;             :      :bold-inc 2
+;;;             :
+;;;             :  Setting the mode to spm will automatically change the exp
+;;;             :  parameters to 6 and 16 if they are 5 and 15, otherwise it will
+;;;             :  leave them where they are, and setting it to act-r will change
+;;;             :  them from 6 and 16 to 5 and 15.  If you want to set them to 5 and 15
+;;;             :  in spm mode (or 6 and 16 in act-r mode) then that must be done after 
+;;;             :  setting spm mode i.e.
+;;;             :  this will work: (sgp :bold-param-mode spm :bold-exp 5 :neg-bold-exp 15)
+;;;             :  this will not: (sgp :bold-exp 5 :neg-bold-exp 15 :bold-param-mode spm).
+;;; 2014.08.07 Dan
+;;;             : * Added the module-demand-time function, renamed bold-demand-
+;;;             :   functions to module-demand-functions, and added a similar
+;;;             :   function module-percent-demand which returns the proportion of
+;;;             :   time that the module was busy during the step instead of just
+;;;             :   1 or 0.
+;;;             : * Those functions also allow specifying a step directly instead
+;;;             :   of having to change :bold-inc.
+;;; 2015.06.10 Dan
+;;;             : * Update how the bold graph is drawn in the environment so 
+;;;             :   that it only draws the axes once.  Leave the times in seconds
+;;;             :   for the graph range since a ms here or there shouldn't matter.
+;;;             : * Changed the run-time bold viewer so that it only needs to 
+;;;             :   calculate the "current" value instead of doing everything
+;;;             :   for each update.
+;;; 2015.06.11 Dan
+;;;             : * Convert the times to a rational of seconds to avoid loss of
+;;;             :   accuracy.
+;;;             : * Use the safe-seconds->ms on input values just to warn of any
+;;;             :   possible issues even though the calculations are actually 
+;;;             :   done with the seconds.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -208,29 +302,39 @@
 ;;;
 ;;; Parameters:
 ;;;
-;;; :bold-scale (default .75)
+;;; :bold-param-mode (default act-r)
+;;;
+;;;   Possible values are act-r or spm.  Determines how the exp and scaling paramters
+;;;   are used to generate the BOLD response.
+;;;
+;;; :bold-scale (default 1)
 ;;;
 ;;;  The scale parameter used in the computation of the positive component of the BOLD response.
 ;;;
 ;;; :bold-exp (default 6)
 ;;;
-;;;  The exponenet parameter used in the computation of the positive component of the BOLD response.
+;;;  The exponent (shape) parameter used in the computation of the positive component of the BOLD response.
 ;;;
 ;;; :neg-bold-scale (default 1)
 ;;;
 ;;;  The scale parameter used in the computation of the negative component of the BOLD response.
 ;;;
-;;; :bold-exp (default 15)
+;;; :bold-exp (default 16)
 ;;;
-;;;  The exponenet parameter used in the computation of the negative component of the BOLD response.
+;;;  The exponent (shape) parameter used in the computation of the negative component of the BOLD response.
 ;;;
-;;; :bold-positive (default 1)
+;;; :bold-positive (default 6)
 ;;;
 ;;;  The coefficient for the positive component of the BOLD response.
 ;;;
-;;; :bold-negative (default 0)
+;;; :bold-negative (default 1)
 ;;;
 ;;;  The coefficient for the negative component of the BOLD response.
+;;;
+;;; :bold-inc (default 2)
+;;; 
+;;;  The intervals at which the BOLD computation is computed in seconds with the first one 
+;;;  occurring at :bold-inc/2.
 ;;;
 ;;; :point-predict (default (goal))
 ;;;
@@ -239,13 +343,38 @@
 ;;; :bold-settle (default 40)
 ;;;
 ;;;  The time in seconds used as the window of time for computing the 
-;;;  bold value - the value at time T is based on the events that have
+;;;  bold value - the value at time T is based on the activity that has
 ;;;  happened between time  (- T :bold-settle) and time T.
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Design Choices:
 ;;;
+;;; This computes the convolution of the module demand curve with a gammapdf
+;;; function representing the hemodynamic response curve.  The demand curve
+;;; is assumed to be a square wave of height 1 thus the convolution is
+;;; just the area under the gammapdf.
+;;; 
+;;; The Gammapdf function used is: (t/b)^a * [e^(-t/b)] / (b*a!)
+;;; which technically is a gammapdf with a value a' = a+1 to simplify the 
+;;; computation.  The user setting for a (the bold-exp parameter) is decremented
+;;; by one for the computation.
+;;;
+;;; When computing the area under the curve the trapezoidal rule is used to
+;;; approximate the area using the endpoints and the midpoint.  To improve the 
+;;; approximation further the demand is broken into segements that are no larger
+;;; than the current increment (split into equal length subsegments).
+;;;
+;;; Both a positive and negative component are computed separately and the result
+;;; is the positive component minus the negative component weighted by the factors
+;;; provided.  Since the area under the gammapdf is 1 the maximum BOLD value will
+;;; be slightly less than 1 if the negative component has a non-zero weight.
+;;; 
+;;; For the modules with 0 duration demand curves the point based predictions
+;;; assume that the demand at that time has an area of 1 (basically a Dirac delta 
+;;; function) which means that the convolution is just the value of the gammapdf 
+;;; at that time.  If the point based preditions are used when the module has
+;;; >0 demand duration it uses only the start time of the demand.
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -257,94 +386,80 @@
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(require-compiled "ENVIRONMENT-COLORS" "ACT-R6:support;environment-colors")
+(require-compiled "ENVIRONMENT-COLORS" "ACT-R-support:environment-colors")
+
+(defun bold-buffer-record-times (x)
+  (/ (buffer-record-ms-time x) 1000))
 
 (defstruct bold-module
-   scale exp inc settle point env-cache v cmdt buffers max-table c1 c2 neg-exp neg-scale)
+   scale (exp 0) inc settle point env-cache v cmdt buffers max-table c1 c2 (neg-exp 0) neg-scale mode)
 
-(defun bold_cumulative (time time1 time2 scale exp)
-   (let ((average (/ (+ time1 time2) 2)))
-     (* (+ (bold_point (- time time1) scale exp) (* 2 (bold_point (- time average) scale exp)) (bold_point (- time time2) scale exp)) (- time2 time1) .25)))
-
-
-(defun bold_cumulative* (time time1 time2 inc scale exp)
-  (setf time2 (min time time2))
-  (do ((x (- time2 inc) (- x inc))
-       (y time2 x)
-       (sum 0 (+ sum (bold_cumulative time x y scale exp))))
-      ((< x time1) (+ sum (bold_cumulative time time1 y scale exp)))))
-
-(defun bold_cumulative-bold (times time inc scale exp)
-   (do ((temp times (cdr temp))
-        (sum 0 (+ sum (bold_cumulative* time (first (car temp)) (second (car temp)) inc scale exp))))
-       ((or (null temp) (> (caar temp) time)) sum)))
-
-(defun bold_point (time s exp)
-  (let* ((scale (/ time s))
-         (result (ignore-errors (* (expt scale exp) (exp (- scale))))))
+(defun bold_partial_gammapdf (time a b)
+  "Compute the gammapdf function without this part: 1/(b*a!) because that will be multiplied through at the end"
+  ;; This computation technically does the calculation for a+1 but the module subtracts
+  ;; one from the user's setting so that it all works out as one would expect.
+  ;; (t/b)^a * [e^(-t/b)] / b*a!
+  (let* ((scale (/ time b))
+         (result (ignore-errors (* (expt scale a) (exp (- scale))))))
      (if result result 0)))
 
-(defun bold_value (times time scale exp)
+
+(defun area-under-bold-subsegment (time time1 time2 a b)
+  "Compute the area under the gammapdf using the trapezoidal rule with the ends and midpoint and inverting the time for the convolution"
+  (* (+ (bold_partial_gammapdf (- time time1) a b) 
+        (* 2 (bold_partial_gammapdf (- time (/ (+ time1 time2) 2)) a b)) 
+        (bold_partial_gammapdf (- time time2) a b)) 
+     (- time2 time1) 
+     .25))
+
+(defun area-under-bold-curve (time time1 time2 inc a b)
+  "Compute the area under the bold curve for the demand from time1 to time2 in blocks no bigger than the increment"
+  (setf time2 (min time time2))
+  (if (= time1 time2)
+      0
+    (let* ((width (- time2 time1))
+           (steps (ceiling width inc))
+           (step (/ width steps)))
+      (do ((current 1 (1+ current))
+           (x (- time2 step) (- x step))
+           (y time2 x)
+           (sum 0 (+ sum (area-under-bold-subsegment time x y a b))))
+          ((= current steps) (+ sum (area-under-bold-subsegment time time1 y a b)))))))
+
+(defun sum-bold-demands (times time inc a b point-based?)
+  "Iterate over the demand segments and sum the area"
    (do ((temp times (cdr temp))
-        (sum 0 (+ sum (bold_point (- time (car temp)) scale exp))))
-       ((or (null temp) (> (car temp) time)) sum)))
+        (sum 0 (+ sum (if point-based?
+                          (bold_partial_gammapdf (- time (caar temp)) a b)
+                        (area-under-bold-curve time (caar temp) (cdar temp) inc a b)))))
+       ((or (null temp) (> (caar temp) time)) sum)))
 
-(defun bold_point-predict (times bm start end)
-  (let ((pos (bold_point-predict_result times bm start end (bold-module-exp bm) (bold-module-scale bm)))
-        (neg (unless (zerop (bold-module-c2 bm))
-               (bold_point-predict_result times bm start end (bold-module-neg-exp bm) (bold-module-neg-scale bm)))))
-    
-    (if neg
-        (let ((c1 (bold-module-c1 bm))
-              (c2 (bold-module-c2 bm)))
-          (mapcar (lambda (p n) (/ (- (* c1 p) (* c2 n)) (- c1 c2))) pos neg))
-      pos)))
 
-(defun bold_point-predict_result (times bm start end exp scale)
+(defun compute-bold-values (times start end inc settle a b point-based?)
   (let* (results
-          (inc (bold-module-inc bm))
-          (settle (bold-module-settle bm))
-          (time (+ start (/ inc 2))))
+         (time (+ start (/ inc 2))))
      (while (<= time (- end (/ inc 2)))
-       (setf times (member (- time settle) times :test '<))
-       (setf results (cons (bold_value times time scale exp) results))
+       (setf times (member (- time settle) times :test '< :key (if point-based? 'car 'cdr)))
+       (push-last (sum-bold-demands times time inc a b point-based?) results)
        (incf time inc))
-     (bold_normalize-list-values (reverse results) bm exp scale)))
+    results))
 
-(defun bold_interval-predict (times bm start end)
-  (let ((pos (bold_interval-predict_result times bm start end (bold-module-exp bm) (bold-module-scale bm)))
-        (neg (unless (zerop (bold-module-c2 bm))
-               (bold_interval-predict_result times bm start end (bold-module-neg-exp bm) (bold-module-neg-scale bm)))))
+(defun bold-predict (times start end inc settle c1 c2 ap bp pos-factor an bn neg-factor point-based?)
+  (let ((pos (unless (zerop c1)
+               (compute-bold-values times start end inc settle ap bp point-based?)))
+        (neg (unless (zerop c2)
+               (compute-bold-values times start end inc settle an bn point-based?))))
     
-    (if neg
-        (let ((c1 (bold-module-c1 bm))
-              (c2 (bold-module-c2 bm)))
-          (mapcar (lambda (p n) (/ (- (* c1 p) (* c2 n)) (- c1 c2))) pos neg))
-      pos)))
-  
-(defun bold_interval-predict_result (times bm start end exp scale)
-  (let* (results
-         (inc (bold-module-inc bm))
-          (settle (bold-module-settle bm))
-          (time (+ start (/ inc 2))))
-     (while (<= time (- end (/ inc 2)))
-       (setf times (member (- time settle) times :test '< :key 'car))
-       (setf results (cons (bold_cumulative-bold times time inc scale exp) results))
-       (incf time inc))
-     (bold_normalize-list-values (reverse results) bm exp scale)))
+    (cond ((and (not (zerop c1)) (not (zerop c2)))
+           (mapcar (lambda (p n) (- (* p pos-factor) (* n neg-factor))) pos neg))
+          ((zerop c2) (mapcar (lambda (p) (* p pos-factor)) pos))
+          (t (mapcar (lambda (n) (- (* n neg-factor))) neg)))))
+
 
 (defun bold_factorial (n)
    (do* ((i n (1- i))
          (v i (* v i)))
         ((= i 1) v)))
-
-(defun bold_normalize-list-values (lis bm exp scale)
-  (declare (ignore bm))
-  (when lis
-     (let ((top (* (bold_factorial exp) scale)))
-       (if (zerop top)
-           lis
-         (mapcar #'(lambda (x) (/ x top)) lis)))))
 
 (defun parse-trace-lists-for-bold (bm)
    (let* ((trace (get-current-buffer-trace))
@@ -362,101 +477,189 @@
                              (buffer-summary-busy->free record)
                              (buffer-summary-request record))
 
-                    (push (cons current-rect (list (buffer-record-time-stamp z))) rects)
+                    (push-last (cons current-rect (bold-buffer-record-times z)) rects)
                     (if (buffer-summary-request record)
-                         (setf current-rect (buffer-record-time-stamp z))
+                         (setf current-rect (bold-buffer-record-times z))
                        (setf current-rect nil)))
 
                  (if (buffer-summary-busy record)
-                   (if (and (buffer-summary-request record)
-                            (or (buffer-summary-chunk-name record)
-                                (and (buffer-summary-error record)
-                                     (not (buffer-summary-error->clear record)))
-                                (buffer-summary-busy->free record)))
-                       (push (cons (buffer-record-time-stamp z) (list (buffer-record-time-stamp z))) rects)
-                     (setf current-rect (buffer-record-time-stamp z)))
+                     (if (and (buffer-summary-request record)
+                              (or (buffer-summary-chunk-name record)
+                                  (and (buffer-summary-error record)
+                                       (not (buffer-summary-error->clear record)))
+                                  (buffer-summary-busy->free record)))
+                         (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects)
+                       (setf current-rect (bold-buffer-record-times z)))
                    (if (buffer-summary-request record)
-                       (push (cons (buffer-record-time-stamp z) (list (buffer-record-time-stamp z))) rects)
+                       (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects)
                      (when (buffer-summary-chunk-name record)
-                       (push (cons (buffer-record-time-stamp z) (list (buffer-record-time-stamp z))) rects)))))))
-
-         (push (cons x (reverse rects)) all-data)))
-
-      all-data))
-
-
-(defun predict-bold-response (&optional (start 0) (end (mp-time)))
-  (let* ((bm (get-module bold))
-         (data (parse-trace-lists-for-bold bm))
-         (bold nil)
-         (point (bold-module-point bm))
-         (inc (bold-module-inc bm)))
-    
-    (if (< (- end start) inc)
-        (print-warning "Sample time too short for BOLD predictions - must be at least :bold-inc seconds (currently ~s)" inc)
-      (progn
-        (unless (zerop (mod start inc))
-          (setf start (* inc (floor start inc)))
-          (model-warning "Start time should be a multiple of :bold-inc (~S).  Using start time of ~S."
-                         inc start))
-        
-        (dolist (x data)
-          (if (find (car x) point)
-              (push (cons (car x) (bold_point-predict (mapcar #'car (cdr x)) bm start end)) bold)
-            (push (cons (car x) (bold_interval-predict (cdr x) bm start end)) bold)))
-        
-        ;; Cache the max values for each buffer so that they can
-        ;; be used in normalizing things later if desired
-        
-        (dolist (x bold)
-          (let* ((buffer (car x))
-                 (data (cdr x))
-                 (max (when data (apply #'max data))))
-            (when (or (null (gethash buffer (bold-module-max-table bm)))
-                      (> max (gethash buffer (bold-module-max-table bm))))
-              (setf (gethash buffer (bold-module-max-table bm)) max))))
-        (output-bold-response-data bold bm start end)
-        bold))))
+                       (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects)))))))
+         
+         (when current-rect (push-last (cons current-rect (mp-time)) rects))
+         (push (cons x rects) all-data)))
+     
+     all-data))
 
 
-(defun bold-demand-functions (&optional (start 0) (end (mp-time)))
-  (let* ((bm (get-module bold))
-         (data (parse-trace-lists-for-bold bm))
-         (bold nil)
-         ;(point (bold-module-point bm))
-         (inc (bold-module-inc bm)))
-    
-    (if (< (- end start) inc)
-        (print-warning "Sample time too short for BOLD predictions - must be at least :bold-inc seconds (currently ~s)" inc)
-      (progn
-        (unless (zerop (mod start inc))
-          (setf start (* inc (floor start inc)))
-          (model-warning "Start time should be a multiple of :bold-inc (~S).  Using start time of ~S."
-                         inc start))
-        
-        (dolist (x data)
-          (push (cons (car x) (bold_demand (cdr x) bm start end)) bold))
-        
-        (output-bold-demand-data bold bm start end)
-        bold))))
-
-
-(defun bold_demand (times bm start end)
-  (let* ((inc (bold-module-inc bm))
-         (results (make-list (ceiling (- end start) inc) :initial-element 0)))
-    (dolist (x times)
-      (if (= (car x) (cadr x))
-          (setf (nth (floor (car x) inc) results) 1)
-        (dotimes (i (ceiling (- (cadr x) (car x)) inc))
-          (setf (nth (+ i (floor (car x) inc)) results) 1))))
-    results))
-    
+(defun predict-bold-response (&optional (start 0) end)
+  (verify-current-mp 
+   "Predict-bold-response requires a current meta-process."
+   (verify-current-model
+    "Predict-bold-response requires a current model."
+    (when (null end)
+      (setf end (/ (mp-time-ms) 1000)))
+    (unless (and (numberp start) (numberp end))
+      (print-warning "Predict-bold-response requires start and end times to be numbers, but given ~s,~s." start end)
+      (return-from predict-bold-response nil))
+    (safe-seconds->ms start 'predict-bold-response)
+    (safe-seconds->ms end 'predict-bold-response)
+    (let* ((bm (get-module bold))
+           (data (parse-trace-lists-for-bold bm))
+           (bold nil)
+           (point (bold-module-point bm))
+           (inc (bold-module-inc bm))
+           (c1 (bold-module-c1 bm))
+           (c2 (bold-module-c2 bm))
+           (ap (if (eq (bold-module-mode bm) 'spm)
+                   (1- (bold-module-exp bm))
+                 (bold-module-exp bm)))
+           (an (if (eq (bold-module-mode bm) 'spm)
+                   (1- (bold-module-neg-exp bm))
+                 (bold-module-neg-exp bm)))
+           (bp (bold-module-scale bm))
+           (bn (bold-module-neg-scale bm))
+           ;; since the 1/(b*factorial(a)) is a constant in the gammapdf function it can be
+           ;; factored out and applied at the end along with the relative scaling between positive
+           ;; and negative 
+           (pos-factor (unless (zerop c1) 
+                         (if (eq (bold-module-mode bm) 'spm)
+                             (/ c1 (* (max c1 c2) bp (bold_factorial ap)))
+                           (/ c1 (- c1 c2) bp (bold_factorial ap)))))
+           (neg-factor (unless (zerop c2)
+                         (if (eq (bold-module-mode bm) 'spm)
+                             (/ c2 (* (max c1 c2) bn (bold_factorial an)))
+                           (/ c2 (- c1 c2) bn (bold_factorial an))))))
+      
+      
+      (if (< (- end start) inc)
+          (print-warning "Sample time too short for BOLD predictions - must be at least :bold-inc seconds (currently ~s)" inc)
+        (progn
+          (unless (zerop (mod start inc))
+            (setf start (* inc (floor start inc)))
+            (model-warning "Start time should be a multiple of :bold-inc (~S).  Using start time of ~S." inc start))
+          
+          (dolist (x data)
+            (push (cons (car x) (bold-predict (cdr x) start end inc (bold-module-settle bm) c1 c2 ap bp pos-factor an bn neg-factor (find (car x) point))) bold))
+          
+          ;; Cache the max values for each buffer so that they can
+          ;; be used in normalizing things later if desired
+          
+          (dolist (x bold)
+            (let* ((buffer (car x))
+                   (data (cdr x))
+                   (max (when data (apply #'max data))))
+              (when (or (null (gethash buffer (bold-module-max-table bm)))
+                        (> max (gethash buffer (bold-module-max-table bm))))
+                (setf (gethash buffer (bold-module-max-table bm)) max))))
+          (output-bold-response-data bold bm start end)
+          bold))))))
+   
+(defun module-demand-times (&key (start 0) end)
+  (verify-current-mp 
+   "Module-demand-times requires a current meta-process."
+   (verify-current-model
+    "Module-demand-times requires a current model."
+    (when (null end)
+      (setf end (/ (mp-time-ms) 1000)))
+    (if (and (numberp start) (numberp end))
+        (progn
+          (safe-seconds->ms start 'predict-bold-response)
+          (safe-seconds->ms end 'predict-bold-response)
+          (let* ((bm (get-module bold))
+                 (data (parse-trace-lists-for-bold bm)))
+            (reverse
+             (mapcar (lambda (x)
+                       (cons (car x) (remove-if (lambda (y)
+                                                  (or (< (cdr y) start) (> (car y) end)))
+                                                (cdr x))))
+               data))))
+      (print-warning "Start and end times for module-demand-times must be numbers, but given ~s,~s." start end)))))
   
-(defun output-bold-demand-data (data bm start end)
+
+(defun module-demand-functions (&key (start 0) end step)
+  (verify-current-mp 
+   "Module-demand-functions requires a current meta-process."
+   (verify-current-model
+    "Module-demand-functions requires a current model."
+    (when (null step)
+      (setf step (bold-module-inc (get-module bold))))
+    (when (null end)
+      (setf end (/ (mp-time-ms) 1000)))
+    (if (and (numberp start) (numberp end) (numberp step))
+        (progn
+          (safe-seconds->ms start 'predict-bold-response)
+          (safe-seconds->ms end 'predict-bold-response)
+          
+          (compute-module-demand start end step nil))
+      (print-warning "Start, end, and step for module-demand-functions must be numbers, but given ~s,~s,~s." start end step)))))
+
+(defun module-demand-proportion (&key (start 0) end step)
+  (verify-current-mp 
+   "Module-demand-proportion requires a current meta-process."
+   (verify-current-model
+    "Module-demand-proportion requires a current model."
+    (when (null step)
+      (setf step (bold-module-inc (get-module bold))))
+    (when (null end)
+      (setf end (/ (mp-time-ms) 1000)))
+    (if (and (numberp start) (numberp end) (numberp step))
+        (progn
+          (safe-seconds->ms start 'predict-bold-response)
+          (safe-seconds->ms end 'predict-bold-response)
+          
+          (compute-module-demand start end step t))
+      (print-warning "Start, end, and step for module-demand-proportion must be numbers, but given ~s,~s,~s." start end step)))))
+
+
+(defun compute-module-demand (start end step percent)
+  (let* ((bm (get-module bold))
+         (data (parse-trace-lists-for-bold bm))
+         (bold nil))
+    (dolist (x data)
+      (push (cons (car x) (module-demand-internal (cdr x) step start end percent))
+            bold))
+      
+    (output-module-demand-data bold bm start end step)
+    bold))
+
+(defun module-demand-internal (times step start end percent)
+  (let ((results (make-list (ceiling (- end start) step) :initial-element 0)))
+    (dolist (x times)
+      (when (or (and (= (car x) (cdr x)) (>= (car x) start) (< (car x) end))
+                (and (> (cdr x) start) (< (car x) end)))
+        (let ((s (max 0 (- (car x) start)))
+              (e (min (- (cdr x) start) (- end start))))
+          (if (= (car x) (cdr x))
+              (if percent
+                  (incf (nth (floor s step) results) 1)
+                (setf (nth (floor s step) results) 1))
+            (do* ((index (floor s step) (1+ index))
+                  (ending (multiple-value-list (floor e step))))
+                ((if (zerop (second ending))
+                     (= index (first ending))
+                   (> index (first ending))))
+              (if percent
+                  (incf (nth index results) (- (* 1000 (min e (* (1+ index) step))) (* 1000 (max s (* index step)))))
+                (setf (nth index results) 1)))))))
+    (if percent
+        (mapcar (lambda (x) (/ (/ x step) 1000)) results)
+      results)))
+
+
+(defun output-module-demand-data (data bm start end step)
   (when (and data (bold-module-v bm) (bold-module-cmdt bm))
     (do* ((times (list 'time))
-          (inc (bold-module-inc bm))
-          (x start (+ x inc)))
+          (x start (+ x step)))
          ((> x end) (push (reverse times) data))
       (push x times))    
     
@@ -522,7 +725,15 @@
             (:bold-inc
              (setf (bold-module-inc instance) (cdr param)))
             (:point-predict
-             (setf (bold-module-point instance) (cdr param)))))
+             (setf (bold-module-point instance) (cdr param)))
+            (:bold-param-mode
+             (cond ((and (eq (cdr param) 'act-r) (= (bold-module-exp instance) 6) (= (bold-module-neg-exp instance) 16))
+                    (setf (bold-module-exp instance) 5)
+                    (setf (bold-module-neg-exp instance) 15))
+                   ((and (eq (cdr param) 'spm) (= (bold-module-exp instance) 5) (= (bold-module-neg-exp instance) 15))
+                    (setf (bold-module-exp instance) 6) 
+                    (setf (bold-module-neg-exp instance) 16)))
+             (setf (bold-module-mode instance) (cdr param)))))
          (t
           (case param
             (:bold-scale
@@ -544,60 +755,66 @@
             (:bold-inc
              (bold-module-inc instance))
             (:point-predict
-             (bold-module-point instance))))))
+             (bold-module-point instance))
+            (:bold-param-mode
+             (bold-module-mode instance))))))
 
 (define-module-fct 'bold nil
    (list
     (define-parameter :v :owner nil)
     (define-parameter :cmdt :owner nil)
     (define-parameter :traced-buffers :owner nil)
+    (define-parameter :bold-param-mode
+      :valid-test (lambda (x) (or (eq x 'act-r) (eq x 'spm)))
+      :warning "either act-r or spm"
+      :default-value 'act-r
+      :documentation "Set how exp and scale parameters determine the hemodynamic response curve.")
     (define-parameter :bold-scale
-      :valid-test #'numberp
+      :valid-test 'numberp
       :warning "a number"
-      :default-value 0.75
+      :default-value 1.0
       :documentation "Scale parameter for computing the BOLD response.")
     (define-parameter :bold-exp
-      :valid-test #'integerp
+      :valid-test 'integerp
       :warning "an integer"
-      :default-value 6
-      :documentation "Exponenet parameter for computing the BOLD response.")
+      :default-value 5
+      :documentation "Exponent parameter for computing the BOLD response.")
     
     (define-parameter :neg-bold-scale
-      :valid-test #'numberp
+      :valid-test 'numberp
       :warning "a number"
-      :default-value 1
+      :default-value 1.0
       :documentation "Scale parameter for computing a negative component of the BOLD response.")
     (define-parameter :neg-bold-exp
-      :valid-test #'integerp
+      :valid-test 'integerp
       :warning "an integer"
       :default-value 15
-      :documentation "Exponenet parameter for computing a negative component of the BOLD response.")
+      :documentation "Exponent parameter for computing a negative component of the BOLD response.")
     
     (define-parameter :bold-positive
-      :valid-test #'nonneg
+      :valid-test 'nonneg
       :warning "a non-negative number"
-      :default-value 1
+      :default-value 6
       :documentation "Factor for the positive component of the hemodynamic response curve.")
     (define-parameter :bold-negative
-      :valid-test #'nonneg
+      :valid-test 'nonneg
       :warning "a non-negative number"
-      :default-value 0
+      :default-value 1
       :documentation "Factor for the negative component of the hemodynamic response curve.")
     
 
-    
     (define-parameter :bold-inc
-      :valid-test #'posnum
+      :valid-test 'posnum
       :warning "a positive number"
-      :default-value 1.5
+      :default-value 2
       :documentation "Time increment in seconds for computing the BOLD response.")
     (define-parameter :bold-settle
-      :valid-test #'posnum
+      :valid-test 'posnum
       :warning "a positive number"
       :default-value 40
       :documentation "Time window in seconds for computing the BOLD response.")
     (define-parameter :point-predict
-      :valid-test #'(lambda (x) (and (listp x) (every (lambda (y) (find y (buffers))) x)))
+      :valid-test (lambda (x) (and (listp x) (every (lambda (y) (find y (buffers))) x)))
       :warning "a list of buffer names"
       :default-value (list 'goal)
       :documentation "List of buffers for which the point based computation should be used to compute the BOLD response."))
@@ -605,7 +822,7 @@
    :creation 'create-bold-module
   :reset 'reset-bold-module
   :params #'handle-bold-params
-   :version "2.0"
+   :version "3.0"
    :documentation "A module to produce BOLD response predictions from buffer request activity.")
 
 (defun bold-data-buffer-max (buffer)
@@ -639,69 +856,67 @@
                          (normalize-bold-data-for-env-local d)
                        (normalize-bold-data-for-env d))))
          (time-inc (car (no-output (sgp :bold-inc))))
-         (buffer-data (cdr (find buffer all-data :key #'car)))
+         (dummy-data (cdar all-data))
          (data nil)
-         (s-index (if (= start -1) 0 (min (floor start time-inc) (length buffer-data))))
-         (e-index (if (= end -1) (length buffer-data) (min (floor end time-inc) (length buffer-data))))
-         (s-time (* s-index time-inc))
-         ;(e-time (* e-index time-inc))
-         )
+         (s-index (if (= start -1) 0 (min (floor start time-inc) (length dummy-data))))
+         (e-index (if (= end -1) (length dummy-data) (min (floor end time-inc) (length dummy-data))))
+         (s-time (* s-index time-inc)))
     
-    (if (> s-index e-index) 
-        (push (list 'text "No data: start time > end time" 40 40 "#f00") data)
+    (if (>= s-index e-index) 
+        (push (list 'text "No data available for time requested" 40 40 "#f00") data)
       
-      (progn 
-        (setf buffer-data (subseq buffer-data s-index e-index))     
-        (if buffer-data
-            (let* ((b (no-output (car (sgp :traced-buffers))))
-                  (buffers (if (listp b) b (buffers)))
-                  (colors (no-output (car (sgp :buffer-trace-colors))))
-                  (color-list (create-color-list (if (and (listp b) colors) colors nil) buffers *gt-colors*))
-                  (cur-color (nth (position buffer buffers) color-list)))
-
-              (push (list 'color cur-color) data)
-              
-              (push (list 'size (round (+ 50 (* (1+ (length buffer-data)) time-inc *pixels-per-second-for-bold*)))
-                          (+ *bold-vertical-scale* 40))
-                    data)
-              (push (list 'line 40 20 40 (+ 20 *bold-vertical-scale*) "#000") data)
-              (push (list 'line 40 (+ 20 *bold-vertical-scale*) 
-                          (round (+ 40 (* (length buffer-data) time-inc *pixels-per-second-for-bold*))) 
-                          (+ 20 *bold-vertical-scale*) "#000") data)
-              (dotimes (i 21)
-                (push (list 'line 35 (- (+ 20 *bold-vertical-scale*) (* i (/ *bold-vertical-scale* 20)))
-                            45 (- (+ 20 *bold-vertical-scale*) (* i (/ *bold-vertical-scale* 20)))
-                            "#000") 
-                      data)
-                (push (list 'text_y (format nil "~4,2f" (* i .05)) 35 (- (+ 20 *bold-vertical-scale*) (* i (/ *bold-vertical-scale* 20)))
-                            "#000") 
-                      data))
-              (dotimes (i (1+ (length buffer-data)))
-                (push (list 'line (+ 40 (* i time-inc *pixels-per-second-for-bold*)) (+ 15 *bold-vertical-scale*)
-                            (+ 40 (* i time-inc *pixels-per-second-for-bold*)) (+ 25 *bold-vertical-scale*)
-                            "#000") 
-                      data)
-                (push (list 'text_x (format nil "~4,2f" (+ s-time (* i time-inc)))
-                            (+ 40 (* i time-inc *pixels-per-second-for-bold*)) (+ 25 *bold-vertical-scale*)
-                            "#000") 
-                      data))
+      (if (null buffer)
           
-          (do ((p1 (butlast buffer-data) (cdr p1))
-               (p2 (cdr buffer-data) (cdr p2))
-               (inc (round (* *pixels-per-second-for-bold* time-inc)))
-               (time (+ 40 (round (* *pixels-per-second-for-bold* (/ time-inc 2))))
-                     (round (+ time inc))))
-              ((null p1))
-               (push (list 'line time (- (+ 20 *bold-vertical-scale*)
-                                         (* (car p1) *bold-vertical-scale*))
-                           (+ time inc) (- (+ 20 *bold-vertical-scale*)
-                                           (* (car p2) *bold-vertical-scale*)) cur-color)
-                     data))
-              
-              
-              
-              )
-      (push (list 'text "No Data Available" 40 40 "#f00") data))))
+          (progn ;; just draw the axes
+            (push (list 'size (round (+ 50 (* (1+ (- e-index s-index)) time-inc *pixels-per-second-for-bold*)))
+                        (+ *bold-vertical-scale* 40))
+                  data)
+            (push (list 'line 40 20 40 (+ 20 *bold-vertical-scale*) "#000") data)
+            (push (list 'line 40 (+ 20 *bold-vertical-scale*) 
+                        (round (+ 40 (* (- e-index s-index) time-inc *pixels-per-second-for-bold*))) 
+                        (+ 20 *bold-vertical-scale*) "#000") data)
+            (dotimes (i 11)
+              (push (list 'line 35 (- (+ 20 *bold-vertical-scale*) (* i (/ *bold-vertical-scale* 10)))
+                          45 (- (+ 20 *bold-vertical-scale*) (* i (/ *bold-vertical-scale* 10)))
+                          "#000") 
+                    data)
+              (push (list 'text_y (format nil "~,1f" (* i .1)) 35 (- (+ 20 *bold-vertical-scale*) (* i (/ *bold-vertical-scale* 10)))
+                          "#000") 
+                    data))
+            
+            (dotimes (i (1+ (- e-index s-index)))
+              (push (list 'line (+ 40 (* i time-inc *pixels-per-second-for-bold*)) (+ 15 *bold-vertical-scale*)
+                          (+ 40 (* i time-inc *pixels-per-second-for-bold*)) (+ 25 *bold-vertical-scale*)
+                          "#000") 
+                    data)
+              (push (list 'text_x (format nil "~,2f" (+ s-time (* i time-inc)))
+                          (+ 40 (* i time-inc *pixels-per-second-for-bold*)) (+ 25 *bold-vertical-scale*)
+                          "#000") 
+                    data)))
+        
+        (let ((bd (cdr (find buffer all-data :key #'car))))
+          (if bd
+              (let* ((buffer-data (subseq bd s-index e-index))
+                     (b (no-output (car (sgp :traced-buffers))))
+                     (buffers (if (listp b) b (buffers)))
+                     (colors (no-output (car (sgp :buffer-trace-colors))))
+                     (color-list (create-color-list (if (and (listp b) colors) colors nil) buffers *gt-colors*))
+                     (cur-color (nth (position buffer buffers) color-list)))
+                  
+                  (push (list 'color cur-color) data)
+                  
+                  (do ((p1 (butlast buffer-data) (cdr p1))
+                       (p2 (cdr buffer-data) (cdr p2))
+                       (inc (round (* *pixels-per-second-for-bold* time-inc)))
+                       (time (+ 40 (round (* *pixels-per-second-for-bold* (/ time-inc 2))))
+                             (round (+ time inc))))
+                      ((null p1))
+                    (push (list 'line time (- (+ 20 *bold-vertical-scale*)
+                                              (* (car p1) *bold-vertical-scale*))
+                                (+ time inc) (- (+ 20 *bold-vertical-scale*)
+                                                (* (car p2) *bold-vertical-scale*)) cur-color)
+                          data)))
+              (push (list 'text "No Data Available" 40 40 "#f00") data)))))
   
   (let ((result nil))
     (dolist (x data)
@@ -803,9 +1018,10 @@
         
 
 (defun brain-scan (handler)
-  (let ((bm (get-module bold))
-        (d (no-output (predict-bold-response)))
-        (result ""))
+  (let* ((bm (get-module bold))
+         (start (max 0 (* (bold-module-inc bm) (1- (floor (mp-time) (bold-module-inc bm))))))
+         (d (no-output (predict-bold-response start)))
+         (result ""))
         
         (dolist (region '(manual goal vocal imaginal retrieval production aural visual))
           (let ((nums (assoc region d)))

@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -91,6 +91,15 @@
 ;;;             :   Error:Unbound variable: \?
 ;;;             :   
 ;;;             :   and then hangs.
+;;; 2014.07.30 Dan
+;;;             : * Added the all-dm-slot-lists and filter-dm-chunks functions
+;;;             :   to use for the filter in the declarative viewer since 
+;;;             :   chunk-type won't work now.
+;;; 2015.05.18 Dan
+;;;             : * Filter-dm-chunks now verifies that all the items are valid
+;;;             :   slot names first because there are potential issues across
+;;;             :   reset and loading where a slot name from a previous run
+;;;             :   doesn't exist anymore.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -228,6 +237,19 @@
     (format *standard-output* "Buffer is Empty")))
 
 
+(defun all-dm-slot-lists ()
+  (cons 'none (mapcar (lambda (x) 
+                        (format nil "~a" (slot-mask->names (car x))))
+                (dm-chunks (get-module declarative)))))
+
+(defun filter-dm-chunks (slot-list)
+  (when (every 'valid-slot-name slot-list)
+    (let ((mask (reduce 'logior slot-list :key 'slot-name->mask)))
+      (mapcan (lambda (x) 
+                (if (slots-vector-match-signature (car x) mask)
+                    (copy-list (cdr x))
+                  nil))
+        (dm-chunks (get-module declarative))))))
 #|
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public

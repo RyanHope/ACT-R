@@ -1,4 +1,4 @@
-Here is the very basic information on how to start running ACT-R 6.  More 
+Here is the very basic information on how to start running ACT-R 7.  More 
 information is available in the tutorials, the reference manual, and the
 ACT-R Environment's manual.
 
@@ -8,14 +8,13 @@ different and vary by system.  You should consult the readme file that is
 included with the standalone for instructions on how to install and run it.
 
 
-1) Download the source files and extract them from the archive (zip file or 
-disk image).
+1) Download the source files and extract them from the zip archive.
 
 2) Start your Lisp application.  ACT-R should work with any ANSI Common Lisp 
-and it has been tested with ACL (Allegro Common Lisp), LispWorks, MCL (Macintosh
-Common Lisp), CLisp, CMUCL, OpenMCL, CCL (Clozure Common Lisp), SBCL, and ABCL.
+and it has been tested with ACL (Allegro Common Lisp), LispWorks, CLisp, 
+CMUCL, CCL (Clozure Common Lisp), SBCL, ABCL, and ECL (Embeddable Common Lisp).
 
-3) In your Lisp application, load the load-act-r-6.lisp file which is found at 
+3) In your Lisp application, load the load-act-r.lisp file which is found at 
 the top level of the ACT-R sources.
 
 That will load all of the necessary ACT-R files, and once the ACT-R version 
@@ -27,8 +26,8 @@ If you would like to use the ACT-R Environment GUI and you have a Lisp
 application which can run it then you need to perform steps 4-6 listed here
 or the alternative step 4 listed in the next section if applicable.
 
-The ACT-R Environment can be run with ACL, LispWorks, MCL, OpenMCL, CCL, CMUCL,
-and versions of SBCL that have the multiprocessing support included.
+The ACT-R Environment can be run with ACL, LispWorks, CCL, CMUCL, and versions
+of SBCL that have the multiprocessing support included.
 
 4) Run the appropriate Environment application which is included with the ACT-R
 source files.  The applications are found in the environment directory.
@@ -41,9 +40,9 @@ source files.  The applications are found in the environment directory.
    downloaded from:" to Anywhere before running it.  Once you successfully
    run it you can change your preferences back to a safer setting.
  - For Unix/Linux you need to have Tcl/Tk installed and then you must run 
-   the starter.tcl script located in the GUI subdirectory of the environment
-   directory.  One way to do that is by running the wish interpreter directly
-   and passing it the file to execute:   wish starter.tcl
+   the starter.tcl script located in the environment/GUI directory.  Executing 
+   that script directly should work, but if not you may need to call the wish
+   interpreter to execute it i.e. "wish starter.tcl" (without the quotes).
 
 5) Wait for the "Control Panel" window to appear.  It should be on the far 
 right side of your display and will say "Waiting for ACT-R" at the top.

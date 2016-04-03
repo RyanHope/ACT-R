@@ -98,6 +98,45 @@
 ;;;             : * Added a safety check to define-meta-process to prevent the
 ;;;             :   creation of new meta-processes while there's some meta-process
 ;;;             :   running (basically same issue as defining new models on the fly).
+;;; 2014.02.18 Dan
+;;;             : * Mp-models now returns the models in a deterministic, but 
+;;;             :   unspecified order.
+;;; 2014.07.17 Dan
+;;;             : * Mp-print-versions now includes the *actr-major-version-string*
+;;;             :   in the header.
+;;; 2014.09.29 Dan
+;;;             : * Mp-print-versions now uses all-module-names so that they are
+;;;             :   always printed in order.
+;;; 2014.09.22 Dan
+;;;             : * Added mp-queue-count to be able to check if there are any
+;;;             :   active events without having to print them or do some trick
+;;;             :   with aborting a scheduled "after" event.
+;;; 2014.11.13 Dan
+;;;             : * Don't allow mp-real-time-management to adjust things if the 
+;;;             :   model is currently running.
+;;; 2014.12.17 Dan
+;;;             : * Changed the declaim for some get-abstract-module because it
+;;;             :   didn't indicate multiple return values and some Lisps care
+;;;             :   about that.
+;;; 2015.05.19 Dan
+;;;             : * Added an optional parameter to mp-show-queue which if true
+;;;             :   indicates events that are in the trace with a *.
+;;; 2015.05.20 Dan
+;;;             : * Added the declaim for event-displayed-p.
+;;; 2015.06.03 Dan
+;;;             : * Commented out the time "accuracy" code since it's not used
+;;;             :   and the variables it is using are being set and used differently
+;;;             :   for other reasons now.
+;;; 2015.06.04 Dan
+;;;             : * Use safe-seconds->ms in mp-real-time-management.
+;;; 2015.07.29 Dan
+;;;             : * Changed how mp-print-versions outputs info for the software
+;;;             :   itself (previously called the framework).
+;;; 2015.08.25 Dan
+;;;             : * Adding a separate scale keyword to mp-real-time-management 
+;;;             :   because just adjusting the units-per-second doesn't quite
+;;;             :   work for going faster than real time with the default slack
+;;;             :   hook.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -181,6 +220,10 @@
 (declaim (ftype (function () t) global-modules-table))
 (declaim (ftype (function () t) max-module-name-length))
 (declaim (ftype (function (t) t) delete-model-fct))
+(declaim (ftype (function (t) (values t t)) get-abstract-module))
+(declaim (ftype (function () t) all-module-names))
+(declaim (ftype (function (t) t) event-displayed-p))
+
 
 ;;; The top level tabel that holds all the meta-processes.
 
@@ -218,12 +261,13 @@
   (setf (meta-p-time-function meta-process) 'get-internal-real-time)
   (setf (meta-p-units-per-second meta-process) internal-time-units-per-second)
   (setf (meta-p-slack-function meta-process) 'real-time-slack)
+  (setf (meta-p-real-time-scale meta-process) 1.0)
   (setf (meta-p-max-time-delta meta-process) nil)
   (setf (meta-p-max-time-maintenance meta-process) nil)
   
   (setf (meta-p-cannot-define-model meta-process) 0))
 
-
+#|
 (defun mp-time-accuracy-limit ()
   (ms->seconds *time-size-current-limit*))
 
@@ -234,7 +278,7 @@
             (values t (cadr sufficient))
           (values t nil)))
     (values nil nil)))
-
+|#
 
 (defmacro verify-current-mp (warning &body body)
   `(if (null (mps-current *meta-processes*))
@@ -255,6 +299,7 @@
 
 (defun mp-real-time-management (&key (time-function 'get-internal-real-time)
                                      (units-per-second internal-time-units-per-second)
+                                     (scale 1.0)
                                      (slack-function 'real-time-slack)
                                      (max-time-delta nil) (delta-maintenance nil)
                                      (allow-dynamics nil))
@@ -269,34 +314,45 @@
           (print-warning "Slack-function ~s not a valid function for mp-real-time-management" slack-function))
          ((not (posnumornil max-time-delta))
           (print-warning "Max-time-delta ~s is not a positive number or nil" max-time-delta))
+         ((not (posnum scale))
+          (print-warning "Scale ~s is not a positive number" scale))
+         ((meta-p-running (current-mp))
+          (print-warning "Mp-real-time-management cannot adjust real-time operation while the model is running."))
          (t
           (setf (meta-p-allow-dynamics (current-mp)) allow-dynamics)
           (setf (meta-p-time-function (current-mp)) time-function)
           (setf (meta-p-units-per-second (current-mp)) units-per-second)
           (setf (meta-p-slack-function (current-mp)) slack-function)
+          (setf (meta-p-real-time-scale (current-mp)) scale)
           (setf (meta-p-max-time-maintenance (current-mp)) delta-maintenance)          
-          (setf (meta-p-max-time-delta (current-mp)) (if (numberp max-time-delta) (seconds->ms max-time-delta) max-time-delta))
+          (setf (meta-p-max-time-delta (current-mp)) (if (numberp max-time-delta) (safe-seconds->ms max-time-delta 'mp-real-time-management) max-time-delta))
           t))))
    
 (defun mp-models ()  
   "returns a list of the names of all the models in the current meta-process"
   (verify-current-mp  
    "mp-models called with no current meta-process."
-   (hash-table-keys (meta-p-models (current-mp)))))
+   (meta-p-model-order (current-mp))))
 
 (defun meta-process-names ()
   (hash-table-keys (mps-table *meta-processes*)))
 
 
 
-(defun mp-show-queue ()
+(defun mp-show-queue (&optional indicate-traced)
   (verify-current-mp 
    "mp-show-queue called with no current meta-process."
    (let ((events (meta-p-events (current-mp))))
      (format t "Events in the queue:~%")
      (dolist (evt events (length events))
-       (format t "~A~%" (format-event evt))))))
+       (format t "~:[~*~;~:[ ~;*~]~]~A~%" indicate-traced (event-displayed-p evt) (format-event evt))))))
 
+
+(defun mp-queue-count ()
+  (verify-current-mp 
+   "mp-show-queue called with no current meta-process."
+   (let ((events (meta-p-events (current-mp))))
+     (length events))))
 
 (defun mp-show-waiting ()
   (verify-current-mp 
@@ -323,19 +379,19 @@
      events)))
      
 (defun mp-print-versions ()
-  (format t "ACT-R Version Information:~%~va: ~10a ~a~%"
+  (format t "ACT-R ~a Version Information:~%~va: ~10a ~a~%" *actr-major-version-string*
     (max (max-module-name-length) 10)
-    "Framework"
+    "Software"
     (meta-p-version (gethash 'default (mps-table *meta-processes*)))
     (meta-p-documentation (gethash 'default (mps-table *meta-processes*))))
-  (maphash #'(lambda (key value)
-               (declare (ignore key))
-               (format t "~va: ~10a ~a~%"
-                 (max (max-module-name-length) 10)
-                 (act-r-module-name value)
-                 (act-r-module-version value)
-                 (act-r-module-documentation value)))
-           (global-modules-table)))
+  (dolist (name (all-module-names))
+    (let ((module (get-abstract-module name)))
+      (format t "~va: ~10a ~a~%"
+        (max (max-module-name-length) 10)
+        name
+        (act-r-module-version module)
+        (act-r-module-documentation module)))))
+    
    
     
 

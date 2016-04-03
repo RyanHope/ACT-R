@@ -8,18 +8,12 @@
 (chunk-type is-member object category judgment)
 
 (add-dm
- (shark isa chunk) (dangerous isa chunk)
- (locomotion isa chunk) (swimming isa chunk) 
- (fish isa chunk) (salmon isa chunk)
- (edible isa chunk) (breathe isa chunk)
- (gills isa chunk) (animal isa chunk)
- (moves isa chunk) (skin isa chunk)
- (canary isa chunk) (color isa chunk)
- (sings isa chunk) (bird isa chunk) 
- (ostrich isa chunk) (flies isa chunk) 
- (height isa chunk) (tall isa chunk)
- (wings isa chunk) (flying isa chunk) 
- (true isa chunk) (false isa chunk) 
+ (shark) (dangerous) (locomotion) (swimming) (fish) 
+ (salmon) (edible) (breathe) (gills) (animal)
+ (moves) (skin) (canary) (color) (sings) (bird) 
+ (ostrich) (flies) (height) (tall) (wings) (flying) 
+ (true) (false) 
+ 
  (p1 ISA property object shark attribute dangerous value true)
  (p2 ISA property object shark attribute locomotion value swimming)
  (p3 ISA property object shark attribute category value fish)
@@ -40,9 +34,10 @@
  (p18 ISA property object bird attribute wings value true)
  (p19 ISA property object bird attribute locomotion value flying)
  (p20 ISA property object bird attribute category value animal)
- (g1 ISA is-member object canary category bird judgment nil)
- (g2 ISA is-member object canary category animal judgment nil)
- (g3 ISA is-member object canary category fish judgment nil))
+ 
+ (g1 ISA is-member object canary category bird)
+ (g2 ISA is-member object canary category animal)
+ (g3 ISA is-member object canary category fish))
 
 (p initial-retrieve
    =goal>
@@ -97,15 +92,15 @@
       attribute   category
 )
 
- (P fail
+(P fail
    =goal>
       ISA         is-member
       object      =obj1
       category    =cat  
       judgment    pending
     
-    ?retrieval>
-      state       error
+   ?retrieval>
+      buffer      failure
 ==>
    =goal>
       judgment    no

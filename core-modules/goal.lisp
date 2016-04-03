@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : goal.lisp
-;;; Version     : 1.1
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Implementation of the goal module.
 ;;; 
@@ -86,12 +86,23 @@
 ;;; 2008.09.19 Dan 
 ;;;             : * Moved the mod-request function to goal-style support
 ;;;             :   and changed the goal module's definition to use it.
+;;; 2013.03.20 Dan
+;;;             : * Minor edits while verifying that it'll work with the typeless
+;;;             :   chunk mechanism.
+;;; 2015.02.11 Dan [2.0]
+;;;             : * Change the default value for :ga from 1 to 0.  The imaginal
+;;;             :   buffer is now the only one which spreads activation by default.
+;;;             :   Should have made this change with the first version of 6.1.
+;;; 2015.06.04 Dan
+;;;             : * Use :time-in-ms t for all the scheduled events.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
 ;;; The goal module has one buffer called goal.
-;;; The source spread parameter of the goal is called :ga and defaults to 1.
+;;; The source spread parameter of the goal is called :ga and defaults to 0.
 ;;;
 ;;; The goal module responds to requests by creating a new chunk and placing it
 ;;; into the buffer.  The requests must be a unique specification of a chunk.
@@ -149,7 +160,7 @@
 
 ;;; Rely on the general functions in the goal-style-module 
 
-(require-compiled "GOAL-STYLE-MODULE" "ACT-R6:support;goal-style-module")
+(require-compiled "GOAL-STYLE-MODULE" "ACT-R-support:goal-style-module")
 
 ;;; Only need to record the chunk that will be stuffed into the buffer
 
@@ -184,9 +195,9 @@
 
 ;;; Actually define the module now
 
-(define-module-fct 'goal '((goal (:ga 1.0)))
+(define-module-fct 'goal '((goal (:ga 0.0)))
   nil
-  :version "1.1"
+  :version "2.0"
   :documentation "The goal module creates new goals for the goal buffer"
   :creation #'create-goal-module
   :query #'goal-query
@@ -212,22 +223,16 @@
     (if chunk-name
         (if (chunk-p-fct chunk-name)
             (progn
-              
               ;; Should it clear it immediately first?
               
-              (schedule-set-buffer-chunk 'goal chunk-name 0 :module 'goal 
-                                         :priority :max :requested nil)
-              (schedule-event-after-module 'goal #'clear-delayed-goal :module 'goal 
-                                           :output nil  
-                                           :destination 'goal
-                                           :maintenance t)
+              (schedule-set-buffer-chunk 'goal chunk-name 0 :time-in-ms t :module 'goal :priority :max :requested nil)
+              (schedule-event-after-module 'goal 'clear-delayed-goal :module 'goal :output nil  
+                                           :destination 'goal :maintenance t)
               
               (setf (goal-module-delayed g-module) chunk-name)
               chunk-name)
           ;; This is a serious problem so don't use model-warning
-          (print-warning 
-           "~S is not the name of a chunk in the current model - goal-focus failed"
-           chunk-name))
+          (print-warning "~S is not the name of a chunk in the current model - goal-focus failed" chunk-name))
       
       (let ((chunk (buffer-read 'goal))
             (delayed (goal-module-delayed g-module)))
@@ -235,8 +240,7 @@
                (command-output "Goal buffer is empty")
                nil)
               ((null chunk)
-               (command-output "Will be a copy of ~a when the model runs" 
-                               delayed)
+               (command-output "Will be a copy of ~a when the model runs" delayed)
                (pprint-chunks-fct (list delayed))
                delayed)
               ((null delayed)
@@ -249,8 +253,7 @@
                      (pprint-chunks-fct (list chunk))
                      chunk)
                  (progn
-                   (command-output "Will be a copy of ~a when the model runs" 
-                                   delayed)
+                   (command-output "Will be a copy of ~a when the model runs" delayed)
                    (command-output "Currently holds:")
                    (pprint-chunks-fct (list chunk))
                    delayed))))))))
@@ -268,17 +271,13 @@
   (let ((chunk (buffer-read 'goal)))
     (if chunk
         (progn
-          (schedule-event-relative 0 'goal-modification 
-                                   :module 'goal
-                                   :priority :max
-                                   :output 'medium)
+          (schedule-event-now 'goal-modification :module 'goal :priority :max :output 'medium)
           (mod-chunk-fct chunk modifications))
                                    
       (print-warning "No chunk in the goal buffer to modify"))))
 
 (defun goal-modification ()
-  "Dummy function for mod-focus event"
-  nil)
+  "Dummy function for mod-focus event")
 
 #|
 This library is free software; you can redistribute it and/or

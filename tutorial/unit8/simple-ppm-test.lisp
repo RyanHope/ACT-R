@@ -2,8 +2,7 @@
 
 (define-model test-ppm
   (sgp :v t :trace-detail high :esc t :ppm nil :egs 0 :cst t)
-  (sgp :seed (100 1))
-  
+    
   (add-dm (small isa chunk)
           (medium isa chunk)
           (large isa chunk))

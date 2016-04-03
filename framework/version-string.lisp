@@ -25,6 +25,22 @@
 ;;; ----- History -----
 ;;; 2007.01.15 Dan
 ;;;             : * Initial creation.
+;;; 2014.07.17 Dan
+;;;             : * Split it into a major and minor version now.  Report the
+;;;             :   major version with the "ACT-R ..." part of mp-print-versions
+;;;             :   and the minor version as the Framework number.
+;;; 2015.07.29 Dan
+;;;             : * The version strings are now going to be combined to create
+;;;             :   the "version" of the software instead of being separate 
+;;;             :   and the ".0" is dropped from the major version info.  
+;;;             :   When I build a release it will now append the repository #
+;;;             :   as an additional .# on the end and add the date in place of 
+;;;             :   the <internal> tag which will be after the number e.g. if
+;;;             :   I were to build it today it would be .0.1842-<07/29/2015>
+;;;             :   instead of ".0-<internal>".
+;;; 2015.08.03 Dan
+;;;             : * Actually separate out all the pieces of the version string
+;;;             :   and then combine them to set *actr-version-string*.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -42,7 +58,16 @@
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(defvar *actr-version-string* "1.5 [r1395]")
+(defvar *actr-major-version-string* "7")
+(defvar *actr-minor-version-string* "0")
+(defvar *actr-repository-number* "1930")
+(defvar *actr-release-tag* "2015-12-21")
+
+(defvar *actr-version-string* (format nil "~a.~a~@[.~a~]-<~a>"
+                                *actr-major-version-string*
+                                *actr-minor-version-string*
+                                *actr-repository-number*
+                                *actr-release-tag*))
 
 #|
 This library is free software; you can redistribute it and/or

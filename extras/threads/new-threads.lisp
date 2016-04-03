@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : new-threads.lisp
-;;; Version     : 2.0a
+;;; Version     : 2.2
 ;;; 
 ;;; Description : Reimplementation of the threaded cognition module using
 ;;;             : the new searchable multi-buffer capability.
@@ -25,9 +25,19 @@
 ;;; 
 ;;; ----- History -----
 ;;; 2010.01.13 Dan [2.0a]
-;;;            : * Initial creation.
+;;;             : * Initial creation.
 ;;; 2011.04.28 Dan
 ;;;             : * Suppress warnings about extending chunks at initial load.
+;;; 2014.06.17 Dan [2.1]
+;;;             : * Fix a bug with thread-request for 6.1 since there isn't an
+;;;             :   'isa <type>' in the chunk description.
+;;; 2015.06.05 Dan
+;;;             : * Schedule events in ms now.
+;;; 2015.07.28 Dan
+;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2015.08.12 Dan [2.2]
+;;;             : * Fixed a bug that got introduced with either the 2.1 or next
+;;;             :   update in the request function.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -96,7 +106,7 @@
 
 ;;; Rely on the general functions in the goal-style-module 
 
-(require-compiled "GOAL-STYLE-MODULE" "ACT-R6:support;goal-style-module")
+(require-compiled "GOAL-STYLE-MODULE" "ACT-R-support:goal-style-module")
 
 ;;; Remove the default goal module because we are going to replace it.
 
@@ -144,25 +154,15 @@
         (let ((chunk-name (car (define-chunks-fct (list chunk-description)))))
           (store-m-buffer-chunk buffer-name chunk-name)
           (push-last chunk-name (tgm-chunk-set instance))
-          (schedule-event-relative delay 'create-new-thread-chunk 
-                                 :module 'goal
-                                 :priority -100 
-                                 :details 
-                                 (concatenate 'string
-                                   (symbol-name 'create-new-buffer-chunk)
-                                   " "
-                                   (symbol-name buffer-name)
-                                   " "
-                                   (symbol-name (first chunk-description))
-                                   " "
-                                   (symbol-name (second chunk-description)))
-                                 :params (list chunk-name))
-          
-          )
+          (schedule-event-relative (seconds->ms delay) 'create-new-thread-chunk 
+                                   :module 'goal
+                                   :priority -100 
+                                   :details (concatenate 'string (symbol-name 'create-new-buffer-chunk) " " (symbol-name buffer-name))
+                                   :params (list chunk-name)))
       (print-warning "Invalid request made of the ~A buffer." buffer-name))))
 
 (defun create-new-thread-chunk (chunk)
-    (schedule-overwrite-buffer-chunk 'goal chunk 0 :module 'goal :priority -1000 :requested t))
+    (schedule-overwrite-buffer-chunk 'goal chunk 0 :time-in-ms t :module 'goal :priority -1000 :requested t))
 
 ;;; These two module functions are responsible for the search interface provided
 ;;; by procedural now. 
@@ -208,7 +208,7 @@
 
 (define-module-fct 'goal '((goal (:ga 1.0) nil nil nil :search))
   nil
-  :version "2.0a"
+  :version "2.2"
   :documentation "Threaded cognition version of the goal module"
   :creation 'create-threaded-goal-module
   :reset (list nil 'threaded-goal-reset)
@@ -284,8 +284,8 @@
               (store-m-buffer-chunk 'goal n-chunk)
               (setf (tgm-chunk-set g-module) (append (tgm-chunk-set g-module) (list n-chunk)))
               (if clear-old-chunk
-                  (schedule-set-buffer-chunk 'goal n-chunk 0 :module 'goal :priority :max :requested nil)  
-                (schedule-overwrite-buffer-chunk 'goal n-chunk 0 :module 'goal :priority :max :requested nil))
+                  (schedule-set-buffer-chunk 'goal n-chunk 0 :time-in-ms t :module 'goal :priority :max :requested nil)  
+                (schedule-overwrite-buffer-chunk 'goal n-chunk 0 :time-in-ms t :module 'goal :priority :max :requested nil))
               (setf (tgm-delayed g-module) n-chunk)
               (schedule-event-after-module 'goal #'clear-delayed-goal :module 'goal 
                                            :output nil :destination 'goal :maintenance t)

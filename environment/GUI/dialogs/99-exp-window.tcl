@@ -179,7 +179,7 @@ proc process_env_window {dummy cmd} {
     }
     text {
       $win.can create text [lindex $cmd 3] [lindex $cmd 4] \
-                              -font env_window_font -fill [lindex $cmd 5] \
+                              -font [list courier [lindex $cmd 7] roman] -fill [lindex $cmd 5] \
                               -text [lindex $cmd 6] -anchor nw -tags [list [lindex $cmd 2] text]
     }
     button {

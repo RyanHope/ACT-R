@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : printing.lisp
-;;; Version     : 1.0
+;;; Version     : 1.1
 ;;; 
 ;;; Description : Module that provides model output control.
 ;;; 
@@ -99,6 +99,27 @@
 ;;;             : * Set suppress-cmds back to nil upon a reset because apparently
 ;;;             :   even with an unwind-protect it's possible for it to get stuck
 ;;;             :   somehow.
+;;; 2013.08.16 Dan
+;;;             : * Fix a problem with CCL and the environment which seems like
+;;;             :   it can only be dealt with here (I don't like implementation
+;;;             :   hacks in the main code).  By default an opened stream is 
+;;;             :   only available to the thread which opens it, but if one sets
+;;;             :   :v or :cmdt to a pathname and then Loads the file through
+;;;             :   the environment in CCL that stream is unavailable to the
+;;;             :   thread which "runs" the model and an error results.  The 
+;;;             :   fix is to specify :sharing :lock in the open command and
+;;;             :   that has to happen here.
+;;; 2014.06.26 Dan
+;;;             : * More error protection around the setting of :v and :cmdt
+;;;             :   when files/streams are used.
+;;; 2014.08.14 Dan
+;;;             : * The :show-all-slots parameter is unnecessary now.
+;;; 2015.06.01 Dan [1.1]
+;;;             : * Adding a one-time-model-warning command (it's in misc-utils
+;;;             :   with the other output commands) which allows one to specify
+;;;             :   a "tag" for the warning and it will only print a warning
+;;;             :   with a given tag (equal test) the first time it occurs after 
+;;;             :   a reset.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -133,33 +154,52 @@
   (or (null param) (eq param t) (streamp param) (pathnamep param)
       (and (stringp param) (parse-namestring param))))
 
+(defun safe-close-printing-stream (stream cmd)
+  (multiple-value-bind (result err)
+      (ignore-errors (close stream))
+    (when (and err (subtypep (type-of err) 'condition))
+      (print-warning "Error encountered when trying to close the file associated with the ~s parameter:~% ~s" cmd err))
+    result))
 
+(defun safe-open-printing-stream (name cmd)
+  (multiple-value-bind (result err)
+      (ignore-errors (open (parse-namestring name)
+                           :direction :output :if-exists :append 
+                           :if-does-not-exist :create
+                           #+:ccl :sharing #+:ccl :lock))
+    (when (and err (subtypep (type-of err) 'condition))
+      (print-warning "Error encountered when trying to open the file associated with the ~s parameter:~% ~s" cmd err)
+      (print-warning "The ~s parameter is being set to t instead." cmd))
+    result))
+  
 (defun printing-module-param (module param)
   (if (consp param)
       (case (car param)
         (:v
          (when (act-r-output-file (printing-module-v module))
-           (close (act-r-output-stream (printing-module-v module)))
+           (safe-close-printing-stream (act-r-output-stream (printing-module-v module)) :v)
            (setf (act-r-output-file (printing-module-v module)) nil))
          (setf (act-r-output-stream (printing-module-v module))
            (cond ((or (pathnamep (cdr param)) (stringp (cdr param)))
-                  (setf (act-r-output-file (printing-module-v module)) t)
-                  (open (parse-namestring (cdr param))
-                        :direction :output :if-exists :append 
-                        :if-does-not-exist :create))
+                  (aif (safe-open-printing-stream (cdr param) :v)
+                       (progn
+                         (setf (act-r-output-file (printing-module-v module)) t)
+                         it)
+                       t))
                  (t 
                   (setf (act-r-output-file (printing-module-v module)) nil)
                   (cdr param)))))
         (:cmdt
          (when (act-r-output-file (printing-module-c module))
-           (close (act-r-output-stream (printing-module-c module)))
+           (safe-close-printing-stream (act-r-output-stream (printing-module-c module)) :cmdt)
            (setf (act-r-output-file (printing-module-c module)) nil))
          (setf (act-r-output-stream (printing-module-c module))
            (cond ((or (pathnamep (cdr param)) (stringp (cdr param)))
-                  (setf (act-r-output-file (printing-module-c module)) t)
-                  (open (parse-namestring (cdr param))
-                        :direction :output :if-exists :append 
-                        :if-does-not-exist :create))
+                  (aif (safe-open-printing-stream (cdr param) :cmdt)
+                       (progn
+                         (setf (act-r-output-file (printing-module-c module)) t)
+                         it)
+                       t))
                  (t 
                   (setf (act-r-output-file (printing-module-c module)) nil)
                   (cdr param)))))
@@ -169,8 +209,6 @@
          (setf (printing-module-detail module) (cdr param)))
         (:model-warnings
          (setf (printing-module-model-warnings module) (cdr param)))
-        (:show-all-slots
-         (setf (printing-module-show-all-slots module) (cdr param)))
         (:cbct
          (setf (printing-module-cbct module) (cdr param))))
     
@@ -180,7 +218,6 @@
       (:trace-filter (printing-module-filter module))
       (:trace-detail (printing-module-detail module))
       (:model-warnings (printing-module-model-warnings module))
-      (:show-all-slots (printing-module-show-all-slots module))
       (:cbct (printing-module-cbct module)))))
 
 (defun reset-printing-module (module)
@@ -194,6 +231,7 @@
     (setf (act-r-output-file (printing-module-c module)) nil))
   (setf (act-r-output-stream (printing-module-c module)) t)
   
+  (setf (printing-module-one-time-tags module) nil)
   (setf (printing-module-filter module) nil)
   (setf (printing-module-detail module) 'high)
   (setf (printing-module-suppress-cmds module) nil))
@@ -230,17 +268,12 @@
      :default-value t
      :warning "must be t or nil"
      :valid-test 'tornil)
-   (define-parameter :show-all-slots
-       :documentation "Whether or not to show unfilled extended slots when printing chunks"
-     :default-value nil
-     :warning "must be t or nil"
-     :valid-test 'tornil)
-   (define-parameter :cbct
+      (define-parameter :cbct
        :documentation "Whether or not to show an event in the trace when a buffer copies a chunk"
      :default-value nil
      :warning "must be t or nil"
      :valid-test 'tornil))
-  :version "1.0"
+  :version "1.1"
   :documentation "Coordinates output of the model."
   :creation 'create-printing-module
   :reset 'reset-printing-module

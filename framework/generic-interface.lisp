@@ -1,4 +1,4 @@
-;;;  -*- mode: LISP; Package: CL-USER; Syntax: COMMON-LISP;  Base: 10 -*-
+;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Author      : Dan Bothell 
@@ -30,6 +30,10 @@
 ;;; 04.10.19 Dan [Moved into ACT-R 6]
 ;;;             : Reset the version to 1.0a1
 ;;;             : added the packaging switches
+;;; 2015.12.17 Dan
+;;;             : * Changed the name of the key at 19,2 from esc to clear to
+;;;             :   actually match the reference image since the model now has
+;;;             :   keypad actions.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -78,7 +82,7 @@
   (setf (aref ar 15 2) 'help)
   (setf (aref ar 16 2) 'home)
   (setf (aref ar 17 2) 'pageup)
-  (setf (aref ar 19 2) 'ESC)
+  (setf (aref ar 19 2) 'clear)
   (setf (aref ar 20 2) #\=)
   (setf (aref ar 21 2) #\/)
   (setf (aref ar 22 2) #\*)
