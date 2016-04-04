@@ -35,7 +35,7 @@
    (cursor-loc :accessor cursor-loc :initform '(0 0))
    (width :accessor width :initform 0)
    (height :accessor height :initform 0)
-   (running :accessor running :initform nil)
+   (running :accessor running :initform :f)
    (read-from-stream :accessor read-from-stream :initform nil)
    (wait :accessor wait :initform nil)))
 
@@ -85,6 +85,9 @@
                   (set-chunk-slot-value-fct name slot-symbol slot-value))))))
 
 (defmethod handle-event ((instance json-interface-module) model method params)
+  (progn
+    (format t "~S~%" method)
+    (finish-output nil)
   (cond
     ((string= method "disconnect")
      (return-from handle-event t))
@@ -142,7 +145,7 @@
     ((string= method "new-word-sound")
      (new-word-sound (jsown:val params "words")))
     ((string= method "new-other-sound")
-     (new-other-sound (jsown:val params "content") (jsown:val params "onset") (jsown:val params "delay") (jsown:val params "recode"))))
+     (new-other-sound (jsown:val params "content") (jsown:val params "onset") (jsown:val params "delay") (jsown:val params "recode")))))
   (return-from handle-event nil))
 
 (defmethod read-stream ((instance json-interface-module))
@@ -253,7 +256,7 @@
   (make-instance 'json-interface-module))
 
 (defun reset-json-netstring-module (instance)
-  (setf (running instance) nil)
+  (setf (running instance) :f)
   (if (and (socket instance) (jstream instance) (thread instance))
       (progn
         (send-command instance "reset" (jsown:new-js ("time-lock" (numberp (jni-sync instance)))) :sync t)

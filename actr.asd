@@ -40,7 +40,7 @@
                             (:file "productions")
                             (:file "goal-style-module")
                             (:file "general-pm")))
-    
+
 
                (:module "core-modules"
                 :serial t
@@ -49,6 +49,7 @@
                              (:file "procedural")
                              (:file "vision")
                              (:file "motor")
+                             (:file "motor-extension")
                              (:file "audio")
                              (:file "speech")
                              (:file "imaginal")))
@@ -70,7 +71,7 @@
                  :components ((:file "conflict-tree")
                               (:file "dm-commands")
                               (:file "procedural-cmds")
-                              (:file "p-star-cmd"))) 
+                              (:file "p-star-cmd")))
 
                (:module "modules"
                 :serial t
@@ -89,7 +90,7 @@
                              (:file "environment-cmds")
                              (:file "stepper-control")
                              (:file "env-device")))
-               
+
                (:module "tools"
                 :serial t
                 :components ((:file "buffer-trace")
@@ -98,7 +99,7 @@
                              (:file "motor-compilation")
                              (:file "perceptual-compilation")
                              (:file "retrieval-compilation")))
-               
+
                (:module "other"
                 :pathname "other-files"
                 :serial t
