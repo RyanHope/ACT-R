@@ -56,11 +56,11 @@
   (let* ((name (if (find "name" (jsown:keywords jsown-obj) :test #'equal)
                    (read-from-string (jsown:val jsown-obj "name"))
                    nil))
-         (typ (read-from-string (jsown:val jsown-obj "isa")))
+         (typ (read-from-string (jsown:val jsown-obj "kind")))
          (slots (jsown:val jsown-obj "slots"))
          (type-expression (if name
-                              `(,name isa ,typ)
-                              `(isa ,typ))))
+                              `(,name kind ,typ)
+                              `(kind ,typ))))
     (loop for slot-name in (jsown:keywords slots) do
           (let* ((slot-symbol (read-from-string slot-name))
                  (slot-value (process-slot slot-symbol (jsown:val slots slot-name) :visual visual)))
@@ -196,16 +196,12 @@
   (if (jstream instance)
       (send-command instance "set-mp-time" (jsown:new-js ("time" (mp-time))) :sync t)))
 
-(defmethod device-hold-finger ((instance json-interface-module) hand finger)
-  (send-command instance "hold-finger" (jsown:new-js ("hand" (symbol-name hand)) ("finger" (symbol-name finger)))
-                :sync (not (numberp (jni-sync instance)))))
-
-(defmethod device-release-finger ((instance json-interface-module) hand finger)
-  (send-command instance "release-finger" (jsown:new-js ("hand" (symbol-name hand)) ("finger" (symbol-name finger)))
-                :sync (not (numberp (jni-sync instance)))))
-
 (defmethod device-handle-keypress ((instance json-interface-module) key)
-  (send-command instance "keypress" (jsown:new-js ("keycode" (char-code key)))
+  (send-command instance "keydown" (jsown:new-js ("keycode" (char-code key)))
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-handle-keyrelease ((instance json-interface-module) key)
+  (send-command instance "keyup" (jsown:new-js ("keycode" (char-code key)))
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-move-cursor-to ((instance json-interface-module) loc)
@@ -213,7 +209,11 @@
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-handle-click ((instance json-interface-module))
-  (send-command instance "mouseclick" (jsown:new-js ("button" 1))
+  (send-command instance "mousedown" (jsown:new-js ("button" 1))
+                :sync (not (numberp (jni-sync instance)))))
+
+(defmethod device-handle-click-release ((instance json-interface-module))
+  (send-command instance "mouseup" (jsown:new-js ("button" 1))
                 :sync (not (numberp (jni-sync instance)))))
 
 (defmethod device-speak-string ((instance json-interface-module) msg)
