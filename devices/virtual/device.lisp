@@ -1,27 +1,27 @@
 ;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;;
 ;;; Author      : Mike Byrne & Dan Bothell
 ;;; Address     : Rice University, MS-25
 ;;;             : Psychology Department
 ;;;             : Houston,TX 77251-1892
 ;;;             : byrne@acm.org
-;;; 
+;;;
 ;;; Copyright   : (c)2000-2004 Mike Byrne
 ;;; Availability: Covered by the GNU LGPL, see LGPL.txt
-;;; 
+;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;;
 ;;; Filename    : virtual-view.lisp
 ;;; Version     : 1.0
-;;; 
+;;;
 ;;; Description : Instantiates "virtual views" so that RPM can act on things
 ;;;             : other than MCL windows.
-;;; 
-;;; Bugs        : 
-;;; 
-;;; Todo        : 
-;;; 
+;;;
+;;; Bugs        :
+;;;
+;;; Todo        :
+;;;
 ;;; ----- History -----
 ;;; 00.06.08 Mike Byrne
 ;;;             :  Date for new header.
@@ -35,7 +35,7 @@
 ;;; 02.01.15 Dan
 ;;;             : Changed the declaration of ignore to
 ;;;             : ignore-if-unused for the subviews method
-;;;             : to eliminate an ugly warning in ACL.  
+;;;             : to eliminate an ugly warning in ACL.
 ;;; 02.02.28 Dan
 ;;;             : changed vv-click-event-handler because
 ;;;             : functionp doesn't gurantee that the function is
@@ -49,7 +49,7 @@
 ;;;             : Moved the populate-loc-to-key-array from generic-interface
 ;;;             : to here.
 ;;;             : Took the UWI code out of here.
-;;; 02.12.19 Dan 
+;;; 02.12.19 Dan
 ;;;             : Added an around method for text items to handle color.
 ;;; 04.04.13 Dan [2.2]  (the previous update is "new" as of 2.2 as well)
 ;;;             : Changed the copyright notice and added the LGPL stuff.
@@ -69,7 +69,7 @@
 ;;;             : * Discovered that the hash-table implementation of the
 ;;;             :   virtual-view subviews can lead to non-repeatable performance
 ;;;             :   of tutorial models (both between different Lisps or even
-;;;             :   within a single Lisp!).  So, for now at least, the 
+;;;             :   within a single Lisp!).  So, for now at least, the
 ;;;             :   build-features-for method for a virtual-window will sort
 ;;;             :   the features based on xy coordinates.  That way the tutorial
 ;;;             :   model results will remain consistent for all systems that
@@ -84,19 +84,19 @@
 ;;;             : * No need to sort the features being returned because the
 ;;;             :   hash-table inside vision will mess it up anyway...
 ;;; 2007.08.23 Dan
-;;;             : * Fixed build-vis-locs-for of buttons so that the text 
+;;;             : * Fixed build-vis-locs-for of buttons so that the text
 ;;;             :   is located at the same point as the oval (bug carried
 ;;;             :   over from the old stuff).
 ;;; 2008.01.08 Dan
-;;;             : * Put the sorting code back in build-vis-locs-for because 
-;;;             :   without it there's no consistency in the names of the 
+;;;             : * Put the sorting code back in build-vis-locs-for because
+;;;             :   without it there's no consistency in the names of the
 ;;;             :   visual-location chunks for testing and verification purposes.
 ;;; 2008.01.09 Dan
 ;;;             : * Adding a little more to the sorting method so that co-located
 ;;;             :   items of different types also get a specific ordering.
 ;;; 2008.04.11 Dan [1.0]
 ;;;             : * Using the new parameter :stable-loc-names in the build-vis-
-;;;             :   locs-for method on virtual-windows to check whether the 
+;;;             :   locs-for method on virtual-windows to check whether the
 ;;;             :   subview items should be sorted.
 ;;;             : * Also took the package setting out of the mode line at the
 ;;;             :   top since there isn't a specific package for any of the
@@ -109,7 +109,7 @@
 ;;;             :   contain multiple "words" i.e. only compatible when each text
 ;;;             :   item produces only one feature.
 ;;; 2008.04.15 Dan
-;;;             : * Fixed a bug with the line views.  Without a specific 
+;;;             : * Fixed a bug with the line views.  Without a specific
 ;;;             :   point-in-vv-p the default misinterprets their size values
 ;;;             :   and could consider clicks which didn't overlap the line
 ;;;             :   to be over the line and not be passed on to the "real" item
@@ -118,7 +118,7 @@
 ;;;             : * Took all the "the fixnum" declarations out of point-in-vv-p
 ;;;             :   because nothing forces the mouse position to be a fixnum and
 ;;;             :   when visual items have an odd dimension the mouse position
-;;;             :   can get set to a rational.  In LispWorks point-in-vv-p does 
+;;;             :   can get set to a rational.  In LispWorks point-in-vv-p does
 ;;;             :   not work if the values are rationals declared as fixnums.
 ;;; 2008.07.01 Dan
 ;;;             : * Added code to the build-vis-locs-for methods to purge any
@@ -142,12 +142,12 @@
 ;;;             : * Updated the build-vis-locs-for methods for text and button
 ;;;             :   items so that they use the updated build-string-feats to
 ;;;             :   deal with newlines in the text.
-;;;             : * The spacing for lines in virtual items is the max of 
+;;;             : * The spacing for lines in virtual items is the max of
 ;;;             :   (* (text-height item) 1.25) (1+ (text-height item)).
 ;;; 2014.02.07 Dan
 ;;;             : * Why have virtual static text items always assumed a centered
 ;;;             :   y justification when all the other devices assume top?  It
-;;;             :   now assumes top justification like everything else for 
+;;;             :   now assumes top justification like everything else for
 ;;;             :   consistency which will probably break lots of models...
 ;;; 2014.02.11 Dan
 ;;;             : * Removed the lines variable from the text build-vis-locs-for
@@ -156,7 +156,7 @@
 ;;;             : * Fixed the use of chunk-type-slot-names by using chunk-filled-
 ;;;             :   slots-list instead.
 ;;; 2014.08.29 Dan
-;;;             : * Changed vv-click-event-handler for buttons so that the action 
+;;;             : * Changed vv-click-event-handler for buttons so that the action
 ;;;             :   can be either a function or a symbol naming a function.
 ;;; 2015.05.20 Dan
 ;;;             : * The approach-width call in the buttons build-vis-locs-for
@@ -182,7 +182,7 @@
    (width :accessor width :initform nil :initarg :width)
    (height :accessor height :initform nil :initarg :height)
    (id :accessor id :initarg :id :initform (new-name-fct "VV"))
-   (handles-click-p :accessor handles-click-p :initform t 
+   (handles-click-p :accessor handles-click-p :initform t
                     :initarg :handles-click-p)
    (view-container :accessor view-container :initform nil)
    (color :accessor color :initarg :color :initform 'black)
@@ -195,8 +195,8 @@
 (defmethod subviews ((vv virtual-view) &optional subview-type)
   (declare (ignore subview-type))
   (let (accum)
-    (maphash #'(lambda (x y) (declare (ignore x)) 
-                (push y accum)) 
+    (maphash #'(lambda (x y) (declare (ignore x))
+                (push y accum))
              (view-subviews vv))
     accum))
 
@@ -272,11 +272,11 @@
         (progn
           (remhash (id sub) (view-subviews vv))
           (setf (view-container sub) nil)
-          
+
           ;; purge the chunks associated with the items
           ;; if they're valid chunks in the current model - windows
           ;; may span model resets
-          
+
           (purge-loc-chunks (loc-chunks sub)))
       (print-warning "Item ~s is not in window ~s so it can't be removed from it" sub vv))))
 
@@ -309,7 +309,7 @@
                  :initform "Virtual Window")
    (outstrm :accessor outstrm :initarg :outstrm :initform t)
    (cursor-pos :accessor cursor-pos :initform #(0 0) :initarg :cursor-pos)
-   (cursor-shape :accessor cursor-shape :initform 'POINTER 
+   (cursor-shape :accessor cursor-shape :initform 'POINTER
                  :initarg :cursor-shape)
    )
   (:default-initargs
@@ -348,7 +348,7 @@
       (if (and c (chunk-p-fct c))
           (mod-chunk-fct c `(screen-x ,(px (cursor-pos vw)) screen-y ,(py (cursor-pos vw)) value ,(cursor-shape vw)))
         (car (setf (gethash (cons (current-mp) (current-model)) (loc-chunks vw))
-               (define-chunks-fct `((isa visual-location kind cursor 
+               (define-chunks-fct `((isa visual-location kind cursor
                                          screen-x ,(px (cursor-pos vw))
                                          screen-y ,(py (cursor-pos vw))
                                          value ,(cursor-shape vw))))))))))
@@ -401,7 +401,7 @@
   ;; DAN
   ;; seems like this should be in the trace
   ;;(format (outstrm vw)
-  
+
   (when (car (no-output (sgp :vwt)))
     (model-output "~&~%<< Window ~S ~? >>~%"
                   (window-title vw)
@@ -443,11 +443,11 @@
 
 
 ;;;; ---------------------------------------------------------------------- ;;;;
-;;;; View classes:  static-text-vv, button-vv, 
+;;;; View classes:  static-text-vv, button-vv,
 
 
 (defclass virtual-dialog-item (virtual-view)
-  ((text :accessor dialog-item-text :initform "Untitled" 
+  ((text :accessor dialog-item-text :initform "Untitled"
          :initarg :dialog-item-text)
    (action-function :accessor action-function :initarg :action :initform nil)
    (text-height :accessor text-height :initarg :text-height :initform 10)
@@ -491,7 +491,7 @@
 
 
 (defmethod build-vis-locs-for ((self static-text-vdi) (vis-mod vision-module))
-  
+
   (let* ((line-height (max (round (text-height self) .8) (+ (text-height self) 1)))
          (feats (build-string-feats vis-mod :text (dialog-item-text self)
                                     :start-x (1+ (x-pos self))
@@ -503,13 +503,13 @@
         (c (gethash (cons (current-mp) (current-model)) (loc-chunks self))))
     (when feats
       (cond ((> (length feats) 1)
-             
+
              ;; delete any old chunks
              (mapcar (lambda (f) (when (chunk-p-fct f) (purge-chunk-fct f))) c)
-             
+
              ;; save the current list
              (setf (gethash (cons (current-mp) (current-model)) (loc-chunks self)) feats)
-             
+
              (mapcar #'(lambda (f)
                          (set-chunk-slot-value-fct f 'color (color self))
                          (setf (chunk-visual-object f) self)
@@ -529,7 +529,7 @@
                     (set-chunk-slot-value-fct (car feats) 'color (color self))
                     (setf (chunk-visual-object (car feats)) self)
                     (setf (gethash (cons (current-mp) (current-model)) (loc-chunks self)) feats))))
-                     
+
             (t
              (set-chunk-slot-value-fct (car feats) 'color (color self))
              (setf (chunk-visual-object (car feats)) self)
@@ -551,11 +551,11 @@
 
 
 (defmethod default-button-action ((btn button-vdi))
-  (format t "~%Button '~S' clicked at time ~S." 
+  (format t "~%Button '~S' clicked at time ~S."
           (dialog-item-text btn) (mp-time)))
 
 (defmethod build-vis-locs-for ((self button-vdi) (vis-mod vision-module))
-  
+
   (let* ((line-height (max (round (text-height self) .8) (+ (text-height self) 1)))
          (lines (1+ (count #\newline (dialog-item-text self))))
          (text-feats (build-string-feats vis-mod :text (dialog-item-text self)
@@ -570,9 +570,9 @@
                                          :line-height line-height))
         (feats nil)
         (c (gethash (cons (current-mp) (current-model)) (loc-chunks self))))
-    
+
     (cond ((> (length text-feats) 1) ;; just use the new chunks
-           (setf feats (append (define-chunks-fct `((isa visual-location 
+           (setf feats (append (define-chunks-fct `((isa visual-location
                                                          screen-x ,(px (view-loc self))
                                                          screen-y ,(py (view-loc self))
                                                          width ,(width self)
@@ -581,10 +581,10 @@
                                                          value oval
                                                          color ,(color self))))
                                text-feats))
-           
+
            ;; delete any old chunks
            (mapcar (lambda (f) (when (chunk-p-fct f) (purge-chunk-fct f))) c)
-           
+
            ;; save the new ones
            (setf (gethash (cons (current-mp) (current-model)) (loc-chunks self)) feats))
           ((= (length text-feats) 1) ;; check if there are already chunks and store the updates
@@ -595,19 +595,19 @@
                                                     height ,(height self)
                                                     color ,(color self)))
                   (mod-chunk-fct (second c)
-                                 (mapcan (lambda (x) 
+                                 (mapcan (lambda (x)
                                            (list x (chunk-slot-value-fct (car text-feats) x)))
                                    (chunk-filled-slots-list-fct (second c))))
-                  
+
                   (setf (chunk-real-visual-value (second c)) (chunk-real-visual-value (car text-feats)))
                   (setf feats c)
                   (purge-chunk-fct (car text-feats)))
-                 (t 
+                 (t
                   ;; remove any old ones that might be there
                   (mapcar (lambda (f) (when (chunk-p-fct f) (purge-chunk-fct f))) c)
-                  
+
                   (setf feats (setf (gethash (cons (current-mp) (current-model)) (loc-chunks self))
-                                (append (define-chunks-fct `((isa visual-location 
+                                (append (define-chunks-fct `((isa visual-location
                                                                   screen-x ,(px (view-loc self))
                                                                   screen-y ,(py (view-loc self))
                                                                   width ,(width self)
@@ -625,11 +625,11 @@
                                                     color ,(color self)))
                   ;; delete any old text chunks
                   (mapcar (lambda (f) (when (chunk-p-fct f) (purge-chunk-fct f))) (cdr c))
-                  
+
                   (setf feats (setf (gethash (cons (current-mp) (current-model)) (loc-chunks self)) (subseq c 0 1))))
                  (t ;no existing feats so just creat an oval chunk
-                  (setf feats (setf (gethash (cons (current-mp) (current-model)) (loc-chunks self)) 
-                                (define-chunks-fct `((isa visual-location 
+                  (setf feats (setf (gethash (cons (current-mp) (current-model)) (loc-chunks self))
+                                (define-chunks-fct `((isa visual-location
                                                           screen-x ,(px (view-loc self))
                                                           screen-y ,(py (view-loc self))
                                                           width ,(width self)
@@ -637,21 +637,21 @@
                                                           kind oval
                                                           value oval
                                                           color ,(color self))))))))))
-           
-                                 
+
+
     (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y vis-mod))))
       (mapcar #'(lambda (f)
                   (setf (chunk-visual-approach-width-fn f) fun)
                   (set-chunk-slot-value-fct f 'color 'black))
         (cdr feats)))
-    
+
     (mapcar #'(lambda (f)
                 (setf (chunk-visual-object f) self)
                 f)
       feats)))
 
 
-;;; The base class for the view based lines. 
+;;; The base class for the view based lines.
 
 (defclass v-liner (virtual-view)
   ())
@@ -675,7 +675,7 @@
                                                   height ,(abs (- (y-pos lnr) (height lnr)))))
                    (car c))
                   (t
-                   (car (setf (gethash (cons (current-mp) (current-model)) (loc-chunks lnr)) 
+                   (car (setf (gethash (cons (current-mp) (current-model)) (loc-chunks lnr))
                           (define-chunks-fct `((isa visual-location
                                                     color ,(color lnr)
                                                     value line
@@ -686,9 +686,9 @@
                                                     height ,(abs (- (y-pos lnr) (height lnr))))))))))))
     (setf (chunk-visual-object f) lnr)
     f))
-                  
+
 (defmethod vis-loc-to-obj ((lnr v-liner) loc)
-  (car (define-chunks-fct `((isa line 
+  (car (define-chunks-fct `((isa line
                                  value ,(chunk-slot-value-fct loc 'value)
                                  color ,(chunk-slot-value-fct loc 'color)
                                  height ,(chunk-slot-value-fct loc 'height)

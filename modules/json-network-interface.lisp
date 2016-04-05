@@ -8,6 +8,11 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+#-quicklisp
+(let ((quicklisp-init (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+  (when (probe-file quicklisp-init)
+    (load quicklisp-init)))
+
 #-jni-bundle
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((*compile-file-pathname* nil))
@@ -32,7 +37,7 @@
    (sync-cond :accessor sync-cond :initform (bordeaux-threads:make-condition-variable))
    (sync-lock :accessor sync-lock :initform (bordeaux-threads:make-lock))
    (display :accessor display :initform nil)
-   (cursor-loc :accessor cursor-loc :initform '(0 0))
+   (cursor-loc :accessor cursor-loc :initform #(0 0))
    (width :accessor width :initform 0)
    (height :accessor height :initform 0)
    (running :accessor running :initform :f)
@@ -85,9 +90,6 @@
                   (set-chunk-slot-value-fct name slot-symbol slot-value))))))
 
 (defmethod handle-event ((instance json-interface-module) model method params)
-  (progn
-    (format t "~S~%" method)
-    (finish-output nil)
   (cond
     ((string= method "disconnect")
      (return-from handle-event t))
@@ -108,30 +110,46 @@
        (setf (display instance) (json->chunkpairs (jsown:val params "loc-chunks")
                                                   (jsown:val params "obj-chunks")))
        (if (not (process-display-called (get-module :vision)))
-           (proc-display :clear (jsown:val params "clear")))))
+           (schedule-event-now 'proc-display :params (list :clear (jsown:val params "clear")) :module :vision :output nil :priority :max))
+           ))
     ((string= method "display-new")
      (progn
-       (setf (display instance) (json->chunkpairs (jsown:val params "loc-chunks")
+        (setf (display instance) (json->chunkpairs (jsown:val params "loc-chunks")
                                                   (jsown:val params "obj-chunks")))
-       (if (not (process-display-called (get-module :vision)))
-           (proc-display :clear t))))
+        (if (not (process-display-called (get-module :vision)))
+            (schedule-event-now 'proc-display :params '(:clear t) :module :vision :output nil :priority :max))
+            ))
     ((string= method "display-add")
      (progn
        (setf (display instance) (cons (json->chunkpair (jsown:val params "loc-chunk")
                                                        (jsown:val params "obj-chunk"))
                                       (display instance)))
        (if (not (process-display-called (get-module :vision)))
-           (proc-display :clear nil))))
+           (schedule-event-now 'proc-display :params '(:clear nil) :module :vision :output nil :priority :max))
+           ))
     ((string= method "display-remove")
      (progn
-       (setf (display instance) (remove (read-from-string (jsown:val params "loc-chunk-name")) (display instance) :key #'car))
+       (setf (display instance) (remove (read-from-string (jsown:val params "loc-chunk-name"))
+                                        (display instance) :key #'car))
        (if (not (process-display-called (get-module :vision)))
-           (proc-display :clear nil))))
+           (schedule-event-now 'proc-display :params '(:clear nil) :module :vision :output nil :priority :max))
+           ))
     ((string= method "display-update")
      (progn
        (update-display-chunks (jsown:val params "chunks"))
        (if (not (process-display-called (get-module :vision)))
-           (proc-display :clear (jsown:val params "clear")))))
+          (schedule-event-now 'proc-display :params (list :clear (jsown:val params "clear")) :module :vision :output nil :priority :max))
+       ))
+    ((string= method "object-add")
+       (setf (display instance) (json->chunkpairs (jsown:val params "loc-chunks") (jsown:val params "obj-chunks")))
+       (schedule-event-now 'add-screen-object :params (list instance (get-module :vision)) :module :vision :output nil :priority :max))
+    ((string= method "object-delete")
+       (setf (display instance) nil)
+       (schedule-event-now 'delete-screen-object :params (list instance (get-module :vision)) :module :vision :output nil :priority :max))
+    ((string= method "object-update")
+        (update-display-chunks (jsown:val params "chunks"))
+        (schedule-event-now 'update-visicon-item :params (list instance t :same-chunks nil :chunks nil)
+                                 :module :vision :output nil :priority :max))
     ((string= method "add-dm")
      (add-dm-fct (list (parse->json-chunk (jsown:val params "chunk")))))
     ((string= method "trigger-reward")
@@ -145,7 +163,7 @@
     ((string= method "new-word-sound")
      (new-word-sound (jsown:val params "words")))
     ((string= method "new-other-sound")
-     (new-other-sound (jsown:val params "content") (jsown:val params "onset") (jsown:val params "delay") (jsown:val params "recode")))))
+     (new-other-sound (jsown:val params "content") (jsown:val params "onset") (jsown:val params "delay") (jsown:val params "recode"))))
   (return-from handle-event nil))
 
 (defmethod read-stream ((instance json-interface-module))
@@ -330,7 +348,7 @@
                          :documentation "The port number of the remote environment")
        (define-parameter :jni-sync
                          :documentation "The timing mode of the model. Use nil for asynchronous mode, t for synchronous mode and any positive number for time-locked mode."))
- :version "1.1"
+ :version "2.0"
  :documentation "Module based manager for remote TCP environments using JSON"
  :params 'params-json-netstring-module
  :creation 'create-json-netstring-module

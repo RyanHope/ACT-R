@@ -1,23 +1,23 @@
 ;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;;
 ;;; Author      : Mike Byrne & Dan Bothell
 ;;; Address     : Rice University, MS-25
 ;;;             : Psychology Department
 ;;;             : Houston,TX 77251-1892
 ;;;             : byrne@acm.org
-;;; 
+;;;
 ;;; Copyright   : (c)1998-2010 Mike Byrne/Dan Bothell
 ;;; Availability: Covered by the GNU LGPL, see LGPL.txt
-;;; 
+;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;;
 ;;; Filename    : motor.lisp
 ;;; Version     : 4.0
-;;; 
+;;;
 ;;; Description : Source code for the ACT-R 6 Motor Module.
-;;; 
-;;; Bugs        : 
+;;;
+;;; Bugs        :
 ;;; To do       : [X] Consider a mechanism for extending the commands that are
 ;;;             :     accepted by the motor module without having to redefine the
 ;;;             :     the request function.
@@ -31,7 +31,7 @@
 ;;;             : [ ] When the hand move has finger offsets it probably should
 ;;;             :     test if the cost of any necessary finger move is greater
 ;;;             :     than the hand move and adjust the time accordingly.
-;;; 
+;;;
 ;;; ----- History -----
 ;;; 2004.12.23 Dan [First pass at moving to ACT-R 6]
 ;;;             : Changed name to motor and reset version to 1.0a1
@@ -40,11 +40,11 @@
 ;;;             :
 ;;;             : Making the requests explicit instead of using a mapping
 ;;;             :   mechanism as was done in ACT-R 5 (at least for now).
-;;;             : 
+;;;             :
 ;;;             : Added :from :motor to the queue-command calls that
 ;;;             :  are events for the device.
 ;;;             :
-;;;             : Doesn't flag any error states at this point (jams or 
+;;;             : Doesn't flag any error states at this point (jams or
 ;;;             : otherwise) nor does it put a "response" chunk into the buffer
 ;;;             : which has been a suggestion for a while.
 ;;;             :
@@ -73,7 +73,7 @@
 ;;; 2005.01.12 Dan
 ;;;             : * Moved the device's parameters to the device module.
 ;;; 2005.02.03 Dan
-;;;             : * Added ":output 'medium"  or ":output 'low" to some of the 
+;;;             : * Added ":output 'medium"  or ":output 'low" to some of the
 ;;;             :   events scheduled to play friendly with the new detail level.
 ;;; 2005.02.10 Dan
 ;;;             : * Switched expt to expt-coerced in compute-exec-time and
@@ -83,7 +83,7 @@
 ;;;             :   definition.
 ;;;             : * Noticed that the last-command query is unhandled...
 ;;; 2005.05.02 Dan
-;;;             : * Added another command from the old rpm-toplevel file - 
+;;;             : * Added another command from the old rpm-toplevel file -
 ;;;             :   set-hand-location and moved the pm- functions to the
 ;;;             :   backwards.lisp file.
 ;;; 2005.05.11 Dan
@@ -106,8 +106,8 @@
 ;;;             :   prespecify all possible features to be accepted in the
 ;;;             :   chunk-type which isn't ideal...
 ;;; 2006.08.22 Dan
-;;;             : * Fixed the prepare request because it wasn't actually 
-;;;             :   making the module busy during the preparation - I called 
+;;;             : * Fixed the prepare request because it wasn't actually
+;;;             :   making the module busy during the preparation - I called
 ;;;             :   the wrong pm method to do the preparation.
 ;;; 2006.08.24 Dan
 ;;;             : * Undoing an old change (from 2004.12.28) because the
@@ -166,12 +166,12 @@
 ;;;             : * Fixed a warning in the handling of a prepare request.
 ;;; 2007.06.04 Dan
 ;;;             : * Added the extend-manual-requests command to allow people to
-;;;             :   add new requests to the manual system without having to 
+;;;             :   add new requests to the manual system without having to
 ;;;             :   modify the request and reset functions.
 ;;; 2007.06.21 Dan
 ;;;             : * Modified move-cursor to deal with the new chunk based feature
 ;;;             :   representation.
-;;; 2008.06.11 Dan 
+;;; 2008.06.11 Dan
 ;;;             : * Changed noisy-loc? to more accurately reflect the 4%
 ;;;             :   chance of missing by only computing one distance instead
 ;;;             :   of doing it separately for each axis.
@@ -180,7 +180,7 @@
 ;;;             :   deletion of chunks by the vision module.
 ;;; 2010.10.06 mdb
 ;;;             : * Changed movement to use mininmum jerk velocity profile for
-;;;             :   cursor moves. 
+;;;             :   cursor moves.
 ;;;             : * Allow incremental mouse moves to update at schedules
 ;;;             :   other than 50 ms.
 ;;; 2010.10.06 mdb
@@ -198,7 +198,7 @@
 ;;;             : * Replaced queue-command calls with schedule-event-relative.
 ;;; 2013.10.01 Dan
 ;;;             : * Update move-cursor so that incremental movements with a
-;;;             :   noisy location are still a straight line to fix an issue 
+;;;             :   noisy location are still a straight line to fix an issue
 ;;;             :   reported by Melissa Gallagher.
 ;;; 2014.02.12 Dan
 ;;;             : * The request chunk-types are no longer subtypes of motor-command
@@ -223,7 +223,7 @@
 ;;; 2014.10.31 Dan
 ;;;             : * Define prepare as 'isa preapare' instead of 'name prepare'.
 ;;; 2014.12.01 Dan
-;;;             : * Automatically define chunks named: left, right, index, 
+;;;             : * Automatically define chunks named: left, right, index,
 ;;;             :   middle, ring, pinkie, and thumb for the motor module if not
 ;;;             :   already chunks.
 ;;; 2015.05.20 Dan
@@ -232,7 +232,7 @@
 ;;;             :   movement method.
 ;;;             : * Approach-width needs to pass the vision module in as well.
 ;;; 2015.06.04 Dan
-;;;             : * Convert exec-times to ms explicitly and then use :time-in-ms t 
+;;;             : * Convert exec-times to ms explicitly and then use :time-in-ms t
 ;;;             :   in all scheduled events.
 ;;;             : * Changed incremental-mouse-p to ms at setting time and do the
 ;;;             :   math in ms.
@@ -247,7 +247,7 @@
 ;;;             :   kept the finger offsets that were currently set for the hand,
 ;;;             :   but peck actions could have adjusted those so that they aren't
 ;;;             :   right for something like a hand-to-mouse if the index finger
-;;;             :   had been offset previously. 
+;;;             :   had been offset previously.
 ;;;             :   The offsets feature can be:
 ;;;             :    - nil (the default and value if not provided) which means
 ;;;             :      to leave the current finger offsets in place
@@ -258,12 +258,12 @@
 ;;;             :      a finger name and then the x and y offset for that finger
 ;;;             :      when the action completes.
 ;;;             : *** When there are offsets that require moving the fingers
-;;;             : *** it should probably compute the move time as the max of 
+;;;             : *** it should probably compute the move time as the max of
 ;;;             : *** the hand movement and the individual finger movements or
 ;;;             : *** especially if the hand move is to the same loc, but for
 ;;;             : *** now not changing that i.e. the finger movements are zero
 ;;;             : *** cost with the hand move.
-;;;             : * The hand-to-home, hand-to-mouse, and set-hand-location 
+;;;             : * The hand-to-home, hand-to-mouse, and set-hand-location
 ;;;             :   actions set the standard finger offsets now.
 ;;; 2015.09.01 Dan
 ;;;             : * Added a hand-to-keypad request and a start-hand-at-keypad
@@ -291,7 +291,7 @@
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
 ;;;
-;;; DAN 
+;;; DAN
 ;;; Start by making sure the general-pm file has been loaded
 ;;;
 
@@ -310,7 +310,7 @@
    (feature-prep-time :accessor feat-prep-time  :initarg :feat-prep-time :initform 0.050)
    (movement-initiation-time :accessor init-time :initarg :init-time :initform 0.050)
    (default-target-width :accessor default-target-width :initarg :default-target-width :initform 1.0)
-   (peck-fitts-coeff :accessor peck-fitts-coeff :initarg :peck-fitts-coeff :initform 0.075) 
+   (peck-fitts-coeff :accessor peck-fitts-coeff :initarg :peck-fitts-coeff :initform 0.075)
    (min-fitts-time :accessor min-fitts-time :initarg :min-fitts-time :initform 0.100)
    (incremental-mouse-p :accessor incremental-mouse-p :initarg :incremental-mouse-p :initform nil)
    (cursor-noise :accessor cursor-noise :initarg :cursor-noise :initform nil)
@@ -359,7 +359,7 @@
 (defmethod move-finger ((the-hand hand) finger r theta)
   (unless (= r 0.)
     (setf (second (assoc finger (fingers the-hand)))
-      (polar-move-xy (second (assoc finger (fingers the-hand))) 
+      (polar-move-xy (second (assoc finger (fingers the-hand)))
                      (vector r theta))))
   (finger-loc the-hand finger))
 
@@ -426,15 +426,15 @@
   (setf (loc (right-hand mtr-mod)) #(7 4))
   (setf (loc (left-hand mtr-mod)) #(4 4))
   (setf (fingers (right-hand mtr-mod))
-    (list (list 'index #(0 0)) 
-          (list 'middle #(1 0)) 
-          (list 'ring #(2 0)) 
+    (list (list 'index #(0 0))
+          (list 'middle #(1 0))
+          (list 'ring #(2 0))
           (list 'pinkie #(3 0))
           (list 'thumb #(-1 2))))
   (setf (fingers (left-hand mtr-mod))
-    (list (list 'index #(0 0)) 
-          (list 'middle #(-1 0)) 
-          (list 'ring #(-2 0)) 
+    (list (list 'index #(0 0))
+          (list 'middle #(-1 0))
+          (list 'ring #(-2 0))
           (list 'pinkie #(-3 0))
           (list 'thumb #(1 2)))))
 
@@ -481,7 +481,7 @@
     (vector distance
             (if (zerop distance)
               0.0
-              (atan (- (py to) (py from)) 
+              (atan (- (py to) (py from))
                     (- (px to) (px from)))))))
 
 
@@ -514,12 +514,12 @@
 
 
 (defmethod compute-exec-time ((mtr-mod motor-module) (self punch))
-  (+ (init-time mtr-mod) 
+  (+ (init-time mtr-mod)
      (key-closure-time (current-device-interface))))
 
 
 (defmethod compute-finish-time ((mtr-mod motor-module) (self punch))
-  (+ (init-time mtr-mod) 
+  (+ (init-time mtr-mod)
      (burst-time mtr-mod)
      (burst-time mtr-mod)))
 
@@ -553,12 +553,12 @@
 ;;;; ---------------------------------------------------------------------- ;;;;
 ;;;; PECK class and methods
 
-(defStyle peck hfrt-movement hand finger r theta) 
+(defStyle peck hfrt-movement hand finger r theta)
 
 (defmethod compute-exec-time ((mtr-mod motor-module) (self peck))
   (+ (init-time mtr-mod)
      (max (burst-time mtr-mod)
-          (randomize-time 
+          (randomize-time
            (fitts mtr-mod (peck-fitts-coeff mtr-mod) (r self))))))   ; 99.06.18
 
 
@@ -581,11 +581,11 @@
         (max (burst-time mtr-mod)
              (fitts mtr-mod (peck-fitts-coeff mtr-mod) (r self))))   ; 99.06.18
   (+ (init-time mtr-mod)
-     (max (burst-time mtr-mod) 
+     (max (burst-time mtr-mod)
           (randomize-time (move-time self)))))
 
 (defmethod compute-finish-time ((mtr-mod motor-module) (self peck-recoil))
-  (+ (exec-time self) 
+  (+ (exec-time self)
      (burst-time mtr-mod)
      (max (burst-time mtr-mod)
           (randomize-time (move-time self)))))
@@ -617,7 +617,7 @@
     :fitts-coeff (peck-fitts-coeff (get-module :motor))))
 
 (defmethod queue-output-events ((mtr-mod motor-module) (self ply))
-  (schedule-event-relative (seconds->ms (exec-time self)) 'move-a-finger :time-in-ms t :destination :motor :module :motor 
+  (schedule-event-relative (seconds->ms (exec-time self)) 'move-a-finger :time-in-ms t :destination :motor :module :motor
                            :params (list (hand self) (finger self) (r self) (theta self))))
 
 (defmethod compute-exec-time ((mtr-mod motor-module) (self ply))
@@ -642,26 +642,26 @@
     (let ((hand (ecase (hand self)
                   (right (right-hand mtr-mod))
                   (left (left-hand mtr-mod)))))
-      
+
       (if (eq (offsets self) 'standard)
           (setf (fingers hand) (ecase (hand self)
-                                 (right 
-                                  (list (list 'index #(0 0)) 
-                                        (list 'middle #(1 0)) 
-                                        (list 'ring #(2 0)) 
+                                 (right
+                                  (list (list 'index #(0 0))
+                                        (list 'middle #(1 0))
+                                        (list 'ring #(2 0))
                                         (list 'pinkie #(3 0))
                                         (list 'thumb #(-1 2))))
                                  (left
-                                  (list (list 'index #(0 0)) 
-                                        (list 'middle #(-1 0)) 
-                                        (list 'ring #(-2 0)) 
+                                  (list (list 'index #(0 0))
+                                        (list 'middle #(-1 0))
+                                        (list 'ring #(-2 0))
                                         (list 'pinkie #(-3 0))
                                         (list 'thumb #(1 2))))))
         (dolist (offset (offsets self))
           (awhen (assoc (first offset) (fingers hand))
                  (setf (second it) (vector (second offset) (third offset))))))))
-      
-  (schedule-event-relative (seconds->ms (exec-time self)) 'move-a-hand :time-in-ms t :destination :motor :module :motor 
+
+  (schedule-event-relative (seconds->ms (exec-time self)) 'move-a-hand :time-in-ms t :destination :motor :module :motor
                            :params (list (hand self) (r self) (theta self))))
 
 (defclass cursor-ply (ply)
@@ -673,7 +673,7 @@
                    (mouse-fitts-coeff (current-device-interface)))))
 
 (defmethod compute-exec-time :before ((mtr-mod motor-module) (self cursor-ply))
-  (setf (fitts-coeff self) 
+  (setf (fitts-coeff self)
     (* (expt-coerced 2 (control-order self)) (fitts-coeff self))))
 
 
@@ -684,7 +684,7 @@
 ;;;             : Queue up the pieces.  The last submovement doesn't move
 ;;;             : with a polar move, though, because small rounding errors
 ;;;             : accumulate and the target will be missed by a couple
-;;;             : pixels.  
+;;;             : pixels.
 
 (defmethod queue-output-events ((mtr-mod motor-module) (self cursor-ply))
   ;; if making incremental moves, do all the necessary computations there
@@ -698,15 +698,15 @@
       (when (> nsteps 1)
         (dotimes (idx (- nsteps 1))
           (setf curdist (minjerk-dist (* (1+ idx) steptime) (r self) d))
-          (setf px-move (polar-move-xy startpos 
+          (setf px-move (polar-move-xy startpos
                                        (vector (pm-angle-to-pixels curdist)
                                                (theta self))))
-          (schedule-event-relative (* (1+ idx) steptime) 'move-cursor-absolute :time-in-ms t :destination :device :module :motor 
+          (schedule-event-relative (* (1+ idx) steptime) 'move-cursor-absolute :time-in-ms t :destination :device :module :motor
                            :params (list px-move))))))
   ;; make the final movement
-  (schedule-event-relative (seconds->ms (exec-time self)) 'move-cursor-absolute :time-in-ms t :destination :device :module :motor 
+  (schedule-event-relative (seconds->ms (exec-time self)) 'move-cursor-absolute :time-in-ms t :destination :device :module :motor
                            :params (list (target-coords self)))
-  
+
   ;; update cursor location for computing the following movement
   (setf (eff-cursor-loc mtr-mod) (target-coords self)))
 
@@ -757,7 +757,7 @@
 
 (defmethod move-cursor ((mtr-mod motor-module) &key loc object (device 'MOUSE) request-spec)
   (unless (or (vpt= (loc (right-hand mtr-mod)) #(28 2))
-              (and (eq (exec-s mtr-mod) 'BUSY) 
+              (and (eq (exec-s mtr-mod) 'BUSY)
                    (eq (type-of (last-prep mtr-mod)) 'HAND-PLY)
                    (eq (hand (last-prep mtr-mod)) 'RIGHT)))
     (model-warning "MOVE-CURSOR requested when hand not at mouse!")
@@ -766,16 +766,16 @@
   (if (or (check-jam mtr-mod) (check-specs 'move-cursor (or loc object) device))
       (complete-request request-spec)
     (let* ((r-theta nil)
-           (feat nil) 
+           (feat nil)
            (vision (get-module :vision))
            (coord-slots (vis-loc-slots vision)))
-      
+
       (setf feat  ;; always refer back to the visicon chunks if possible
         (cond ((and object (chunk-visicon-entry object) (chunk-p-fct (gethash (chunk-visicon-entry object) (visicon vision))))
                (gethash (chunk-visicon-entry object) (visicon vision)))
               ((and object (chunk-slot-value-fct object 'screen-pos)
                     (chunk-p-fct (chunk-slot-value-fct object 'screen-pos))
-                    (numberp (chunk-slot-value-fct (chunk-slot-value-fct object 'screen-pos) (first coord-slots))) 
+                    (numberp (chunk-slot-value-fct (chunk-slot-value-fct object 'screen-pos) (first coord-slots)))
                     (numberp (chunk-slot-value-fct (chunk-slot-value-fct object 'screen-pos) (second coord-slots))))
                (if (chunk-p-fct (gethash (chunk-visicon-entry (chunk-slot-value-fct object 'screen-pos)) (visicon vision)))
                     (gethash (chunk-visicon-entry (chunk-slot-value-fct object 'screen-pos)) (visicon vision))
@@ -784,20 +784,20 @@
                (gethash (chunk-visicon-entry loc) (visicon vision)))
               ((and loc (chunk-p-fct loc) (numberp (chunk-slot-value-fct loc (first coord-slots))) (numberp (chunk-slot-value-fct loc (second coord-slots))))
                loc)
-              (t 
+              (t
                (print-warning "No valid location could be generated from ~s or ~s when trying to move the mouse." object loc)
                (complete-request request-spec)
                (return-from move-cursor nil))))
-                
+
       (setf r-theta (xy-to-polar (eff-cursor-loc mtr-mod) (xy-loc feat vision)))
-      (if (= 0 (vr r-theta))        ; r=0 is a no-op 
+      (if (= 0 (vr r-theta))        ; r=0 is a no-op
           (progn
             (complete-request request-spec)
             (model-warning "Move-cursor action aborted because cursor is at requested target ~S" (if object object loc)))
         (let* ((w (approach-width feat (vtheta r-theta) vision))
                (noisy-target-cords (noisy-loc? mtr-mod (xy-loc feat vision) w))
                (r-theta-new (xy-to-polar (eff-cursor-loc mtr-mod) noisy-target-cords)))
-          
+
           (prepare-movement mtr-mod
                             (make-instance 'cursor-ply
                               :request-spec request-spec
@@ -813,7 +813,7 @@
 
 
 ;;; NOISY-LOC?      [Method]
-;;; Description : Adds noise to the output location if noise is on.  Uses 
+;;; Description : Adds noise to the output location if noise is on.  Uses
 ;;;             : logistic rather than normal [like other ACT-R].  7.8 is
 ;;;             : the width of the 96% interval of the unit logistic [after
 ;;;             : MacKenzie].
@@ -824,7 +824,7 @@
     (let ((pixw (pm-angle-to-pixels w)))
       (if (zerop pixw)
           xy-loc
-        (polar-move-xy xy-loc (vector (act-r-noise (/ pixw 7.8)) 
+        (polar-move-xy xy-loc (vector (act-r-noise (/ pixw 7.8))
                                       (act-r-random pi)))))))
 
 ;;;; ---------------------------------------------------------------------- ;;;;
@@ -834,7 +834,7 @@
 ;;; CLICK-MOUSE      [Method]
 ;;; Date        : 97.02.13
 ;;; Description : Clicking the mouse is really just a punch with the right
-;;;             : index finger.  
+;;;             : index finger.
 
 (defgeneric click-mouse (mtr-mod request)
   (:documentation  "Execute a mouse click operation (a punch)"))
@@ -893,7 +893,7 @@
     (setf to-key (read-from-string to-key)))
   (let ((new-loc (key-to-loc (keyboard (current-device-interface)) to-key)))
     (if new-loc
-        (let* ((cur-hand (ecase hand 
+        (let* ((cur-hand (ecase hand
                            (right (right-hand mtr-mod))
                            (left (left-hand mtr-mod))))
                (new-polar (xy-to-polar (loc cur-hand) new-loc)))
@@ -942,7 +942,7 @@
       (complete-request request)
     (let ((polar (xy-to-polar (loc (right-hand mtr-mod)) #(19 4))))
       (point-hand mtr-mod :hand 'right :r (vr polar) :theta (vtheta polar) :twidth 4.0
-                  :offsets (list (list 'index 0 0) 
+                  :offsets (list (list 'index 0 0)
                                  (list 'middle 1 0)
                                  (list 'ring 2 0)
                                  (list 'pinkie 3 1)
@@ -950,7 +950,7 @@
                   :request-spec request))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Dan 
+;;; Dan
 ;;; everything below here is additional stuff for the ACT-R 6 interface
 
 
@@ -989,21 +989,21 @@
     (if (gethash chunk-type (new-requests-table dummy-module))
         (remhash chunk-type (new-requests-table dummy-module))
       (print-warning "~s is not a previously extended request for the manual module." chunk-type))))
-           
-  
+
+
 
 (defmethod pm-module-request ((motor motor-module) buffer-name chunk-spec)
   (declare (ignore buffer-name))
-  
+
   (cond ((test-for-clear-request chunk-spec)
          (schedule-event-now 'clear :module :motor :destination :motor :output 'medium))
-        
+
         ((= (length (chunk-spec-slot-spec chunk-spec 'cmd)) 1)
          (let ((cmd (spec-slot-value (first (chunk-spec-slot-spec chunk-spec 'cmd)))))
            (if (eq cmd 'prepare)
                (let* ((style (verify-single-explicit-value chunk-spec 'style :motor 'prepare))
                       (params-list (mapcan (lambda (x)
-                                             (when (slot-in-chunk-spec-p chunk-spec x) 
+                                             (when (slot-in-chunk-spec-p chunk-spec x)
                                                (aif (verify-single-explicit-value chunk-spec x :motor style)
                                                     (list (sym->key x) it)
                                                     (progn
@@ -1014,19 +1014,19 @@
                  (when style
                    (setf (prepare-spec motor) chunk-spec)
                    (schedule-event-now 'prepare :destination :motor :params (push style params-list) :module :motor :output 'low)))
-             
+
              ;; otherwise look it up in the extended table
              (aif (gethash cmd (new-requests-table motor))
                   (funcall (cdr it) motor chunk-spec)
                   (print-warning "Invalid command ~a sent to the manual buffer" cmd)))))
-        
+
         ((chunk-spec-slot-spec chunk-spec 'cmd)
          (complete-request chunk-spec)
          (print-warning "Invalid command to motor module specifies the cmd slot multiple times."))
         (t
          (complete-request chunk-spec)
          (print-warning "Invalid command to motor module does not specify the cmd slot."))))
-    
+
 
 (defmethod handle-simple-command-request ((mtr-mod motor-module) chunk-spec &optional (output 'low))
   (let ((command (spec-slot-value (first (chunk-spec-slot-spec chunk-spec 'cmd)))))
@@ -1053,7 +1053,7 @@
   (let* ((style (spec-slot-value (first (chunk-spec-slot-spec chunk-spec 'cmd))))
          (dummy (make-instance style))
          (params-list (mapcan (lambda (x)
-                                (when (slot-in-chunk-spec-p chunk-spec x) 
+                                (when (slot-in-chunk-spec-p chunk-spec x)
                                   (aif (verify-single-explicit-value chunk-spec x :motor style)
                                        (list (sym->key x) it)
                                        (return-from handle-partial-style-request nil))))
@@ -1079,28 +1079,28 @@
 (extend-manual-requests (move-cursor object loc device) handle-partial-style-request)
 
 (defun reset-motor-module (instance)
-  
+
   (chunk-type motor-command (cmd "motor action"))
   (chunk-type (prepare (:include motor-command)) (cmd prepare) style hand finger r theta)
-  
+
   (unless (chunk-p prepare)
     (define-chunks (prepare isa prepare))
     (make-chunk-immutable 'prepare))
-  
-  
+
+
   (dolist (c '(left right index middle ring pinkie thumb))
     (unless (chunk-p-fct c)
       (define-chunks-fct (list (list c 'name c)))
       (make-chunk-immutable c)))
-  
+
   ;; Moved so that extensions which define new motor
-  ;; commands can specialize the reset method to add the 
+  ;; commands can specialize the reset method to add the
   ;; required chunk-types and include motor-command.
-  
+
   (reset-pm-module instance)
-  
+
   ;; Define the chunk-types for the specified extensions
-  
+
   (maphash (lambda (name value)
              (let* ((chunk-type-list (car value))
                     (type (chunk-type-fct (if (listp (first chunk-type-list))
@@ -1120,7 +1120,7 @@
         (:cursor-noise
          (setf (cursor-noise motor) (cdr param)))
         (:default-target-width
-         (setf (default-target-width motor) (cdr param))) 
+         (setf (default-target-width motor) (cdr param)))
         (:incremental-mouse-moves
          (setf (incremental-mouse-p motor) (if (numberp (cdr param))
                                                (safe-seconds->ms (cdr param))
@@ -1134,14 +1134,14 @@
          (setf (init-time motor) (cdr param)))
         (:motor-feature-prep-time
          (setf (feat-prep-time motor) (cdr param)))
-         
+
         (:peck-fitts-coeff
          (setf (peck-fitts-coeff motor) (cdr param))))
     (case param
       (:cursor-noise
        (cursor-noise motor))
       (:default-target-width
-       (default-target-width motor))  
+       (default-target-width motor))
       (:incremental-mouse-moves
        (if (numberp (incremental-mouse-p motor))
            (ms->seconds (incremental-mouse-p motor))
@@ -1154,59 +1154,59 @@
        (init-time motor))
       (:motor-feature-prep-time
         (feat-prep-time motor))
-      
+
       (:peck-fitts-coeff
         (peck-fitts-coeff motor)))))
 
 (defun create-motor-module (model-name)
-  (declare (ignore model-name)) 
+  (declare (ignore model-name))
   (make-instance 'motor-module))
 
-(define-module-fct :motor 
-    (list (define-buffer-fct 'manual 
+(define-module-fct :motor
+    (list (define-buffer-fct 'manual
               :queries '(modality preparation execution processor last-command)
-            :status-fn (lambda () 
+            :status-fn (lambda ()
                          (print-module-status (get-module :motor)))
             :trackable t))
-  (list 
+  (list
    (define-parameter :cursor-noise
-     :valid-test 'tornil 
+     :valid-test 'tornil
      :default-value nil
      :warning "T or NIL"
      :documentation "Is there noise in the final cursor location.")
    (define-parameter :default-target-width
-     :valid-test 'nonneg 
+     :valid-test 'nonneg
      :default-value 1.0
      :warning "a non-negative number"
-     :documentation 
+     :documentation
      "Effective width, in degrees visual angle, of targets with undefined widths.")
    (define-parameter :incremental-mouse-moves
-     :valid-test 'posnumorbool 
+     :valid-test 'posnumorbool
      :default-value nil
      :warning "T, NIL, or a non-negative number"
      :documentation "Output mouse moves in stages?")
    (define-parameter :min-fitts-time
-     :valid-test 'nonneg 
+     :valid-test 'nonneg
      :default-value 0.1
      :warning "a non-negative number"
      :documentation "Minimum movement time for an aimed [Fitts's] movement.")
    (define-parameter :motor-burst-time
-     :valid-test 'nonneg 
+     :valid-test 'nonneg
      :default-value 0.05
      :warning "a non-negative number"
      :documentation "Minimum time for any movement.")
    (define-parameter :motor-initiation-time
-     :valid-test 'nonneg 
+     :valid-test 'nonneg
      :default-value .05
      :warning "a non-negative number"
      :documentation "Time to initiate a motor movement.")
    (define-parameter :motor-feature-prep-time
-     :valid-test 'nonneg 
+     :valid-test 'nonneg
      :default-value 0.05
      :warning "a non-negative number"
      :documentation "Time to prepare a movement feature.")
    (define-parameter :peck-fitts-coeff
-     :valid-test 'nonneg 
+     :valid-test 'nonneg
      :default-value 0.075
      :warning "a non-negative number"
      :documentation "b coefficient in Fitts's equation for PECK movements."))
@@ -1225,7 +1225,7 @@
   "Starts the right hand on the mouse instead of the 'home row' location"
   (verify-current-mp
    "No current meta-process.  Cannot set hand at mouse."
-   (verify-current-model 
+   (verify-current-model
     "No current model.  Cannot set hand at mouse."
     (aif (get-module :motor)
          (let* ((the-hand (right-hand it)))
@@ -1237,15 +1237,15 @@
   "Starts the right hand on the keypad instead of the 'home row' location"
   (verify-current-mp
    "No current meta-process.  Cannot set hand at keypad."
-   (verify-current-model 
+   (verify-current-model
     "No current model.  Cannot set hand at keypad."
     (aif (get-module :motor)
          (let* ((the-hand (right-hand it)))
            (setf (loc the-hand) #(19 4))
            (setf (fingers the-hand)
-             (list (list 'index #(0 0)) 
-                   (list 'middle #(1 0)) 
-                   (list 'ring #(2 0)) 
+             (list (list 'index #(0 0))
+                   (list 'middle #(1 0))
+                   (list 'ring #(2 0))
                    (list 'pinkie #(3 1))
                    (list 'thumb #(0 2))))
            t)
@@ -1263,7 +1263,7 @@
 (defun set-cursor-position-fct (xyloc)
   (verify-current-mp
    "No current meta-process.  Cannot set cursor position."
-   (verify-current-model 
+   (verify-current-model
     "No current model.  Cannot set cursor position."
     (if (and (get-module :motor) (current-device-interface))
         (progn
@@ -1284,32 +1284,32 @@
   "Function to set the location of the given hand to LOC"
   (verify-current-mp
    "No current meta-process.  Cannot set hand location."
-   (verify-current-model 
+   (verify-current-model
     "No current model.  Cannot set hand location."
     (aif (get-module :motor)
          (progn
            (setf loc (coerce loc 'vector))
            (ecase hand
-             (right 
+             (right
               (setf (fingers (right-hand it))
-                (list (list 'index #(0 0)) 
-                      (list 'middle #(1 0)) 
-                      (list 'ring #(2 0)) 
+                (list (list 'index #(0 0))
+                      (list 'middle #(1 0))
+                      (list 'ring #(2 0))
                       (list 'pinkie #(3 0))
                       (list 'thumb #(-1 2))))
               (setf (loc (right-hand it)) loc))
-             (left 
+             (left
               (setf (fingers (left-hand it))
-                (list (list 'index #(0 0)) 
-                      (list 'middle #(-1 0)) 
-                      (list 'ring #(-2 0)) 
+                (list (list 'index #(0 0))
+                      (list 'middle #(-1 0))
+                      (list 'ring #(-2 0))
                       (list 'pinkie #(-3 0))
                       (list 'thumb #(1 2))))
               (setf (loc (left-hand it)) loc)))
            t)
          (print-warning "No motor module found.  Cannot set hand location.")))))
 
-   
+
 #|
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
