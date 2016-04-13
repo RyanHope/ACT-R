@@ -328,7 +328,8 @@
             (case (car param)
               (:jni-hostname (setf ret (setf (jni-hostname instance) (cdr param))))
               (:jni-port (setf ret (setf (jni-port instance) (cdr param))))
-              (:jni-sync (setf ret (setf (jni-sync instance) (cdr param)))))
+              (:jni-sync (setf ret (setf (jni-sync instance) (cdr param))))
+              (:jni-remote-config (setf ret (setf (jni-remote-config instance) (cdr param)))))
             (if (and (jni-hostname instance) (jni-port instance))
                 (if (or (not (string= hostname (jni-hostname instance))) (not (equal port (jni-port instance))))
                     (connect instance)))
@@ -336,7 +337,8 @@
     (case param
       (:jni-hostname (jni-hostname instance))
       (:jni-port (jni-port instance))
-      (:jni-sync (jni-sync instance)))))
+      (:jni-sync (jni-sync instance))
+      (:jni-remote-config (jni-remote-config instance)))))
 
 (undefine-module jni)
 (define-module-fct
