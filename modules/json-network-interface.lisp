@@ -340,7 +340,6 @@
       (:jni-sync (jni-sync instance))
       (:jni-remote-config (jni-remote-config instance)))))
 
-(undefine-module jni)
 (define-module-fct
   'json-network-interface
   nil
