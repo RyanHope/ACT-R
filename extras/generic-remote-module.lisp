@@ -57,10 +57,13 @@
       (setf (version instance) (jsown:val params "version"))
       (setf (description instance) (jsown:val params "description"))
       (setf (rm-params instance) (jsown:val params "params"))
+      (setf (rm-buffers instance) (jsown:val params "buffers"))
       t))
     ((string= method "creation")
      instance)
     ((string= method "params")
+     (jsown:val params "value"))
+    ((string= method "query")
      (jsown:val params "value"))
     (t t)
     ))
@@ -84,12 +87,33 @@
         :documentation documentation
         :default-value default-value))))
 
+(defmethod rm-define-buffers ((instance remote-module))
+  (loop for keyword in (jsown:keywords (rm-buffers instance))
+    collect
+    (let* ((name (read-from-string keyword))
+           (param-name nil)
+           (param-default nil))
+      (let ((options (jsown:val (rm-buffers instance) keyword)))
+        (loop for option in (jsown:keywords options)
+          do (let ((opt (jsown:val options option)))
+               (cond
+                 ((string= option "param-name")
+                  (setf param-name (make-keyword opt)))
+                 ((string= option "param-default")
+                  (setf param-default opt))
+                 ))))
+      (define-buffer-fct name
+        :param-name param-name
+        :param-default param-default))))
+
 (defmethod rm-read-stream ((instance remote-module))
   (usocket:wait-for-input (list (socket instance)) :ready-only t)
   (let ((line (read-line (jstream instance))))
-    (if (and line (> (length line) 0))
-      (let ((o (jsown:parse line)))
-        (rm-handle-event instance (jsown:val o "mp") (jsown:val o "model") (jsown:val o "method") (jsown:val o "params"))))))
+    (progn
+     ;(format t "~a~%" line)
+     (if (and line (> (length line) 0))
+       (let ((o (jsown:parse line)))
+         (rm-handle-event instance (jsown:val o "mp") (jsown:val o "model") (jsown:val o "method") (jsown:val o "params")))))))
 
 (defun define-remote-module-fct (hostname port)
   (let ((cls (make-instance 'remote-module)))
@@ -99,10 +123,13 @@
      (rm-send-command cls (current-meta-process) "" "init" nil)
      (define-module-fct
        (name cls)
-       nil
+       (rm-define-buffers cls)
        (rm-define-params cls)
        :version (version cls)
        :documentation (description cls)
+       :query #'(lambda (instance buffer-name slot value) (rm-send-command cls (current-meta-process) (current-model) "query" (list buffer-name slot value)))
+       :request #'(lambda (instance buffer-name chunk-spec) (progn (format t "~a ~a~%" buffer-name chunk-spec) (rm-send-command cls (current-meta-process) (current-model) "request" (list buffer-name (format nil "~a" chunk-spec)))))
+       :buffer-mod #'(lambda (instance buffer chunk-spec) (rm-send-command cls (current-meta-process) (current-model) "buffer-mod" (list buffer (format nil "~a" chunk-spec))))
        :creation #'(lambda (model) (rm-send-command cls (current-meta-process) model "creation" nil))
        :run-start #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "run-start" nil))
        :run-end #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "run-end" nil))

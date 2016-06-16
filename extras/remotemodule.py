@@ -70,6 +70,18 @@ class TestModule(object):
             "TEST-P1": {"documentation": "test param 1", "default-value": 13},
             "TEST-P2": {"documentation": "test param 2", "default-value": 69}
         }
+        self.buffers = {
+            "TESTBUF1": {}
+        }
+        self.buffer_defaults = {
+            "TESTBUF1": {
+                "STATE": {
+                    "FREE": True,
+                    "BUSY": False,
+                    "ERROR": False
+                }
+            }
+        }
         self.ms = Module_Server(self)
         self.ms.addDispatcher(self.d)
         reactor.listenTCP(5555, self.ms)
@@ -86,12 +98,13 @@ class TestModule(object):
     @d.listen('init')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('init', mp, model, params)
-        print self.param_defaults
         self.ms.p.sendCommand(None,  None, "init",
             name="test-remote-module",
             version="1.0",
             description="A test remote module.",
-            params=self.param_defaults)
+            params=self.param_defaults,
+            buffers=self.buffers,
+            )
 
     @d.listen('creation')
     def ACTR6_JNI_Event(self, mp, model, params):
@@ -99,7 +112,10 @@ class TestModule(object):
         if not mp in self.models:
             self.models[mp] = {}
         if not model in self.models[mp]:
-            self.models[mp][model] = self.param_defaults
+            self.models[mp][model] = {
+                "params": self.param_defaults,
+                "buffers": self.buffer_defaults
+            }
         else:
             raise Exception("Duplicate model")
         self.ms.p.sendCommand(mp,  model, "creation")
@@ -110,10 +126,25 @@ class TestModule(object):
         if isinstance(params, list):
             if params[1] == []:
                 params[1] = None
-            self.models[mp][model][params[0]]["default-value"] = params[1]
-            self.ms.p.sendCommand(mp,  model, "params", value=self.models[mp][model][params[0]]["default-value"])
+            self.models[mp][model]["params"][params[0]]["default-value"] = params[1]
+            self.ms.p.sendCommand(mp,  model, "params", value=self.models[mp][model]["params"][params[0]]["default-value"])
         else:
-            self.ms.p.sendCommand(mp,  model, "params", value=self.models[mp][model][params]["default-value"])
+            self.ms.p.sendCommand(mp,  model, "params", value=self.models[mp][model]["params"][params]["default-value"])
+
+    @d.listen('query')
+    def ACTR6_JNI_Event(self, mp, model, params):
+        print ('query', mp, model, params)
+        self.ms.p.sendCommand(mp,  model, "query", value=self.models[mp][model]["buffers"][params[0]][params[1]][params[2]])
+
+    @d.listen('buffer-mod')
+    def ACTR6_JNI_Event(self, mp, model, params):
+        print ('buffer-mod', mp, model, params)
+        self.ms.p.sendCommand(mp,  model, "buffer-mod")
+
+    @d.listen('request')
+    def ACTR6_JNI_Event(self, mp, model, params):
+        print ('request', mp, model, params)
+        self.ms.p.sendCommand(mp,  model, "request")
 
     @d.listen('run-start')
     def ACTR6_JNI_Event(self, mp, model, params):
