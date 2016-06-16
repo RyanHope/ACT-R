@@ -74,7 +74,18 @@
 
 (defmethod rm-define-params ((instance remote-module))
   (loop for keyword in (jsown:keywords (rm-params instance))
-    collect (define-parameter (make-keyword keyword) :documentation (jsown:val (rm-params instance) keyword))))
+    collect
+    (let* ((param (make-keyword keyword))
+           (documentation "")
+           (default-value nil))
+      (progn
+       (jsown:do-json-keys (key val)
+                           (case key
+                             (:documentation (setf documentation val))
+                             (:default-value (setf default-value val))))
+       (define-parameter param
+         :documentation documentation
+         :default-value default-value)))))
 
 (defmethod rm-read-stream ((instance remote-module))
   (handler-case
@@ -108,7 +119,7 @@
        :creation #'(lambda (model) (progn (rm-send-command cls (current-meta-process) model "creation" nil :sync t) cls))
        :run-start #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "run-start" nil :sync t))
        :run-end #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "run-end" nil :sync t))
-       :params #'(lambda (instance param) (rm-send-command cls (current-meta-process) (current-model) "params" param :sync t))
+       :params #'(lambda (instance param) (rm-send-command cls (current-meta-process) (current-model) "params" (if (consp param) (list (car param) (cdr param)) param) :sync t))
        )
      cls
      )

@@ -62,7 +62,11 @@ class Module_Server(Factory):
         return self.p
 
     def init(self, name, version, description):
-        self.p.sendCommand(None,  None, "init", name=name, version=version, description=description, params={"test-p1":"test param 1", "test-p2":"test param 2"})
+        p = {
+            "test-p1": {"documentation": "test param 1", "default-value": 13},
+            "test-p2": {"documentation": "test param 2", "default-value": 69}
+        }
+        self.p.sendCommand(None,  None, "init", name=name, version=version, description=description, params=p)
 
 class TestModule(object):
 
@@ -76,6 +80,7 @@ class TestModule(object):
     @d.listen('connectionMade')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('connectionMade', mp, model, params)
+        self.models = {}
 
     @d.listen('connectionLost')
     def ACTR6_JNI_Event(self, mp, model, params):
@@ -89,9 +94,19 @@ class TestModule(object):
     @d.listen('creation')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('creation', mp, model, params)
+        if not mp in self.models:
+            self.models[mp] = {}
+        if not model in self.models[mp]:
+            self.models[mp] = [13, 69]
+        else:
+            raise Exception("Duplicate model")
 
     @d.listen('params')
     def ACTR6_JNI_Event(self, mp, model, params):
+        if isinstance(params, list):
+            self.
+        else:
+            pass
         print ('params', mp, model, params)
 
     @d.listen('run-start')
