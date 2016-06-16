@@ -42,7 +42,7 @@ class ACTR_Module_Protocol(LineReceiver):
                           mp=obj['mp'],
                           model=obj['model'],
                           params=obj['params'])
-        self.sendCommand(obj['mp'], obj['model'], "sync")
+        #self.sendCommand(obj['mp'], obj['model'], "sync")
 
     def sendCommand(self, mp, model, method, **params):
         self.sendLine(json.dumps({"mp": mp, "model": model, "method": method, "params": params}))
@@ -61,18 +61,15 @@ class Module_Server(Factory):
         self.p.factory = self
         return self.p
 
-    def init(self, name, version, description):
-        p = {
-            "test-p1": {"documentation": "test param 1", "default-value": 13},
-            "test-p2": {"documentation": "test param 2", "default-value": 69}
-        }
-        self.p.sendCommand(None,  None, "init", name=name, version=version, description=description, params=p)
-
 class TestModule(object):
 
     d = Dispatcher()
 
     def __init__(self):
+        self.param_defaults = {
+            "TEST-P1": {"documentation": "test param 1", "default-value": 13},
+            "TEST-P2": {"documentation": "test param 2", "default-value": 69}
+        }
         self.ms = Module_Server(self)
         self.ms.addDispatcher(self.d)
         reactor.listenTCP(5555, self.ms)
@@ -89,7 +86,12 @@ class TestModule(object):
     @d.listen('init')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('init', mp, model, params)
-        self.ms.init("test-remote-module", "1.0", "a test remote module")
+        print self.param_defaults
+        self.ms.p.sendCommand(None,  None, "init",
+            name="test-remote-module",
+            version="1.0",
+            description="A test remote module.",
+            params=self.param_defaults)
 
     @d.listen('creation')
     def ACTR6_JNI_Event(self, mp, model, params):
@@ -97,25 +99,31 @@ class TestModule(object):
         if not mp in self.models:
             self.models[mp] = {}
         if not model in self.models[mp]:
-            self.models[mp] = [13, 69]
+            self.models[mp][model] = self.param_defaults
         else:
             raise Exception("Duplicate model")
+        self.ms.p.sendCommand(mp,  model, "creation")
 
     @d.listen('params')
     def ACTR6_JNI_Event(self, mp, model, params):
-        if isinstance(params, list):
-            self.
-        else:
-            pass
         print ('params', mp, model, params)
+        if isinstance(params, list):
+            if params[1] == []:
+                params[1] = None
+            self.models[mp][model][params[0]]["default-value"] = params[1]
+            self.ms.p.sendCommand(mp,  model, "params", value=self.models[mp][model][params[0]]["default-value"])
+        else:
+            self.ms.p.sendCommand(mp,  model, "params", value=self.models[mp][model][params]["default-value"])
 
     @d.listen('run-start')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('run-start', mp, model, params)
+        self.ms.p.sendCommand(mp,  model, "run-start")
 
     @d.listen('run-end')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('run-end', mp, model, params)
+        self.ms.p.sendCommand(mp,  model, "run-end")
 
 if __name__ == '__main__':
 
