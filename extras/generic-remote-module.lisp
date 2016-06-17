@@ -18,6 +18,7 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
            (let ((*compile-file-pathname* nil))
              (asdf:load-system :usocket)
+             (asdf:load-system :bordeaux-threads)
              (asdf:load-system :jsown)))
 
 #+:packaged-actr (in-package :act-r)
@@ -32,6 +33,9 @@
 (defclass remote-module ()
   ((socket :accessor socket :initform nil)
    (jstream :accessor jstream :initform nil)
+   (socket2 :accessor socket2 :initform nil)
+   (jstream2 :accessor jstream2 :initform nil)
+   (thread :accessor thread :initform nil)
    (name :accessor name :initform nil)
    (version :accessor version :initform nil)
    (description :accessor description :initform nil)
@@ -44,6 +48,16 @@
   (write-char #\return (jstream instance))
   (write-char #\linefeed (jstream instance))
   (finish-output (jstream instance)))
+
+(defmethod rm-send-raw2 ((instance remote-module) string)
+  (write-string string (jstream2 instance))
+  (write-char #\return (jstream2 instance))
+  (write-char #\linefeed (jstream2 instance))
+  (finish-output (jstream2 instance)))
+
+(defmethod rm-send-command2 ((instance remote-module) mp model method params)
+  (rm-send-raw2 instance (jsown:to-json (jsown:new-js ("mp" mp) ("model" model) ("method" method) ("params" params))))
+  (rm-read-stream2 instance method))
 
 (defmethod rm-send-command ((instance remote-module) mp model method params)
   (rm-send-raw instance (jsown:to-json (jsown:new-js ("mp" mp) ("model" model) ("method" method) ("params" params))))
@@ -59,14 +73,19 @@
       (setf (rm-params instance) (jsown:val params "params"))
       (setf (rm-buffers instance) (jsown:val params "buffers"))
       t))
-    ((string= method "define-chunks")
-      t);(rm-send-command instance (current-meta-process) (current-model) "define-chunks" (define-chunks-fct (jsown:val params "chunks")) :wait t))
     ((string= method "creation")
      instance)
     ((string= method "params")
      (jsown:val params "value"))
     ((string= method "query")
      (jsown:val params "value"))
+    (t t)
+    ))
+
+(defmethod rm-handle-event2 ((instance remote-module) mp model method params)
+  (cond
+    ((string= method "define-chunks")
+      (rm-send-command2 instance (current-meta-process) (current-model) "define-chunks" (define-chunks-fct (jsown:val params "chunks")) :wait t))
     (t t)
     ))
 
@@ -124,12 +143,51 @@
            (if (string= m method)
              (return-from rm-read-stream ret))))))))
 
-(defun define-remote-module-fct (hostname port)
+(defmethod rm-read-stream2 ((instance remote-module) m)
+  (loop
+    (usocket:wait-for-input (list (socket2 instance)) :ready-only t)
+    (let ((line (read-line (jstream2 instance))))
+      (progn
+       (format t "~a~%" line)
+       (if (and line (> (length line) 0))
+         (let* ((o (jsown:parse line))
+                (mp (jsown:val o "mp"))
+                (model (jsown:val o "model"))
+                (method (jsown:val o "method"))
+                (params (jsown:val o "params"))
+                (ret (rm-handle-event instance mp model method params)))
+           (if (string= m method)
+             (return-from rm-read-stream2 ret))))))))
+
+(defmethod incomming ((instance remote-module) inport)
+  (usocket:wait-for-input (setf (socket2 instance) (usocket:socket-listen usocket:*wildcard-host* inport :reuse-address t)))
+  (setf (client2 instance) (usocket:socket-accept (socket2 instance)))
+  (setf (jstream2 instance) (usocket:socket-stream (socket2 instance)))
+  ; (loop
+  ;   (usocket:wait-for-input (list (socket2 instance)) :ready-only t)
+  ;   (let ((line (read-line (jstream2 instance))))
+  ;     (progn
+  ;      (format t "~a~%" line)
+  ;      (if (and line (> (length line) 0))
+  ;        (let* ((o (jsown:parse line))
+  ;               (mp (jsown:val o "mp"))
+  ;               (model (jsown:val o "model"))
+  ;               (method (jsown:val o "method"))
+  ;               (params (jsown:val o "params")))
+  ;          (rm-handle-event2 instance mp model method params))
+  ;        )
+  ;      )
+  ;     )
+  ;   )
+  )
+
+(defun define-remote-module-fct (hostname outport inport)
   (let ((cls (make-instance 'remote-module)))
     (progn
-     (setf (socket cls) (usocket:socket-connect hostname port))
+     (setf (thread cls) (bordeaux-threads:make-thread #'(lambda () (incomming cls inport))))
+     (setf (socket cls) (usocket:socket-connect hostname outport))
      (setf (jstream cls) (usocket:socket-stream (socket cls)))
-     (rm-send-command cls (current-meta-process) "" "init" nil)
+     (rm-send-command cls (current-meta-process) "" "init" inport)
      (define-module-fct
        (name cls)
        (rm-define-buffers cls)
@@ -148,4 +206,4 @@
      cls
      )
     )
-  )
+)
