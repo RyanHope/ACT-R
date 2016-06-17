@@ -47,7 +47,7 @@
 
 (defmethod rm-send-command ((instance remote-module) mp model method params)
   (rm-send-raw instance (jsown:to-json (jsown:new-js ("mp" mp) ("model" model) ("method" method) ("params" params))))
-  (rm-read-stream instance))
+  (rm-read-stream instance method))
 
 (defmethod rm-handle-event ((instance remote-module) mp model method params)
   (cond
@@ -59,6 +59,8 @@
       (setf (rm-params instance) (jsown:val params "params"))
       (setf (rm-buffers instance) (jsown:val params "buffers"))
       t))
+    ((string= method "define-chunks")
+      t);(rm-send-command instance (current-meta-process) (current-model) "define-chunks" (define-chunks-fct (jsown:val params "chunks")) :wait t))
     ((string= method "creation")
      instance)
     ((string= method "params")
@@ -106,14 +108,21 @@
         :param-name param-name
         :param-default param-default))))
 
-(defmethod rm-read-stream ((instance remote-module))
-  (usocket:wait-for-input (list (socket instance)) :ready-only t)
-  (let ((line (read-line (jstream instance))))
-    (progn
-     ;(format t "~a~%" line)
-     (if (and line (> (length line) 0))
-       (let ((o (jsown:parse line)))
-         (rm-handle-event instance (jsown:val o "mp") (jsown:val o "model") (jsown:val o "method") (jsown:val o "params")))))))
+(defmethod rm-read-stream ((instance remote-module) m)
+  (loop
+    (usocket:wait-for-input (list (socket instance)) :ready-only t)
+    (let ((line (read-line (jstream instance))))
+      (progn
+       (format t "~a~%" line)
+       (if (and line (> (length line) 0))
+         (let* ((o (jsown:parse line))
+                (mp (jsown:val o "mp"))
+                (model (jsown:val o "model"))
+                (method (jsown:val o "method"))
+                (params (jsown:val o "params"))
+                (ret (rm-handle-event instance mp model method params)))
+           (if (string= m method)
+             (return-from rm-read-stream ret))))))))
 
 (defun define-remote-module-fct (hostname port)
   (let ((cls (make-instance 'remote-module)))
@@ -127,8 +136,9 @@
        (rm-define-params cls)
        :version (version cls)
        :documentation (description cls)
+       :reset (list #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "reset" 1)) #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "reset" 2)) #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "reset" 3)))
        :query #'(lambda (instance buffer-name slot value) (rm-send-command cls (current-meta-process) (current-model) "query" (list buffer-name slot value)))
-       :request #'(lambda (instance buffer-name chunk-spec) (progn (format t "~a ~a~%" buffer-name chunk-spec) (rm-send-command cls (current-meta-process) (current-model) "request" (list buffer-name (format nil "~a" chunk-spec)))))
+       :request #'(lambda (instance buffer-name chunk-spec) (rm-send-command cls (current-meta-process) (current-model) "request" (list buffer-name (format nil "~a" chunk-spec))))
        :buffer-mod #'(lambda (instance buffer chunk-spec) (rm-send-command cls (current-meta-process) (current-model) "buffer-mod" (list buffer (format nil "~a" chunk-spec))))
        :creation #'(lambda (model) (rm-send-command cls (current-meta-process) model "creation" nil))
        :run-start #'(lambda (instance) (rm-send-command cls (current-meta-process) (current-model) "run-start" nil))

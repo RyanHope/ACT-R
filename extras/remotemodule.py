@@ -86,6 +86,22 @@ class TestModule(object):
         self.ms.addDispatcher(self.d)
         reactor.listenTCP(5555, self.ms)
 
+    def parse_chunk_spec(self, chunkspec):
+        cs=json.loads(chunkspec.replace('ACT-R-CHUNK-SPEC ','').replace('ACT-R-SLOT-SPEC ','').replace(' (#S(','",[["').replace(')))','"]]]').replace('#S(','["').replace(') ','"],').replace(' ','","'))
+        return zip(cs[::2],cs[1::2])
+
+    def parse_value(self, value):
+        try:
+            return int(value)
+        except ValueError:
+            try:
+                return float(value)
+            except ValueError:
+                return value
+
+    def chunk_spec_to_chunk_def(self, cs):
+        return [[self.parse_value(ss[1]) for ss in zip(s[::2],s[1::2]) if ss[0]==':NAME' or ss[0]==':VALUE'] for s in [p for p in cs if p[0]==':SLOTS'][0][1]]
+
     @d.listen('connectionMade')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('connectionMade', mp, model, params)
@@ -111,13 +127,10 @@ class TestModule(object):
         print ('creation', mp, model, params)
         if not mp in self.models:
             self.models[mp] = {}
-        if not model in self.models[mp]:
-            self.models[mp][model] = {
-                "params": self.param_defaults,
-                "buffers": self.buffer_defaults
-            }
-        else:
-            raise Exception("Duplicate model")
+        self.models[mp][model] = {
+            "params": self.param_defaults,
+            "buffers": self.buffer_defaults
+        }
         self.ms.p.sendCommand(mp,  model, "creation")
 
     @d.listen('params')
@@ -144,6 +157,7 @@ class TestModule(object):
     @d.listen('request')
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('request', mp, model, params)
+        self.ms.p.sendCommand(mp,  model, "define-chunks", chunks=[[item for sublist in self.chunk_spec_to_chunk_def(self.parse_chunk_spec(params[1])) for item in sublist]])
         self.ms.p.sendCommand(mp,  model, "request")
 
     @d.listen('run-start')
@@ -155,6 +169,11 @@ class TestModule(object):
     def ACTR6_JNI_Event(self, mp, model, params):
         print ('run-end', mp, model, params)
         self.ms.p.sendCommand(mp,  model, "run-end")
+
+    @d.listen('reset')
+    def ACTR6_JNI_Event(self, mp, model, params):
+        print ('reset', mp, model, params)
+        self.ms.p.sendCommand(mp,  model, "reset")
 
 if __name__ == '__main__':
 
